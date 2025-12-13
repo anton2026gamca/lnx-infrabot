@@ -6,6 +6,24 @@
 
 
 
+
+
+//---------------------------Motory---------------------------
+#define Motor_amount 4
+const int motor_pin[Motor_amount][2] = {
+  {5, 4}, // M1PWM, M1DIR
+  {33, 33}, // M2PWM, M2DIR
+  {33, 33}, // M3PWM, M3DIR
+  {33, 33} // M4PWM, M4DIR
+};
+
+int16_t motor_speed[Motor_amount] = {0, 0, 0, 0};
+
+struct motors {
+  int16_t motor_speed[Motor_amount];
+};
+
+motors motors_data;
 //-------------------------BNO05------------------
 Adafruit_BNO055 bno = Adafruit_BNO055(55);
 
@@ -28,34 +46,27 @@ compass compass_data;
 struct IR {
   uint16_t angle;       // DIR
   uint16_t distance;    // CM
-  uint8_t sensor[12];      // RAW values from sensors
+  uint8_t sensor_IR[IR_data_sensor_amount]; // RAW values from sensors
   uint8_t status;       // 13. byte = status / flag
 };
 IR IR_data;
+//Line sensor
+#define Line_sensor_amount 16
 
-//---------------------------Motory---------------------------
-
-#define Motor_amount 4
-const int motor_pin[Motor_amount][2] = {
-  {5, 4}, // M1PWM, M1DIR
-  {33, 33}, // M2PWM, M2DIR
-  {33, 33}, // M3PWM, M3DIR
-  {33, 33} // M4PWM, M4DIR
+const int line_pin[Line_sensor_amount] = {
+  14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 38, 39, 40, 41
 };
 
-int motor_speed[Motor_amount] = {0, 0, 0, 0};
-
-struct motors {
-  int motor_speed[Motor_amount];
+struct line {
+  int16_t sensor_line[Line_sensor_amount];
 };
-
-motors motors_data;
+line line_data;
 
 //---------------------------Functions--------------------------------------
 int TEST = 0;// if 1 print all values by serial
 
 
-//Motors
+// Motors
 void turn_on_motor(int motor_ID, int speed) {
   int pwm = abs(speed);
   if(speed < 0){
@@ -66,7 +77,7 @@ void turn_on_motor(int motor_ID, int speed) {
   analogWrite(motor_pin[motor_ID][0], pwm);
 }
 
-void motors_on(int m_speed[Motor_amount]) {
+void motors_on(int16_t m_speed[Motor_amount]) {
 
   for (int i = 0; i < Motor_amount; i++) {
     turn_on_motor(i, m_speed[i]);
@@ -75,7 +86,7 @@ void motors_on(int m_speed[Motor_amount]) {
 }
 
 
-//Compass
+// Compass
 void read_compass() {
   //static float angles[3]; // X = Heading, Y = Pitch, Z = Roll
   sensors_event_t event;
@@ -85,7 +96,8 @@ void read_compass() {
   compass_data.pitch = event.orientation.y; // Pitch
   compass_data.roll = event.orientation.z; // Roll
 }
-//IR_data
+
+//  IR_data
 void read_IR() {
   
   Wire.beginTransmission(I2C_ADDRESS);
@@ -120,9 +132,9 @@ void read_IR() {
 
   for (int i = 0; i < IR_data_sensor_amount; i++) {
       if (Wire.available()) {
-          IR_data.sensor[i] = Wire.read();
+          IR_data.sensor_IR[i] = Wire.read();
       } else {
-          IR_data.sensor[i] = 0;
+          IR_data.sensor_IR[i] = 0;
       }
   }
   // --- last byte = status ---
@@ -134,13 +146,20 @@ void read_IR() {
 }
 
 
+// Line sensor
+void read_line() {
+  for (int i = 0; i < Line_sensor_amount; i++) {
+    line_data.sensor_line[i] = analogRead(line_pin[i]);
+  }
+}
 
 // Data collection & Raspberry comunication-----------------------------------------------------------------------
 
 struct all {
+  motors motors_data;
   compass compass_data;
   IR IR_data;
-  motors motors_data;
+  line line_data;
 };
 
 all all_data;
@@ -149,9 +168,20 @@ void Save_data() {
   all_data.compass_data = compass_data;
   all_data.IR_data      = IR_data;
   all_data.motors_data  = motors_data;
+  all_data.line_data    = line_data;
 }
 
 void Print_data(int clear) {
+  // Motors
+  Serial.print("Motors: ");
+  for (int i = 0; i < Motor_amount; i++) {
+    Serial.print(i);
+    Serial.print(":");
+    Serial.print(all_data.motors_data.motor_speed[i]);
+    Serial.print("   ");
+  }
+  Serial.println();
+
   // Compass
   Serial.print("Heading: ");
   Serial.print(all_data.compass_data.heading);
@@ -161,28 +191,30 @@ void Print_data(int clear) {
   Serial.println(all_data.compass_data.roll);
 
   // IR
-  Serial.print("IR_dataDIR: ");
+  Serial.print("IR_data_DIR: ");
   Serial.print(all_data.IR_data.angle);
-  Serial.print("   IR_dataDist: ");
+  Serial.print("   IR_data_Dist: ");
   Serial.print(all_data.IR_data.distance);
   Serial.print("   ");
   for (int i = 0; i < IR_data_sensor_amount; i++) {
     Serial.print(i);
     Serial.print(":");
-    Serial.print(all_data.IR_data.sensor[i]);
+    Serial.print(all_data.IR_data.sensor_IR[i]);
     Serial.print("   ");
   }
   Serial.print("Status:  ");
   Serial.println(all_data.IR_data.status);
 
-  // Motors
-  for (int i = 0; i < Motor_amount; i++) {
+  // Line
+  Serial.print("Line:  ");
+  for (int i = 0; i < Line_sensor_amount; i++) {
     Serial.print(i);
     Serial.print(":");
-    Serial.print(all_data.motors_data.motor_speed[i]);
+    Serial.print(all_data.line_data.sensor_line[i]);
     Serial.print("   ");
   }
-  Serial.println();
+  Serial.println("");
+  
 
   // END LINE
   Serial.println("-------------------------------------------------------------------------");
@@ -214,6 +246,10 @@ void setup() {
   Wire.begin();
   Serial.println("MRM-IR_data-Finder3 dual read start");
 
+  //Line sensor
+  for (int i = 0; i < Line_sensor_amount; i++) {
+    pinMode(line_pin[i], INPUT);
+  }
 }
 
 void loop() {
@@ -227,14 +263,17 @@ void loop() {
   delay(500);
   digitalWrite(LED_BUILTIN, LOW);
   */
-  
+
+
+  // Motors
+  motors_on(motors_data.motor_speed);
   // Compass
   read_compass();
   // IR_data
   read_IR();
-  // Motors
-  motors_on(motors_data.motor_speed);
-  
+  // Line
+  read_line();
+
   Save_data();
   Print_data(0);
 
