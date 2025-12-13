@@ -16,7 +16,7 @@ struct compass {
 };
 compass compass_data;
 //-------------------------MRM-IR_data-Finder3-------------------
-#define I2C_ADDRESS 0x10                   // Adress MRM‑IR_data‑Finder3
+#define I2C_ADDRESS 0x10                   // Adress MRM‑IR‑Finder3
 #define REGISTER_ANGLE_AND_DISTANCE 0x00   // vIR_datatual register pre dir and dist
 #define REGISTER_RAW 0x01                  // vIR_datatual register for RAW data
 #define DATA_COUNT_ANGLE 4                 // 4 bytes dir + dist
