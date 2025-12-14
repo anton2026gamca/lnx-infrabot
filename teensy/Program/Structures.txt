@@ -42,4 +42,5 @@ all data {
 	motors_data {
 		int16_t motor_speed[Motor_amount] // = 4
 	} 2*4 = 8
+
 } 8 = 8
