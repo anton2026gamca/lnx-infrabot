@@ -1,0 +1,14 @@
+[Unit]
+Description=lnx-infrabot API service
+After=network.target
+
+[Service]
+WorkingDirectory=/home/pi/lnx-infrabot/web_server/api
+ExecStart=/usr/bin/env bash -lc 'exec /usr/bin/python3 ./api.py'
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

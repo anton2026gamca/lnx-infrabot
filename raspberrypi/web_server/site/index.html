@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Raspberry Pi Camera</title>
+    <style>
+      body { text-align: center; background: #222; color: white; }
+      img { max-width: 100%; height: auto; margin-top: 20px; border: 2px solid #fff; }
+    </style>
+  </head>
+  <body>
+    <h1>Live Camera Feed</h1>
+    <label for="quality" style="display:block; margin-top:10px;">Quality (divide resolution by):</label>
+    <select id="quality" style="font-size:16px; padding:4px; margin-top:6px;">
+      <option value="1">1 — full (highest resolution, throttled)</option>
+      <option value="2">2 — half (throttled)</option>
+      <option value="3">3 — third</option>
+      <option value="4" selected>4 — quarter (default)</option>
+      <option value="5">5 — fifth</option>
+    </select>
+    <br>
+
+    <img id="camera" src="/api/video_feed?q=4" alt="Camera Feed">
+
+    <script>
+      const qualitySelect = document.getElementById('quality');
+      const img = document.getElementById('camera');
+
+      function updateSrc() {
+        const q = qualitySelect.value;
+        img.src = '/api/video_feed?q=' + q + '&_=' + Date.now();
+      }
+
+      qualitySelect.addEventListener('change', updateSrc);
+    </script>
+  </body>
+</html>
