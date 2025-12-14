@@ -1,0 +1,46 @@
+
+all data {
+	motors_data {
+		int16_t motor_speed[Motor_amount] // = 4
+	} 2*4 = 8
+	compass_data {
+		float Heading
+		float Pitch
+		float Roll
+	} 4 + 4 + 4 = 12
+	IR_data {
+		uin16_t angle
+		uin16_t distance
+		uin8_t sensor_IR[IR_data_snsor_amount] // = 12
+		uin8_t status
+	} 2 + 2 + 1*12 + 1 = 17
+	line_data {
+		int16_t sensor_line[Line_sensor_amount] // = 16
+	} // 2*16 = 32
+} 8 + 12 + 17 + 32 = 69
+
+// message from teensy to Raspberry
+all data {
+	compass_data {
+		float Heading
+		float Pitch
+		float Roll
+	} 4 + 4 + 4 = 12
+	IR_data {
+		uin16_t angle
+		uin16_t distance
+		uin8_t sensor_IR[IR_data_snsor_amount] // = 12
+		uin8_t status
+	} 2 + 2 + 1*12 + 1 = 17
+	line_data {
+		int16_t sensor_line[Line_sensor_amount] // = 16
+	} // 2*16 = 32
+} 12 + 17 + 32 = 61
+
+// reply from Raspberry to teensy
+all data {
+	motors_data {
+		int16_t motor_speed[Motor_amount] // = 4
+	} 2*4 = 8
+} 8 = 8
+
