@@ -64,13 +64,14 @@ struct LineData {
 LineData line_data;
 
 // Data collection and raspberry -------------------
+#define RASPBERRY_SERIAL_SPEED 38400
 
 #define BNO_DATA_LENGHT ( (4 +1)*3 ) // -xxx,+yyy,+zzz,
 #define IR_SENSOR_DATA_LENGHT ( (3 + 1) + (4 + 1) + (3 + 1)*IR_SENSOR_AMOUNT + (1 + 1) - 1 ) // aaa,dddd,12*[vvv,]s,
 #define LINE_SENSOR_DATA ( (4 + 1)*LINE_SENSOR_AMOUNT ) // 12*[cccc,]
 #define ALL_DATA_LENGHT (BNO_DATA_LENGHT + IR_SENSOR_DATA_LENGHT + LINE_SENSOR_DATA - 1)
   // -xxx,+yyy,+zzz,aaa,dddd,12*[vvv,]s,12*[cccc,] - ','
-#define DATA_STRING_LENGHT (5 + ALL_DATA_LENGHT + 1 + 1) // "a"="..."\0
+#define DATA_STRING_LENGHT (1 + 5 + ALL_DATA_LENGHT + 1 + 1 + 1) // {"a"="..."}\0
   // "a"="+xxx,+yyy,+zzz,aaa,dddd,12*[vvv,]s,12*[cccc,] - ','"\0
 
 
@@ -83,7 +84,7 @@ struct AllData {
 
 AllData all_data;
 
-char send_data[DATA_STRING_LENGHT];
+char message_data[DATA_STRING_LENGHT];
 
 //---------------------------Functions--------------------------------------
 int TEST = 0;// if 1 print all values by serial
@@ -177,7 +178,54 @@ void read_line() {
 }
 
 // Data collection & Raspberry comunication-----------------------------------------------------------------------
+void recieve_data() {
+  //String input = Serial.readStringUntil('\n'); // reading line
+  String input = Serial8.readStringUntil('\n'); // reading line
+  // main lenght and format chcek
+  if (input.length() != 31 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"'
+                  || input[29] != '"' || input[30] != '}' ) {
+    Serial.println("Invalid string!");
+    return;
+  }
+  String data = input.substring(6, 29); // deleting start end ending of string
+  // comma check
+  if (data[5] != ',' || data[11] != ',' || data[17] != ',') {
+    Serial.println("Wrong comma structure!");
+    return;
+  }
+  // sign chcek
+  for (int i = 0; i <= 18; i += 6) { 
+    if (data[i] != '+' && data[i] != '-') {
+      Serial.println("Wrong sign!");
+      return;
+    }
+  }
+  // numbers check
+  for (int i = 0; i < 4; i++) {
+    for (int j = 1; j < 5; j++) {
+      if (data[i*6 + j] < '0' || data[i*6 + j] > '9') {
+        Serial.print("Wrong number at:");
+        Serial.println(i*6 + j);
+        return;
+      }
+    }
+  }
+  int values[4];
+  values[0] = data.substring(0, 5).toInt();
+  values[1] = data.substring(6, 11).toInt();
+  values[2] = data.substring(12, 17).toInt();
+  values[3] = data.substring(18, 23).toInt();
 
+  Serial.print("Default string: ");
+  Serial.println(input);
+  Serial.println("Extracted values:");
+  /*for (int i = 0; i < 4; i++) {
+    Serial.println(values[i]);
+  }*/
+  for (int i = 0; i < 4; i++) {
+    motors_data.motor_speed[i] = values[i];
+  }
+}
 
 
 
@@ -198,7 +246,6 @@ void Print_data(int clear) {
     Serial.print("   ");
   }
   Serial.println();
-
   // Compass
   Serial.print("Heading: ");
   Serial.print(all_data.compass_data.heading);
@@ -206,7 +253,6 @@ void Print_data(int clear) {
   Serial.print(all_data.compass_data.pitch);
   Serial.print("\tRoll: ");
   Serial.println(all_data.compass_data.roll);
-
   // IR
   Serial.print("IR_data_DIR: ");
   Serial.print(all_data.IR_data.angle);
@@ -221,7 +267,6 @@ void Print_data(int clear) {
   }
   Serial.print("Status:  ");
   Serial.println(all_data.IR_data.status);
-
   // Line
   Serial.print("Line:  ");
   for (int i = 0; i < LINE_SENSOR_AMOUNT; i++) {
@@ -231,14 +276,11 @@ void Print_data(int clear) {
     Serial.print("   ");
   }
   Serial.println("");
-  
-
   // END LINE
   Serial.println("-------------------------------------------------------------------------");
 }
 
 // Getting ready comunicat string---------------------
-
 void format_number_w_sign(float input_number, char final_string[], int width) {
   int number = round(input_number);
   if (number < 0) {
@@ -273,8 +315,8 @@ void format_number_wn_sign(float input_number, char final_string[], int width) {
 
 int append_number_to_string(float number, char* target_string, int position, int number_size, int sign) {
   char hold_number[10]; // buffer pre jedno číslo
-  if (sign == 1) {
-    format_number_w_sign(number, hold_number, number_size); // formating number
+  if (sign == 1) { // formating number
+    format_number_w_sign(number, hold_number, number_size);
   }
   else {
     format_number_wn_sign(number, hold_number, number_size);
@@ -289,44 +331,52 @@ int append_char_to_string(char c, char* target_string, int position) {
     return position + 1;
 }
 
-void creat_comunication_string() {
+void creat_comunication_string() { // formating messsage data into easy-sendable form
   for (int i = 0; i < DATA_STRING_LENGHT; i ++) {
-    send_data[i] = '#';
+    message_data[i] = '#';
   }
-  
   int position = 0;
-  position = append_char_to_string('"',                                   send_data, position);
-  position = append_char_to_string('a',                                   send_data, position);
-  position = append_char_to_string('"',                                   send_data, position);
-  position = append_char_to_string('=',                                   send_data, position);
-  position = append_char_to_string('"',                                   send_data, position);
-  
-  position = append_number_to_string(all_data.compass_data.heading,       send_data, position, 3, 0);
-  position = append_number_to_string(all_data.compass_data.pitch,         send_data, position, 3, 1);
-  position = append_number_to_string(all_data.compass_data.roll,          send_data, position, 3, 1);
-
-  position = append_number_to_string(all_data.IR_data.angle,              send_data, position, 3, 0);
-  position = append_number_to_string(all_data.IR_data.distance,           send_data, position, 4, 0);
+  // message start
+  position = append_char_to_string('{',                                   message_data, position);
+  position = append_char_to_string('"',                                   message_data, position);
+  position = append_char_to_string('a',                                   message_data, position);
+  position = append_char_to_string('"',                                   message_data, position);
+  position = append_char_to_string('=',                                   message_data, position);
+  position = append_char_to_string('"',                                   message_data, position);
+  // compass
+  position = append_number_to_string(all_data.compass_data.heading,       message_data, position, 3, 0);
+  position = append_number_to_string(all_data.compass_data.pitch,         message_data, position, 3, 1);
+  position = append_number_to_string(all_data.compass_data.roll,          message_data, position, 3, 1);
+  // IR sensor
+  position = append_number_to_string(all_data.IR_data.angle,              message_data, position, 3, 0);
+  position = append_number_to_string(all_data.IR_data.distance,           message_data, position, 4, 0);
   for (int i = 0; i < IR_SENSOR_AMOUNT; i++) {
-    position = append_number_to_string(all_data.IR_data.sensor_IR[i],     send_data, position, 3, 0);
+    position = append_number_to_string(all_data.IR_data.sensor_IR[i],     message_data, position, 3, 0);
   }
-  position = append_number_to_string(all_data.IR_data.status,             send_data, position, 1, 0);
-
+  position = append_number_to_string(all_data.IR_data.status,             message_data, position, 1, 0);
+  // Line sensor
   for (int i = 0; i < LINE_SENSOR_AMOUNT; i++) {
-    position = append_number_to_string(all_data.line_data.sensor_line[i], send_data, position, 4, 0);
+    position = append_number_to_string(all_data.line_data.sensor_line[i], message_data, position, 4, 0);
   }
-  
+  // message end
   position = position - 1; // delete last ','
-  position = append_char_to_string('"',                                   send_data, position);
-  position = append_char_to_string('\0',                                  send_data, position);
+  position = append_char_to_string('"',                                   message_data, position);
+  position = append_char_to_string('}',                                   message_data, position);
+  position = append_char_to_string('\0',                                  message_data, position);
 }
 
+void send_message() {
+  Serial8.println(message_data);
+  Serial.println(message_data);
+}
 
 //--------------------------------------SETUP------------------------------------------
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(38400);
   pinMode(LED_BUILTIN, OUTPUT);
+
+  Serial8.begin(RASPBERRY_SERIAL_SPEED);
 
   // Motors
   for(int i = 0; i < 4; i++){
@@ -376,18 +426,18 @@ void loop() {
 
   Save_data();
   Print_data(0);
+  creat_comunication_string();
+  send_message();
 
   // Send data
 
   // Recieve data
+  if (/*Serial.available()*/Serial8.available() > 0) {
+    recieve_data();
+  }
 
   // Motors
   motors_on(motors_data.motor_speed);
 
-
-  creat_comunication_string();
-  Serial.println(send_data);
-  
-
-  delay(100);
+  delay(50);
 }
