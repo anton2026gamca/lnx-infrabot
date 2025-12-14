@@ -10,18 +10,18 @@
 
 
 //---------------------------Motory---------------------------
-#define Motor_amount 4
-const int motor_pin[Motor_amount][2] = {
+#define MOTOR_AMOUNT 4
+const int motor_pin[MOTOR_AMOUNT][2] = {
   {5, 4}, // M1PWM, M1DIR
   {33, 33}, // M2PWM, M2DIR
   {33, 33}, // M3PWM, M3DIR
   {33, 33} // M4PWM, M4DIR
 };
 
-int16_t motor_speed[Motor_amount] = {0, 0, 0, 0};
+int16_t motor_speed[MOTOR_AMOUNT] = {0, 0, 0, 0};
 
 struct motors {
-  int16_t motor_speed[Motor_amount];
+  int16_t motor_speed[MOTOR_AMOUNT];
 };
 
 motors motors_data;
@@ -101,9 +101,9 @@ void turn_on_motor(int motor_ID, int speed) {
   analogWrite(motor_pin[motor_ID][0], pwm);
 }
 
-void motors_on(int16_t m_speed[Motor_amount]) {
+void motors_on(int16_t m_speed[MOTOR_AMOUNT]) {
 
-  for (int i = 0; i < Motor_amount; i++) {
+  for (int i = 0; i < MOTOR_AMOUNT; i++) {
     turn_on_motor(i, m_speed[i]);
       motors_data.motor_speed[i] = m_speed[i];
   }
@@ -201,7 +201,7 @@ void recieve_data() {
     }
   }
   // numbers check
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < MOTOR_AMOUNT; i++) {
     for (int j = 1; j < 5; j++) {
       if (data[i*6 + j] < '0' || data[i*6 + j] > '9') {
         Serial.print("Wrong number at:");
@@ -210,7 +210,7 @@ void recieve_data() {
       }
     }
   }
-  int values[4];
+  int values[MOTOR_AMOUNT];
   values[0] = data.substring(0, 5).toInt();
   values[1] = data.substring(6, 11).toInt();
   values[2] = data.substring(12, 17).toInt();
@@ -222,7 +222,7 @@ void recieve_data() {
   /*for (int i = 0; i < 4; i++) {
     Serial.println(values[i]);
   }*/
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < MOTOR_AMOUNT; i++) {
     motors_data.motor_speed[i] = values[i];
   }
 }
@@ -239,7 +239,7 @@ void Save_data() {
 void Print_data(int clear) {
   // Motors
   Serial.print("Motors: ");
-  for (int i = 0; i < Motor_amount; i++) {
+  for (int i = 0; i < MOTOR_AMOUNT; i++) {
     Serial.print(i);
     Serial.print(":");
     Serial.print(all_data.motors_data.motor_speed[i]);
