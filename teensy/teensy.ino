@@ -1,32 +1,70 @@
-#include <Wire.h>
-#include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
-#include <math.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
 #include <algorithm>
+#include <math.h>
 #include <string.h>
 
 
 
+// ================================================
+// =                Definitions                   =
+// ================================================
+
+// Serials
+#define RASPBERRY_SERIAL Serial8
+#define RASPBERRY_SERIAL_SPEED 38400
+
+#define DEBUG false
+#define DEBUG_SERIAL Serial
+#define DEBUG_SERIAL_SPEED 38400
+
+void debug_println(const char *msg) {
+  if (DEBUG) {
+    DEBUG_SERIAL.println(msg);
+  }
+}
+
+void debug_println(const float msg) {
+  if (DEBUG) {
+    DEBUG_SERIAL.println(msg);
+  }
+}
+
+void debug_print(const char *msg) {
+  if (DEBUG) {
+    DEBUG_SERIAL.print(msg);
+  }
+}
+
+void debug_print(const float msg) {
+  if (DEBUG) {
+    DEBUG_SERIAL.print(msg);
+  }
+}
 
 
-//---------------------------Motory---------------------------
-#define MOTOR_AMOUNT 4
-const int motor_pin[MOTOR_AMOUNT][2] = {
-  {5, 4}, // M1PWM, M1DIR
-  {33, 33}, // M2PWM, M2DIR
-  {33, 33}, // M3PWM, M3DIR
-  {33, 33} // M4PWM, M4DIR
+// Motors
+#define MOTOR_COUNT 4
+const int motor_pin[MOTOR_COUNT][2] = {
+    {5, 4},   // M1PWM, M1DIR
+    {33, 33}, // M2PWM, M2DIR
+    {33, 33}, // M3PWM, M3DIR
+    {33, 33}  // M4PWM, M4DIR
 };
 
-int16_t motor_speed[MOTOR_AMOUNT] = {0, 0, 0, 0};
+int16_t motor_speed[MOTOR_COUNT] = {0, 0, 0, 0};
 
 struct motors {
-  int16_t motor_speed[MOTOR_AMOUNT];
+  int16_t motor_speed[MOTOR_COUNT];
 };
 
 motors motors_data;
-//-------------------------BNO05------------------
+
+
+// BNO05
 Adafruit_BNO055 bno = Adafruit_BNO055(55);
+bool bno_initialized = false;
 
 struct CompassData {
   float heading;
@@ -34,46 +72,45 @@ struct CompassData {
   float roll;
 };
 CompassData compass_data;
-//-------------------------MRM-IR_data-Finder3-------------------
-#define I2C_ADDRESS 0x10                   // Adress MRM‑IR‑Finder3
-#define REGISTER_ANGLE_AND_DISTANCE 0x00   // vIR_datatual register pre dir and dist
-#define REGISTER_RAW 0x01                  // vIR_datatual register for RAW data
-#define DATA_COUNT_ANGLE 4                 // 4 bytes dir + dist
-#define DATA_COUNT_RAW 12                  // 12 bytes for RAW data mode
-#define IR_SENSOR_AMOUNT 12           // sensor amount
 
-#define NO_SIGNAL 999                     // no signal from mrm / no ball found
+
+// MRM-IR_data-Finder3
+#define IR_I2C_ADDRESS 0x10
+#define IR_ANGLE_AND_DISTANCE_REGISTER 0x00
+#define IR_ANGLE_AND_DISTANCE_BYTES_COUNT 4
+#define IR_RAW_REGISTER 0x01
+#define IR_RAW_BYTES_COUNT 12
+#define IR_SENSOR_COUNT 12
+#define IR_NO_SIGNAL 999
 
 struct IRData {
-  uint16_t angle;       // DIR
-  uint16_t distance;    // CM
-  uint8_t sensor_IR[IR_SENSOR_AMOUNT]; // RAW values from sensors
-  uint8_t status;       // 13. byte = status / flag
+  uint16_t angle;                     // DIR
+  uint16_t distance;                  // CM
+  uint8_t sensor_IR[IR_SENSOR_COUNT]; // RAW values from sensors
+  uint8_t status;                     // 13th byte: status/flag
 };
 IRData IR_data;
-//Line sensor
-#define LINE_SENSOR_AMOUNT 16
 
-const int line_pin[LINE_SENSOR_AMOUNT] = {
-  14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 38, 39, 40, 41
-};
+
+// Line sensor
+#define LINE_SENSOR_COUNT 16
+
+const int line_pin[LINE_SENSOR_COUNT] = { 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 38, 39, 40, 41 };
 
 struct LineData {
-  int16_t sensor_line[LINE_SENSOR_AMOUNT];
+  int16_t sensor_line[LINE_SENSOR_COUNT];
 };
 LineData line_data;
 
-// Data collection and raspberry -------------------
-#define RASPBERRY_SERIAL_SPEED 38400
 
-#define BNO_DATA_LENGHT ( (4 +1)*3 ) // -xxx,+yyy,+zzz,
-#define IR_SENSOR_DATA_LENGHT ( (3 + 1) + (4 + 1) + (3 + 1)*IR_SENSOR_AMOUNT + (1 + 1) - 1 ) // aaa,dddd,12*[vvv,]s,
-#define LINE_SENSOR_DATA ( (4 + 1)*LINE_SENSOR_AMOUNT ) // 12*[cccc,]
-#define ALL_DATA_LENGHT (BNO_DATA_LENGHT + IR_SENSOR_DATA_LENGHT + LINE_SENSOR_DATA - 1)
-  // -xxx,+yyy,+zzz,aaa,dddd,12*[vvv,]s,12*[cccc,] - ','
-#define DATA_STRING_LENGHT (1 + 5 + ALL_DATA_LENGHT + 1 + 1 + 1) // {"a"="..."}\0
-  // "a"="+xxx,+yyy,+zzz,aaa,dddd,12*[vvv,]s,12*[cccc,] - ','"\0
-
+// Data collection
+#define BNO_DATA_STRING_LENGTH ((4 + 1) * 3)                                                        // -xxx,+yyy,+zzz,
+#define IR_SENSOR_DATA_STRING_LENGTH ((3 + 1) + (4 + 1) + (3 + 1) * IR_SENSOR_COUNT + (1 + 1) - 1) // aaa,dddd,12*[vvv,]s,
+#define LINE_SENSOR_DATA_STRING_LENGTH ((4 + 1) * LINE_SENSOR_COUNT)                                      // 12*[cccc,]
+#define ALL_DATA_LENGTH (BNO_DATA_STRING_LENGTH + IR_SENSOR_DATA_STRING_LENGTH + LINE_SENSOR_DATA_STRING_LENGTH - 1)
+// -xxx,+yyy,+zzz,aaa,dddd,12*[vvv,]s,12*[cccc,] - ','
+#define DATA_STRING_LENGTH (1 + 5 + ALL_DATA_LENGTH + 1 + 1 + 1) // {"a"="..."}\0
+// "a"="+xxx,+yyy,+zzz,aaa,dddd,12*[vvv,]s,12*[cccc,] - ','"\0
 
 struct AllData {
   motors motors_data;
@@ -84,360 +121,342 @@ struct AllData {
 
 AllData all_data;
 
-char message_data[DATA_STRING_LENGHT];
-
-//---------------------------Functions--------------------------------------
-int TEST = 0;// if 1 print all values by serial
+char message_data[DATA_STRING_LENGTH];
 
 
-// Motors
-void turn_on_motor(int motor_ID, int speed) {
-  int pwm = abs(speed);
-  if(speed < 0){
-      digitalWrite(motor_pin[motor_ID][1], LOW);
+
+// ================================================
+// =                 Functions                    =
+// ================================================
+
+
+// Debug
+void print_debug_data(int clear) {
+  debug_print("Motors: ");
+  for (int i = 0; i < MOTOR_COUNT; i++) {
+    debug_print(i);
+    debug_print(":");
+    debug_print(all_data.motors_data.motor_speed[i]);
+    debug_print("   ");
+  }
+  debug_println("");
+  
+  debug_print("Heading: ");
+  debug_print(all_data.compass_data.heading);
+  debug_print("\t\tPitch: ");
+  debug_print(all_data.compass_data.pitch);
+  debug_print("\tRoll: ");
+  debug_println(all_data.compass_data.roll);
+  
+  debug_print("IR_data_DIR: ");
+  debug_print(all_data.IR_data.angle);
+  debug_print("   IR_data_Dist: ");
+  debug_print(all_data.IR_data.distance);
+  debug_print("   ");
+  for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+    debug_print(i);
+    debug_print(":");
+    debug_print(all_data.IR_data.sensor_IR[i]);
+    debug_print("   ");
+  }
+  debug_print("Status:  ");
+  debug_println(all_data.IR_data.status);
+  
+  debug_print("Line:  ");
+  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
+    debug_print(i);
+    debug_print(":");
+    debug_print(all_data.line_data.sensor_line[i]);
+    debug_print("   ");
+  }
+  debug_println("");
+  debug_println("-------------------------------------------------------------------------");
+}
+
+// Helpers
+void format_number_with_sign(float input_number, char final_string[], int width) {
+  int number = round(input_number);
+  if (number < 0) {
+    final_string[0] = '-';
   } else {
-      digitalWrite(motor_pin[motor_ID][1], HIGH);
+    final_string[0] = '+';
+  }
+  int value = abs(number);
+
+  for (int i = width; i > 0; i--) {
+    final_string[i] = (value % 10) + '0';
+    value /= 10;
+  }
+  final_string[width + 1] = ',';
+  final_string[width + 2] = '\0';
+}
+
+void format_number(float input_number, char final_string[], int width) {
+  int number = round(input_number);
+  int value = abs(number);
+
+  for (int i = width - 1; i >= 0; i--) {
+    final_string[i] = (value % 10) + '0';
+    value /= 10;
+  }
+  final_string[width] = ',';
+  final_string[width + 1] = '\0';
+}
+
+int append_number_to_string(float number, char *target_string, int position, int number_string_length, int sign) {
+  char num_str[number_string_length + 3];
+  if (sign == 1) {
+    format_number_with_sign(number, num_str, number_string_length);
+  } else {
+    format_number(number, num_str, number_string_length);
+  }
+  int len = strlen(num_str);
+  memcpy(target_string + position, num_str, len);
+  return position + len;
+}
+
+int append_char_to_string(char c, char *target_string, int position) {
+  target_string[position] = c;
+  return position + 1;
+}
+
+// Main functions
+
+void set_motor_speed(int motor_ID, int speed) {
+  int pwm = abs(speed);
+  if (speed < 0) {
+    digitalWrite(motor_pin[motor_ID][1], LOW);
+  } else {
+    digitalWrite(motor_pin[motor_ID][1], HIGH);
   }
   analogWrite(motor_pin[motor_ID][0], pwm);
 }
 
-void motors_on(int16_t m_speed[MOTOR_AMOUNT]) {
-
-  for (int i = 0; i < MOTOR_AMOUNT; i++) {
-    turn_on_motor(i, m_speed[i]);
-      motors_data.motor_speed[i] = m_speed[i];
+void set_all_motors_speed(int16_t m_speed[MOTOR_COUNT]) {
+  for (int i = 0; i < MOTOR_COUNT; i++) {
+    set_motor_speed(i, m_speed[i]);
+    motors_data.motor_speed[i] = m_speed[i];
   }
 }
 
 
-// Compass
 void read_compass() {
-  //static float angles[3]; // X = Heading, Y = Pitch, Z = Roll
+  if (!bno_initialized) {
+    return;
+  }
   sensors_event_t event;
   bno.getEvent(&event);
 
-  compass_data.heading = event.orientation.x; // Heading
-  compass_data.pitch = event.orientation.y; // Pitch
-  compass_data.roll = event.orientation.z; // Roll
+  compass_data.heading = event.orientation.x;
+  compass_data.pitch = event.orientation.y;
+  compass_data.roll = event.orientation.z;
 }
 
-//  IR_data
-void read_IR() {
-  
-  Wire.beginTransmission(I2C_ADDRESS);
-  Wire.write(REGISTER_ANGLE_AND_DISTANCE);
-  Wire.endTransmission();
-  Wire.requestFrom(I2C_ADDRESS, DATA_COUNT_ANGLE);
 
-  if (Wire.available() >= DATA_COUNT_ANGLE) {
+void read_IR_sensor() {
+  Wire.beginTransmission(IR_I2C_ADDRESS);
+  Wire.write(IR_ANGLE_AND_DISTANCE_REGISTER);
+  Wire.endTransmission();
+  Wire.requestFrom(IR_I2C_ADDRESS, IR_ANGLE_AND_DISTANCE_BYTES_COUNT);
+
+  if (Wire.available() >= IR_ANGLE_AND_DISTANCE_BYTES_COUNT) {
     uint16_t angle = Wire.read() << 8;
     angle |= Wire.read();
     uint16_t distance = Wire.read() << 8;
     distance |= Wire.read();
-    // save
+    
     if (angle == 180 && distance == 0) {
-      IR_data.angle = NO_SIGNAL; // default „no signal“
+      IR_data.angle = IR_NO_SIGNAL;
       IR_data.distance = 0;
     } else {
       IR_data.angle = angle;
       IR_data.distance = distance;
     }
   } else {
-      IR_data.angle = NO_SIGNAL; // default „no signal“
-      IR_data.distance = 0;
-      Serial.println("No IR_data signal detected");
+    IR_data.angle = IR_NO_SIGNAL;
+    IR_data.distance = 0;
+    debug_println("No IR_data signal detected");
   }
 
-  // ---  12 RAW bytes ---
-  Wire.beginTransmission(I2C_ADDRESS);
-  Wire.write(REGISTER_RAW);
+  Wire.beginTransmission(IR_I2C_ADDRESS);
+  Wire.write(IR_RAW_REGISTER);
   Wire.endTransmission();
-  Wire.requestFrom(I2C_ADDRESS, DATA_COUNT_RAW);
+  Wire.requestFrom(IR_I2C_ADDRESS, IR_RAW_BYTES_COUNT);
 
-  for (int i = 0; i < IR_SENSOR_AMOUNT; i++) {
-      if (Wire.available()) {
-          IR_data.sensor_IR[i] = Wire.read();
-      } else {
-          IR_data.sensor_IR[i] = 0;
-      }
+  for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+    if (Wire.available()) {
+      IR_data.sensor_IR[i] = Wire.read();
+    } else {
+      IR_data.sensor_IR[i] = 0;
+    }
   }
-  // --- last byte = status ---
+  
   if (Wire.available()) {
-      IR_data.status = Wire.read();
+    IR_data.status = Wire.read();
   } else {
-      IR_data.status = 0;
+    IR_data.status = 0;
   }
 }
 
 
-// Line sensor
-void read_line() {
-  for (int i = 0; i < LINE_SENSOR_AMOUNT; i++) {
+void read_line_sensor() {
+  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     line_data.sensor_line[i] = analogRead(line_pin[i]);
   }
 }
 
-// Data collection & Raspberry comunication-----------------------------------------------------------------------
+
 void recieve_data() {
-  //String input = Serial.readStringUntil('\n'); // reading line
-  String input = Serial8.readStringUntil('\n'); // reading line
-  // main lenght and format chcek
-  if (input.length() != 31 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"'
-                  || input[29] != '"' || input[30] != '}' ) {
-    Serial.println("Invalid string!");
+  // String input = DEBUG_SERIAL.readStringUntil('\n');
+  String input = RASPBERRY_SERIAL.readStringUntil('\n');
+  
+  if (input.length() != 31 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[29] != '"' || input[30] != '}') {
+    debug_println("Invalid string!");
     return;
   }
-  String data = input.substring(6, 29); // deleting start end ending of string
-  // comma check
+
+  String data = input.substring(6, 29);
+
   if (data[5] != ',' || data[11] != ',' || data[17] != ',') {
-    Serial.println("Wrong comma structure!");
+    debug_println("Wrong comma structure!");
     return;
   }
-  // sign chcek
-  for (int i = 0; i <= 18; i += 6) { 
+  
+  for (int i = 0; i <= 18; i += 6) {
     if (data[i] != '+' && data[i] != '-') {
-      Serial.println("Wrong sign!");
+      debug_println("Wrong sign!");
       return;
     }
   }
-  // numbers check
-  for (int i = 0; i < MOTOR_AMOUNT; i++) {
+  
+  for (int i = 0; i < MOTOR_COUNT; i++) {
     for (int j = 1; j < 5; j++) {
-      if (data[i*6 + j] < '0' || data[i*6 + j] > '9') {
-        Serial.print("Wrong number at:");
-        Serial.println(i*6 + j);
+      if (data[i * 6 + j] < '0' || data[i * 6 + j] > '9') {
+        debug_print("Wrong number at:");
+        debug_println(i * 6 + j);
         return;
       }
     }
   }
-  int values[MOTOR_AMOUNT];
+
+  int values[MOTOR_COUNT];
   values[0] = data.substring(0, 5).toInt();
   values[1] = data.substring(6, 11).toInt();
   values[2] = data.substring(12, 17).toInt();
   values[3] = data.substring(18, 23).toInt();
 
-  Serial.print("Default string: ");
-  Serial.println(input);
-  Serial.println("Extracted values:");
-  /*for (int i = 0; i < 4; i++) {
-    Serial.println(values[i]);
-  }*/
-  for (int i = 0; i < MOTOR_AMOUNT; i++) {
+  debug_print("Default string: ");
+  debug_println(input.c_str());
+  debug_println("Extracted values:");
+  // for (int i = 0; i < 4; i++) {
+  //   debug_println(values[i]);
+  // }
+  for (int i = 0; i < MOTOR_COUNT; i++) {
     motors_data.motor_speed[i] = values[i];
   }
 }
 
-
-
-void Save_data() {
+void update_all_data() {
   all_data.compass_data = compass_data;
-  all_data.IR_data      = IR_data;
-  all_data.motors_data  = motors_data;
-  all_data.line_data    = line_data;
+  all_data.IR_data = IR_data;
+  all_data.motors_data = motors_data;
+  all_data.line_data = line_data;
 }
 
-void Print_data(int clear) {
-  // Motors
-  Serial.print("Motors: ");
-  for (int i = 0; i < MOTOR_AMOUNT; i++) {
-    Serial.print(i);
-    Serial.print(":");
-    Serial.print(all_data.motors_data.motor_speed[i]);
-    Serial.print("   ");
-  }
-  Serial.println();
-  // Compass
-  Serial.print("Heading: ");
-  Serial.print(all_data.compass_data.heading);
-  Serial.print("\t\tPitch: ");
-  Serial.print(all_data.compass_data.pitch);
-  Serial.print("\tRoll: ");
-  Serial.println(all_data.compass_data.roll);
-  // IR
-  Serial.print("IR_data_DIR: ");
-  Serial.print(all_data.IR_data.angle);
-  Serial.print("   IR_data_Dist: ");
-  Serial.print(all_data.IR_data.distance);
-  Serial.print("   ");
-  for (int i = 0; i < IR_SENSOR_AMOUNT; i++) {
-    Serial.print(i);
-    Serial.print(":");
-    Serial.print(all_data.IR_data.sensor_IR[i]);
-    Serial.print("   ");
-  }
-  Serial.print("Status:  ");
-  Serial.println(all_data.IR_data.status);
-  // Line
-  Serial.print("Line:  ");
-  for (int i = 0; i < LINE_SENSOR_AMOUNT; i++) {
-    Serial.print(i);
-    Serial.print(":");
-    Serial.print(all_data.line_data.sensor_line[i]);
-    Serial.print("   ");
-  }
-  Serial.println("");
-  // END LINE
-  Serial.println("-------------------------------------------------------------------------");
-}
 
-// Getting ready comunicat string---------------------
-void format_number_w_sign(float input_number, char final_string[], int width) {
-  int number = round(input_number);
-  if (number < 0) {
-    final_string[0] = '-';
-  }
-  else {
-    final_string[0] = '+';
-  }
-  int value = abs(number);
-  int final_string_size = width + 2;
-
-  for (int i = width; i > 0; i--) {
-    final_string[i] = (value % 10) + '0';
-    value /= 10;
-  }
-  final_string[width + 1] = ',';  // message split
-  final_string[width + 2] = '\0'; // string ending
-}
-
-void format_number_wn_sign(float input_number, char final_string[], int width) {
-  int number = round(input_number);
-  int value = abs(number);
-  int final_string_size = width + 1;
-
-  for (int i = width - 1; i >= 0; i--) {
-    final_string[i] = (value % 10) + '0';
-    value /= 10;
-  }
-  final_string[width] = ',';  // message split
-  final_string[width + 1] = '\0'; // string ending
-}
-
-int append_number_to_string(float number, char* target_string, int position, int number_size, int sign) {
-  char hold_number[10]; // buffer pre jedno číslo
-  if (sign == 1) { // formating number
-    format_number_w_sign(number, hold_number, number_size);
-  }
-  else {
-    format_number_wn_sign(number, hold_number, number_size);
-  }
-  int len = strlen(hold_number);                         // final lenght
-  memcpy(target_string + position, hold_number, len);    // copy to main string
-  return position + len;                                 // next position
-}
-// similar than number, but append just one char
-int append_char_to_string(char c, char* target_string, int position) {
-    target_string[position] = c;
-    return position + 1;
-}
-
-void creat_comunication_string() { // formating messsage data into easy-sendable form
-  for (int i = 0; i < DATA_STRING_LENGHT; i ++) {
+void create_raspberry_message() {
+  for (int i = 0; i < DATA_STRING_LENGTH; i++) {
     message_data[i] = '#';
   }
+
   int position = 0;
   // message start
-  position = append_char_to_string('{',                                   message_data, position);
-  position = append_char_to_string('"',                                   message_data, position);
-  position = append_char_to_string('a',                                   message_data, position);
-  position = append_char_to_string('"',                                   message_data, position);
-  position = append_char_to_string('=',                                   message_data, position);
-  position = append_char_to_string('"',                                   message_data, position);
+  position = append_char_to_string('{', message_data, position);
+  position = append_char_to_string('"', message_data, position);
+  position = append_char_to_string('a', message_data, position);
+  position = append_char_to_string('"', message_data, position);
+  position = append_char_to_string('=', message_data, position);
+  position = append_char_to_string('"', message_data, position);
   // compass
-  position = append_number_to_string(all_data.compass_data.heading,       message_data, position, 3, 0);
-  position = append_number_to_string(all_data.compass_data.pitch,         message_data, position, 3, 1);
-  position = append_number_to_string(all_data.compass_data.roll,          message_data, position, 3, 1);
+  position = append_number_to_string(all_data.compass_data.heading, message_data, position, 3, 0);
+  position = append_number_to_string(all_data.compass_data.pitch, message_data, position, 3, 1);
+  position = append_number_to_string(all_data.compass_data.roll, message_data, position, 3, 1);
   // IR sensor
-  position = append_number_to_string(all_data.IR_data.angle,              message_data, position, 3, 0);
-  position = append_number_to_string(all_data.IR_data.distance,           message_data, position, 4, 0);
-  for (int i = 0; i < IR_SENSOR_AMOUNT; i++) {
-    position = append_number_to_string(all_data.IR_data.sensor_IR[i],     message_data, position, 3, 0);
+  position = append_number_to_string(all_data.IR_data.angle, message_data, position, 3, 0);
+  position = append_number_to_string(all_data.IR_data.distance, message_data, position, 4, 0);
+  for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+    position = append_number_to_string(all_data.IR_data.sensor_IR[i], message_data, position, 3, 0);
   }
-  position = append_number_to_string(all_data.IR_data.status,             message_data, position, 1, 0);
+  position = append_number_to_string(all_data.IR_data.status, message_data, position, 1, 0);
   // Line sensor
-  for (int i = 0; i < LINE_SENSOR_AMOUNT; i++) {
+  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     position = append_number_to_string(all_data.line_data.sensor_line[i], message_data, position, 4, 0);
   }
   // message end
   position = position - 1; // delete last ','
-  position = append_char_to_string('"',                                   message_data, position);
-  position = append_char_to_string('}',                                   message_data, position);
-  position = append_char_to_string('\0',                                  message_data, position);
+  position = append_char_to_string('"', message_data, position);
+  position = append_char_to_string('}', message_data, position);
+  position = append_char_to_string('\0', message_data, position);
 }
 
-void send_message() {
-  Serial8.println(message_data);
-  Serial.println(message_data);
+void send_raspberry_message() {
+  RASPBERRY_SERIAL.println(message_data);
+  debug_println(message_data);
 }
 
-//--------------------------------------SETUP------------------------------------------
+
+
 void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(38400);
   pinMode(LED_BUILTIN, OUTPUT);
 
-  Serial8.begin(RASPBERRY_SERIAL_SPEED);
+  DEBUG_SERIAL.begin(38400);
+  RASPBERRY_SERIAL.begin(RASPBERRY_SERIAL_SPEED);
 
   // Motors
-  for(int i = 0; i < 4; i++){
+  for (int i = 0; i < 4; i++) {
     pinMode(motor_pin[i][0], OUTPUT);
     pinMode(motor_pin[i][1], OUTPUT);
     analogWrite(motor_pin[i][0], motor_speed[i]);
   }
 
-  //Compass
-  if (!bno.begin()) {
-    Serial.println("Nepodarilo sa inicializovat BNO055!");
-    while (1);
+  // Compass
+  if (bno.begin()) {
+    bno_initialized = true;
+    delay(1000);
+    bno.setExtCrystalUse(true);
+  } else {
+    debug_println("Failed to initialize BNO055!");
+    compass_data.heading = 0;
+    compass_data.pitch = 0;
+    compass_data.roll = 0;
   }
-  delay(1000);
-  bno.setExtCrystalUse(true);
 
-  //IR_data finder
+  // IR_data finder
   Wire.begin();
-  Serial.println("MRM-IR_data-Finder3 dual read start");
+  debug_println("MRM-IR_data-Finder3 dual read start");
 
-  //Line sensor
-  for (int i = 0; i < LINE_SENSOR_AMOUNT; i++) {
+  // Line sensor
+  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     pinMode(line_pin[i], INPUT);
   }
 }
 
+
 void loop() {
-  // put your main code here, to run repeatedly:
-  /*
-  // FIRST TEST
-  Serial.println("Hello world! OFF");
-  delay(500);
-  digitalWrite(LED_BUILTIN, HIGH);
-  Serial.println("Hello world! ON");
-  delay(500);
-  digitalWrite(LED_BUILTIN, LOW);
-  */
-
-
-  
-  // Compass
   read_compass();
-  // IR_data
-  read_IR();
-  // Line
-  read_line();
+  read_IR_sensor();
+  read_line_sensor();
+  update_all_data();
 
-  Save_data();
-  Print_data(0);
-  creat_comunication_string();
-  send_message();
+  if (DEBUG) { print_debug_data(0); }
+  create_raspberry_message();
+  send_raspberry_message();
 
-  // Send data
-
-  // Recieve data
-  if (/*Serial.available()*/Serial8.available() > 0) {
+  if (RASPBERRY_SERIAL.available() > 0) {
     recieve_data();
   }
 
-  // Motors
-  motors_on(motors_data.motor_speed);
+  set_all_motors_speed(motors_data.motor_speed);
 
   delay(50);
 }
