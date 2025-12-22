@@ -12,13 +12,12 @@
 // ================================================
 
 // START/STOP
- //variabil made for testing whithout module
-#define MODULE_USED 1 // 0 = module disconnected, 1 = modul connected
+#define USE_BLUETOOTH_MODULE 1
 
 #define SWITCH_PIN 32
 #define MODULE_PIN 33
 
-volatile bool run = false;
+volatile bool is_running = false;
 
 // Serials
 #define RASPBERRY_SERIAL Serial8
@@ -143,13 +142,12 @@ char message_data[DATA_STRING_LENGTH];
 // ================================================
 
 // START/STOP
-void update_run() {
-  // AND logic: robot moves only if both module and switch are HIGH
-  if (MODULE_USED) {
-    run = (digitalRead(MODULE_PIN) == HIGH) && (digitalRead(SWITCH_PIN) == HIGH);
+void update_running_state() {
+  if (USE_BLUETOOTH_MODULE) {
+    is_running = (digitalRead(MODULE_PIN) == HIGH) && (digitalRead(SWITCH_PIN) == HIGH);
   }
   else {
-    run = (digitalRead(SWITCH_PIN) == HIGH);
+    is_running = (digitalRead(SWITCH_PIN) == HIGH);
   }
 }
 
@@ -438,8 +436,8 @@ void setup() {
   pinMode(MODULE_PIN, INPUT);
   pinMode(SWITCH_PIN, INPUT_PULLUP);
   // Attach interrupts to both pins
-  attachInterrupt(digitalPinToInterrupt(MODULE_PIN), update_run, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), update_run, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(MODULE_PIN), update_running_state, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), update_running_state, CHANGE);
 
   // Motors
   for (int i = 0; i < 4; i++) {
@@ -485,7 +483,7 @@ void loop() {
     recieve_data();
   }
 
-  if (run) {
+  if (is_running) {
     set_all_motors_speed(motors_data.motor_speed);
     if (DEBUG) Serial.println("MOVING!");
   }
