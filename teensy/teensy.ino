@@ -11,6 +11,14 @@
 // =                Definitions                   =
 // ================================================
 
+// START/STOP
+#define USE_BLUETOOTH_MODULE 1
+
+#define SWITCH_PIN 32
+#define MODULE_PIN 33
+
+volatile bool is_running = false;
+
 // Serials
 #define RASPBERRY_SERIAL Serial8
 #define RASPBERRY_SERIAL_SPEED 38400
@@ -47,10 +55,10 @@ void debug_print(const float msg) {
 // Motors
 #define MOTOR_COUNT 4
 const int motor_pin[MOTOR_COUNT][2] = {
-    {5, 4},   // M1PWM, M1DIR
-    {33, 33}, // M2PWM, M2DIR
-    {33, 33}, // M3PWM, M3DIR
-    {33, 33}  // M4PWM, M4DIR
+    {5, 4},   //5, 6 M1PWM, M1DIR
+    {7, 8}, // M2PWM, M2DIR
+    {9, 10}, // M3PWM, M3DIR
+    {11, 12}  // M4PWM, M4DIR
 };
 
 int16_t motor_speed[MOTOR_COUNT] = {0, 0, 0, 0};
@@ -95,7 +103,11 @@ IRData IR_data;
 // Line sensor
 #define LINE_SENSOR_COUNT 16
 
-const int line_pin[LINE_SENSOR_COUNT] = { 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 38, 39, 40, 41 };
+//const int line_pin[LINE_SENSOR_COUNT] = { 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 38, 39, 40, 41 };
+// pin mapping on teensy does not allow more place-eficient
+const int line_pin[LINE_SENSOR_COUNT] = { 23, 22, 21, 20, 24, 25, 17, 16, 15, 14, 26, 27, 41, 40, 39, 38 };
+
+
 
 struct LineData {
   int16_t sensor_line[LINE_SENSOR_COUNT];
@@ -129,6 +141,15 @@ char message_data[DATA_STRING_LENGTH];
 // =                 Functions                    =
 // ================================================
 
+// START/STOP
+void update_running_state() {
+  if (USE_BLUETOOTH_MODULE) {
+    is_running = (digitalRead(MODULE_PIN) == HIGH) && (digitalRead(SWITCH_PIN) == HIGH);
+  }
+  else {
+    is_running = (digitalRead(SWITCH_PIN) == HIGH);
+  }
+}
 
 // Debug
 void print_debug_data(int clear) {
@@ -409,8 +430,14 @@ void send_raspberry_message() {
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
-  DEBUG_SERIAL.begin(38400);
+  DEBUG_SERIAL.begin(DEBUG_SERIAL_SPEED);
   RASPBERRY_SERIAL.begin(RASPBERRY_SERIAL_SPEED);
+
+  pinMode(MODULE_PIN, INPUT);
+  pinMode(SWITCH_PIN, INPUT_PULLUP);
+  // Attach interrupts to both pins
+  attachInterrupt(digitalPinToInterrupt(MODULE_PIN), update_running_state, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), update_running_state, CHANGE);
 
   // Motors
   for (int i = 0; i < 4; i++) {
@@ -456,7 +483,12 @@ void loop() {
     recieve_data();
   }
 
-  set_all_motors_speed(motors_data.motor_speed);
-
+  if (is_running) {
+    set_all_motors_speed(motors_data.motor_speed);
+    if (DEBUG) Serial.println("MOVING!");
+  }
+  else {
+    if (DEBUG) Serial.println("MODULE OR SWITCH OFF!");
+  }
   delay(50);
 }
