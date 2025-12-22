@@ -1,4 +1,5 @@
 $fn = 90;
+use <Robot.scad>
 module raspberry_bracket_support() {
     difference() {
         cylinder(d = 8, h = 5,center=true);
@@ -64,4 +65,4 @@ module raspberry_whith_everithing() {
 }
 //raspberry_whith_everithing();
 
-raspberry_bracket_support_all();
+raspberry_bracket();
