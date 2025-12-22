@@ -55,16 +55,19 @@ void debug_print(const float msg) {
 // Motors
 #define MOTOR_COUNT 4
 const int motor_pin[MOTOR_COUNT][2] = {
-    {5, 4},   //5, 6 M1PWM, M1DIR
-    {7, 8}, // M2PWM, M2DIR
-    {9, 10}, // M3PWM, M3DIR
+    {5, 6},   // M1PWM, M1DIR
+    {7, 8},   // M2PWM, M2DIR
+    {9, 10},  // M3PWM, M3DIR
     {11, 12}  // M4PWM, M4DIR
 };
+const_int kicker_pin = 4;  // ON/OFF
 
 int16_t motor_speed[MOTOR_COUNT] = {0, 0, 0, 0};
+int8_t kicker_position = 0; // 1 = out (kick) 0 = in
 
 struct motors {
   int16_t motor_speed[MOTOR_COUNT];
+  int8_t kicker_position;
 };
 
 motors motors_data;
@@ -160,7 +163,8 @@ void print_debug_data(int clear) {
     debug_print(all_data.motors_data.motor_speed[i]);
     debug_print("   ");
   }
-  debug_println("");
+  debug_print("Kicker:");
+  debug_println(all_data.motors_data.kicker_position);
   
   debug_print("Heading: ");
   debug_print(all_data.compass_data.heading);
@@ -260,6 +264,11 @@ void set_all_motors_speed(int16_t m_speed[MOTOR_COUNT]) {
   }
 }
 
+void set_kicker_position(int8_t position) {
+  digitalWrite(kicker_pin, position);
+  motors_data.kicker_position = position;
+}
+
 
 void read_compass() {
   if (!bno_initialized) {
@@ -331,14 +340,14 @@ void recieve_data() {
   // String input = DEBUG_SERIAL.readStringUntil('\n');
   String input = RASPBERRY_SERIAL.readStringUntil('\n');
   
-  if (input.length() != 31 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[29] != '"' || input[30] != '}') {
+  if (input.length() != 33 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[31] != '"' || input[32] != '}') {
     debug_println("Invalid string!");
     return;
   }
 
-  String data = input.substring(6, 29);
+  String data = input.substring(6, 31);
 
-  if (data[5] != ',' || data[11] != ',' || data[17] != ',') {
+  if (data[5] != ',' || data[11] != ',' || data[17] != ','|| data[30] != ',') {
     debug_println("Wrong comma structure!");
     return;
   }
@@ -359,12 +368,18 @@ void recieve_data() {
       }
     }
   }
+  if (data[31] < '0' || data[31] > '9') {
+    debug_print("Wrong number at:");
+    debug_println(31);
+    return;
+  }
 
-  int values[MOTOR_COUNT];
+  int values[MOTOR_COUNT + 1];
   values[0] = data.substring(0, 5).toInt();
   values[1] = data.substring(6, 11).toInt();
   values[2] = data.substring(12, 17).toInt();
   values[3] = data.substring(18, 23).toInt();
+  values[4] = data.substring(24, 25).toInt();
 
   debug_print("Default string: ");
   debug_println(input.c_str());
@@ -375,6 +390,7 @@ void recieve_data() {
   for (int i = 0; i < MOTOR_COUNT; i++) {
     motors_data.motor_speed[i] = values[i];
   }
+  motors_data.kicker_position = values[4];
 }
 
 void update_all_data() {
@@ -445,6 +461,7 @@ void setup() {
     pinMode(motor_pin[i][1], OUTPUT);
     analogWrite(motor_pin[i][0], motor_speed[i]);
   }
+  pinMode(kicker_pin, OUTPUT);
 
   // Compass
   if (bno.begin()) {
@@ -485,6 +502,7 @@ void loop() {
 
   if (is_running) {
     set_all_motors_speed(motors_data.motor_speed);
+    set_kicker_position(motors_data.kicker_position);
     if (DEBUG) Serial.println("MOVING!");
   }
   else {
