@@ -19,7 +19,7 @@ module teensy_board_bracket() {
     translate([0,0,-16.2]) difference() {
         union() {
             cube([100,50,2],center=true);
-            translate([0,0,3.6])
+            translate([0,0,3.5])
                 teensy_board_holes(6, 5);
         }
         teensy_board_holes(3.3, 200);

@@ -13,12 +13,15 @@ use <Raspberry_bracket.scad>;
 use <Motor_bracket.scad>;
 use <Teensy_board_bracket.scad>;
 use <Kicker.scad>;
+use <Level_shifter.scad>;
+use <Camera_bracket.scad>;
+use <IR_sensor_bracket.scad>;
 
 // IR seeker 3D model zo stranky
 // %rotate([0,0,180])translate([-21,-21,210])import("mrm-ir-finder3.stl");
 
 module ball() {
-    translate([0,0,43/2])sphere(d = 43);
+    translate([0,-104.5,43/2])sphere(d = 43);
 }
 
 
@@ -209,6 +212,8 @@ module middle_part (brackets_support = 1) {
                     raspberry_bracket_support_all();
                 translate([55,15,57.4]) rotate([0,0,90])
                     teensy_board_brackets_holes(6, 5);
+                translate([-58,50,57.4])
+                    level_shifter_holes(6, 5);
             }
         }
         
@@ -237,9 +242,13 @@ module middle_part (brackets_support = 1) {
         translate([55,15,76.6]) rotate([0,0,90])
             teensy_board_brackets_holes();
         
+        // level_shifter
+        translate([-58,50,70])level_shifter_holes();
+        
         // cable hole
         cylinder(d = 90, h = 200, center=true);
         
+        // batery
         for(A = [1,-1])
             translate([A*15,80,50])cube([26,35, 100], center=true);
     }
@@ -247,6 +256,58 @@ module middle_part (brackets_support = 1) {
 
 
 
+module upper_part () {
+    difference() {
+        translate([0,0,96]) union() {
+            cylinder(d=robot_d,h=2,center=true);
+            /*// SOCCER COMUNICATION MODUL
+            translate([-30-22.86/2,0,10]) {
+                cube([2.54+4,6*2.54+4,20], center = true);
+                translate([22.86,2.54,0])
+                    cube([2.54+4,4*2.54+4,20],center=true);
+            }
+            // BNO Compass
+            translate([40-7*2.54/2,0,10])rotate([0,0,45]) {
+                cube([2.54+4,6*2.54+4,20], center = true);
+                translate([7 * 2.54,0,0])
+                    cube([2.54+4,4*2.54+4,20],center=true);
+            }*/
+        }
+        // BUTTON HOLE
+        
+        // platform conection
+        platform_conection_holes();
+        // IR sensor
+        IR_sensor_bracket_holes();
+        // front
+        *translate([0,-89.2,100])
+            cube([200,50,100],center=true);
+        translate([0,-120,100]) scale([1.05,1,1])
+            cylinder(h = 100, d = 200,center=true);
+        // cable hole
+        translate([30,0,0])
+            cylinder(d = 30, h = 300,center=true);
+        // camera cable hole
+        translate([-30,0,100]) cube([5,20,100], center=true);
+        // batery
+        for(A = [1,-1])
+            translate([A*15,80,50])cube([26,35, 100], center=true);
+        
+        // SOCCER COMUNICATION MODUL 
+                    //translate([-73-22.86/2,-34,100])
+        translate([5-22.86/2,30,100]) {
+            cube([2.54+0.5,6*2.54+0.5,100], center = true);
+            translate([22.86,2.54,0])
+                cube([2.54+0.5,4*2.54+0.5,100],center=true);
+        }
+        // BNO Compass
+        translate([-60-8*2.54/2,-34,100])rotate([0,0,135]) {
+            cube([2.54+0.5,6*2.54+0.5,200], center = true);
+            translate([7 * 2.54,0,0])
+                cube([2.54+0.5,4*2.54+0.5,200],center=true);
+        }
+    }
+}
 module all(){
     intersection() {
         MAXsize();
@@ -256,25 +317,55 @@ module all(){
             //color("lightgray", 0.3)motors();
             //wheel_conector();
             //motor_driver_brackets_all();
-            translate([0,-70,23.1])kicker();
-            kicker_cutout();
+            //translate([0,-70,23.1])kicker();
+            //kicker_cutout();
             
-            bottom_part();
+            //bottom_part();
             whole_bottom_wall();
-            ball_zone();
-            middle_part();
-            middle_wall();
-            translate([-55,0,65])raspberry_bracket();
+            //ball_zone();
+            //middle_part();
+            %middle_wall();
+            upper_part();
+            
+            %translate([-55,3,65])raspberry_bracket();
+            %translate([55,15,76.6]) rotate([0,0,90])
+                teensy_board_bracket();
+            
+            #translate([0,0,96 + 4 + 80]) {
+                IR_sensor_bracket();
+                //IR_sensor();
+            }
+            %translate([-58,50,70]) level_shifter();
         }
     }
 }
-//all();
-middle_part(0);
-//middle_wall(0);
+all();
+//IR_sensor_bracket();
+//ball();
+//middle_wall();
+//upper_part();
 //ball_zone();
 //kicker_cutout();
 //translate([0,-70,23.1])kicker();
 //motors();
+/*
+middle_part(0);
+middle_wall(0);
+%translate([-55,0,60.4])rotate([0,0,0])
+    raspberry_bracket();
+%translate([55,15,76.6]) rotate([0,0,90])
+    teensy_board_bracket();
+#translate([-58,50,70]) level_shifter();
+
+% whole_bottom_wall();
+
+*/
+
+
+
+
+
+
 *color("red", 0.5)translate([-55,0,75])rotate([0,0,0]) {
     raspberry();
     translate([0,0,-14.6])raspberry_bracket();
