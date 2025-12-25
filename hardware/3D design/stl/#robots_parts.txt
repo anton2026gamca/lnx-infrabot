@@ -9,7 +9,3 @@ One robot contains:
  	1x middle_wall+USB_hole or 1x middle_wall-USB_hole
 // if you want to program after assembling use middle_wall-USB_hole, if you have not your program already, use middle_wall+USB_hole
  	1x raspberry_bracket
-	1x upper_part
-	1x IR_sensor_bracket
-	1x camera_bracket
-	1x camera_bracket_holder

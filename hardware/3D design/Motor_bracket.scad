@@ -3,6 +3,10 @@ wheel_h = 12.5;
 wheel_offset = 90;
 robot_d = 215;
 robot_h = 220;
+use <Robot.scad>
+
+// Motor 
+motor_L = 17;
 
 // Motor bracket
 width = 25;
@@ -13,6 +17,16 @@ num_holes = 7;
 hole_set = 6.35;
 
 ballDiameter = 43;
+module wheel_conector() {
+    rotate([0,0,45])translate([0,0,wheel_d/2]) for (A = [0:90:359]){
+        rotate([A,90,0]) translate([0,0,wheel_offset-5/2]) {
+            difference() {
+                cylinder(h = 5, d = 17.5, center = true);
+                cylinder(h = 10, d = 3.5, center=true);
+            }
+        }
+    }
+}
 module motor_bracket_holes() {
     for (A = [0:90:359]){
         rotate([0,0,A + 45])
