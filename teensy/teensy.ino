@@ -503,10 +503,10 @@ void loop() {
   if (is_running) {
     set_all_motors_speed(motors_data.motor_speed);
     set_kicker_position(motors_data.kicker_position);
-    if (DEBUG) Serial.println("MOVING!");
+    debug_println("MOVING!");
   }
   else {
-    if (DEBUG) Serial.println("MODULE OR SWITCH OFF!");
+    debug_println("MODULE OR SWITCH OFF!");
   }
   delay(50);
 }
