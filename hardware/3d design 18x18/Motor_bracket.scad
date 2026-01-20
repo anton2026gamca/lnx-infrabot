@@ -1,3 +1,4 @@
+$fn = 90;
 wheel_d = 55;
 wheel_h = 12.5;
 wheel_offset = 90;
@@ -97,11 +98,22 @@ module motors() {
 }
 
 
-module motor_brackets_all() {
+module motor_brackets_all(rot = 0) {
     translate([0,0,wheel_d/2])
     for (A = [0:90:359]){
-        rotate([0,0,A + 45])
+        rotate([0,rot,A + 45])
             translate([wheel_offset - 5,0,0])
                 motor_bracket();
     }
 }
+
+module motor_brackets_holders() {
+    difference() {
+        for (A = [45:90:359])
+            rotate([0,0,A])translate([59,0,0])
+                cube([lenght,width,11], center=true);
+        motor_bracket_holes();
+    }
+}
+motor_brackets_holders();
+%motor_brackets_all(rot = 0);

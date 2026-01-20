@@ -159,7 +159,29 @@ module bottom_part () {
                 for(A = [1,-1])
                 translate([A*72,0,10])
                     cube([30,39, 20], center=true);
+                
+                cylinder(d = 105, h = 3);
+                
+                
             }
+            // Line sensor
+            translate([0,0,63])
+                cylinder(d =75, h = 100, center=true);
+            difference() {
+                translate([0,0,63-100])
+                    cylinder(d =90, h = 100, center=true);
+                translate([0,0,0])
+                    cylinder(d =78, h = 200, center=true);
+            }
+            for (A = [0:15:359]) {
+                rotate([0,0,A]) translate([45,0,0])
+                    cylinder(d = 10, h = 100, center=true);
+            }
+            for (A = [0:90:359]) for (B = [15, 20, 25]) {
+                rotate([0,0,A]) translate([B,0,0])
+                    cylinder(d = 3.3, h = 100, center=true);
+            }
+            
             // Connection to upper parts
             platform_conection_holes();
             
@@ -168,7 +190,7 @@ module bottom_part () {
             wheels_cutout();
             
             // Motor brackets holes
-            motor_bracket_holes();
+            //motor_bracket_holes();
             
             // Driver holes
             motor_driver_bracket_holes();
@@ -188,6 +210,7 @@ module bottom_part () {
                     cube([26,35, 20], center=true);
       
         }
+        
     }
 }
 
@@ -220,7 +243,8 @@ module middle_part (brackets_support = 1) {
             // Motor brackets holes - if mounting it from top
             motor_driver_bracket_holes();
             
-            
+            // Motor brackets holes
+            translate([0,0,100])motor_bracket_holes();
             
             // Ball zone holes
             ball_zone_holes();
@@ -354,13 +378,14 @@ module all(){
     }
 }
 
-
+//motor_brackets_all(180);
+//translate([0,0,47.5])motor_brackets_holders();
 //all();
 //IR_sensor_bracket();
 //ball();
+bottom_part();
 *middle_part();
-*middle_wall();
-upper_part();
+*upper_part();
 //bottom_part();
 //bottom_wall();
 
