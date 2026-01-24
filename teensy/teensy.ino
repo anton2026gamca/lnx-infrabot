@@ -530,7 +530,7 @@ void loop() {
   if (module_value && switch_value) {
     set_all_motors_speed(motors_data.motor_speed);
     set_kicker_position(motors_data.kicker_position);
-    Serial.println("        MOVE!");
+    debug_println("MOVING!");
   }
   else {
     stop_motors();
