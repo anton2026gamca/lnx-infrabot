@@ -59,10 +59,10 @@ void debug_print(const float msg) {
 // Motors
 #define MOTOR_COUNT 4
 const int motor_pin[MOTOR_COUNT][2] = {
-    {5, 6},   // M1PWM, M1DIR
-    {7, 8},   // M2PWM, M2DIR
-    {9, 10},  // M3PWM, M3DIR
-    {11, 12}  // M4PWM, M4DIR
+    {6, 5},   // M1PWM, M1DIR
+    {8, 7},   // M2PWM, M2DIR
+    {10, 9},  // M3PWM, M3DIR
+    {12, 11}  // M4PWM, M4DIR
 };
 const int kicker_pin = 4;  // ON/OFF
 
@@ -266,6 +266,11 @@ void set_all_motors_speed(int16_t m_speed[MOTOR_COUNT]) {
     set_motor_speed(i, m_speed[i]);
     motors_data.motor_speed[i] = m_speed[i];
   }
+}
+
+void set_kicker_position(int8_t position) {
+  digitalWrite(kicker_pin, position);
+  motors_data.kicker_position = position;
 }
 
 void set_kicker_position(int8_t position) {
@@ -530,7 +535,7 @@ void loop() {
   if (module_value && switch_value) {
     set_all_motors_speed(motors_data.motor_speed);
     set_kicker_position(motors_data.kicker_position);
-    debug_println("MOVING!");
+    Serial.println("        MOVE!");
   }
   else {
     stop_motors();
