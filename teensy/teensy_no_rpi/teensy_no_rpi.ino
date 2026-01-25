@@ -6,6 +6,42 @@
 #include <string.h>
 
 
+// ================================================
+// =            In-game variabiles                =
+// ================================================
+
+// Speed
+struct Speeds {
+  int16_t full;
+  int16_t main;
+  int16_t turn;
+  int16_t adjust_turn;
+};
+Speeds speed = {
+  255, // full 255
+  70, // main 200
+  40, // turn 100
+  40, // adjust turn 70
+};
+
+// Compass
+float opponent_goal_angle = 0; // real opponent goal angle
+float target_angle = 180; // opponent goal adjusted to this angle 
+float goal_alignment_offset = target_angle - opponent_goal_angle; // centering opponents goal to 180
+float heading_tolerance = 15; // tolerated missrotation
+float heading_adjust_zone = 60; // slower rotation in here
+
+// IR seeker
+float IR_zones[8][3] = { // bottom value, top value, add value (move = IR + add)
+  {  0,  60,  +0},
+  { 60,  90, +10},
+  { 90, 120, +20},
+  {120, 180, +30},
+  {180, 240, -30},
+  {240, 270, -20},
+  {270, 300, -10},
+  {300, 360,  -0},
+};
 
 // ================================================
 // =                Definitions                   =
@@ -83,6 +119,7 @@ bool bno_initialized = false;
 
 struct CompassData {
   float heading;
+  float relative_heading;
   float pitch;
   float roll;
 };
@@ -268,9 +305,59 @@ void set_all_motors_speed(int16_t m_speed[MOTOR_COUNT]) {
   }
 }
 
-void set_kicker_position(int8_t position) {
-  digitalWrite(kicker_pin, position);
-  motors_data.kicker_position = position;
+
+void calculate_motor_speeds(float theta_deg, int16_t speed) {
+  // Konverzia uhla na radiány
+  float theta = fmod(theta_deg + 90, 360) * PI / 180.0f;
+
+  int16_t motor_speed[MOTOR_COUNT];
+
+  // Rozklad rýchlosti
+  float vx = speed * cosf(theta);  // dopredu/dozadu
+  float vy = speed * sinf(theta);  // dolava/doprava
+
+  // X-omni konfigurácia
+  motor_speed[0] = roundf( vx - vy);  // M0 = front right
+  motor_speed[1] = roundf(-vx - vy);  // M1 = back right
+  motor_speed[2] = roundf(-vx + vy);  // M2 = back left
+  motor_speed[3] = roundf( vx + vy);  // M3 = front left
+
+  // Normalizácia
+  int16_t max_val = 0;
+  for (int i = 0; i < MOTOR_COUNT; i++) {
+    int16_t abs_val = abs(motor_speed[i]);
+    if (abs_val > max_val) max_val = abs_val;
+  }
+
+  if (max_val > speed) {
+    for (int i = 0; i < MOTOR_COUNT; i++) {
+      motors_data.motor_speed[i] = motor_speed[i] * speed / max_val;
+    }
+  }
+  else {
+    for (int i = 0; i < MOTOR_COUNT; i++) {
+      motors_data.motor_speed[i] = motor_speed[i];
+    }
+  }
+}
+
+void move(int16_t dir, int16_t speed) {
+  calculate_motor_speeds(dir, speed);
+  set_all_motors_speed(motors_data.motor_speed);
+}
+
+void turn_right(int16_t speed) {
+  for (int i = 0; i < MOTOR_COUNT; i++) {
+    motors_data.motor_speed[i] = speed;
+  }
+  set_all_motors_speed(motors_data.motor_speed);
+}
+
+void turn_left(int16_t speed) {
+  for (int i = 0; i < MOTOR_COUNT; i++) {
+    motors_data.motor_speed[i] = -speed;
+  }
+  set_all_motors_speed(motors_data.motor_speed);
 }
 
 void set_kicker_position(int8_t position) {
@@ -295,6 +382,7 @@ void read_compass() {
   bno.getEvent(&event);
 
   compass_data.heading = event.orientation.x;
+  compass_data.relative_heading = fmod(compass_data.heading + goal_alignment_offset + 360.0, 360.0);
   compass_data.pitch = event.orientation.y;
   compass_data.roll = event.orientation.z;
 }
@@ -354,7 +442,7 @@ void read_line_sensor() {
 
 
 void recieve_data() {
-  //String input = DEBUG_SERIAL.readStringUntil('\n');
+  // String input = DEBUG_SERIAL.readStringUntil('\n');
   String input = RASPBERRY_SERIAL.readStringUntil('\n');
   
   if (input.length() != 33 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[31] != '"' || input[32] != '}') {
@@ -401,9 +489,9 @@ void recieve_data() {
   debug_print("Default string: ");
   debug_println(input.c_str());
   debug_println("Extracted values:");
-  //for (int i = 0; i < 4; i++) {
-  //  debug_println(values[i]);
-  //}
+  // for (int i = 0; i < 4; i++) {
+  //   debug_println(values[i]);
+  // }
   for (int i = 0; i < MOTOR_COUNT; i++) {
     motors_data.motor_speed[i] = values[i];
   }
@@ -504,6 +592,50 @@ void setup() {
   }
 }
 
+// ================================================
+// =                  Play                        =
+// ================================================
+
+void play() {
+  if (target_angle - heading_tolerance <= compass_data.relative_heading && compass_data.relative_heading <= target_angle + heading_tolerance) {
+    Serial.print("Rotation: --OK--");
+    go_to_ball();
+  }
+  else if (target_angle - heading_adjust_zone < compass_data.relative_heading && compass_data.relative_heading < target_angle - heading_tolerance) {
+    Serial.print("Rotation: Adjust");
+    turn_right(speed.adjust_turn);
+  }
+  else if (target_angle + heading_tolerance < compass_data.relative_heading && compass_data.relative_heading < target_angle + heading_adjust_zone) {
+    Serial.print("Rotation: Adjust");
+    turn_left(speed.adjust_turn);
+  }
+  else if (compass_data.relative_heading < target_angle - heading_adjust_zone) {
+    Serial.print("Rotation: Wrong!");
+    turn_right(speed.turn);
+  }
+  else if (target_angle + heading_adjust_zone < compass_data.relative_heading) {
+    Serial.print("Rotation: Wrong!");
+    turn_left(speed.turn);
+  }
+  else Serial.println("Rotation: ERROR!");
+}
+
+void go_to_ball() {
+  if (IR_data.angle == IR_NO_SIGNAL) {
+    stop_motors();
+    Serial.println(IR_NO_SIGNAL);
+  }
+  //move(IR_data.angle, speed.main);
+  for (int i = 0; i < 8; i++) {
+    if (IR_zones[i][0] < IR_data.angle && IR_data.angle < IR_zones[i][1]) {
+      move(IR_data.angle + IR_zones[i][2], speed.main);
+      Serial.print("   Zone: ");
+      Serial.print(i);
+      Serial.print("  IR_VALUE: ");
+      Serial.println(IR_data.angle);
+    }
+  }
+}
 
 void loop() {
   if (!digitalRead(SWITCH_PIN)) {
@@ -517,29 +649,23 @@ void loop() {
   update_all_data();
 
   if (DEBUG) { print_debug_data(0); }
-  create_raspberry_message();
-  send_raspberry_message();
 
-  if (RASPBERRY_SERIAL.available() > 0) {
-    recieve_data();
-  }
-  
-  debug_print("SWITCH: ");
-  debug_print(switch_value);
-  debug_print("    MODULE: ");
-  debug_print(module_value);
+  // Printout states and turn on LEDs
+  Serial.print("SWITCH: ");
+  Serial.print(switch_value);
+  Serial.print("    MODULE: ");
+  Serial.print(module_value);
   (switch_value) ? digitalWrite(SWITCH_LED_PIN, HIGH) : digitalWrite(SWITCH_LED_PIN, LOW);
   (module_value) ? digitalWrite(MODULE_LED_PIN, HIGH) : digitalWrite(MODULE_LED_PIN, LOW);
   (module_value && switch_value) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
-
+  switch_value = 1; //------------------------------------------------------------------------------------------------------------------------------------------------------------
   if (module_value && switch_value) {
-    set_all_motors_speed(motors_data.motor_speed);
-    set_kicker_position(motors_data.kicker_position);
     Serial.println("        MOVE!");
+    play();
   }
   else {
     stop_motors();
-    debug_println("        STOP!");
+    Serial.println("        STOP!");
   }
   delay(10);
 }

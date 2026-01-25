@@ -268,14 +268,44 @@ void set_all_motors_speed(int16_t m_speed[MOTOR_COUNT]) {
   }
 }
 
-void set_kicker_position(int8_t position) {
-  digitalWrite(kicker_pin, position);
-  motors_data.kicker_position = position;
+void calculate_motor_speeds(float theta_deg, int16_t speed) {
+  theta_deg -= 90;
+theta_deg = fmod(theta_deg + 360.0, 360.0);
+  float theta = theta_deg * PI / 180.0; // radian
+  int16_t motor_speed[MOTOR_COUNT];
+
+  // Vector split
+  float vx = speed * cos(theta);  // forward/backward
+  float vy = speed * sin(theta);  // sideways
+
+  motor_speed[0] = round( vx + vy); // M0 = front right
+  motor_speed[1] = round(-vx + vy); // M1 = back right
+  motor_speed[2] = round(-vx - vy); // M2 = back left
+  motor_speed[3] = round( vx - vy); // M3 = front left
+
+  // Normalization
+  int16_t max_val = 0;
+  for (int i = 0; i < MOTOR_COUNT; i++) {
+    if (abs(motor_speed[i]) > max_val)
+      max_val = abs(motor_speed[i]);
+  }
+
+  if (max_val > speed) {
+    for (int i = 0; i < MOTOR_COUNT; i++) {
+      motors_data.motor_speed[i] = motor_speed[i] * speed / max_val;
+    }
+  }
 }
 
 void set_kicker_position(int8_t position) {
   digitalWrite(kicker_pin, position);
   motors_data.kicker_position = position;
+}
+
+void move(int16_t dir, int16_t speed, int16_t kick) {
+  set_kicker_position(kick);
+  calculate_motor_speeds(dir, speed);
+  set_all_motors_speed(motors_data.motor_speed);
 }
 
 void stop_motors() {
@@ -354,7 +384,7 @@ void read_line_sensor() {
 
 
 void recieve_data() {
-  //String input = DEBUG_SERIAL.readStringUntil('\n');
+  // String input = DEBUG_SERIAL.readStringUntil('\n');
   String input = RASPBERRY_SERIAL.readStringUntil('\n');
   
   if (input.length() != 33 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[31] != '"' || input[32] != '}') {
@@ -401,9 +431,9 @@ void recieve_data() {
   debug_print("Default string: ");
   debug_println(input.c_str());
   debug_println("Extracted values:");
-  //for (int i = 0; i < 4; i++) {
-  //  debug_println(values[i]);
-  //}
+  // for (int i = 0; i < 4; i++) {
+  //   debug_println(values[i]);
+  // }
   for (int i = 0; i < MOTOR_COUNT; i++) {
     motors_data.motor_speed[i] = values[i];
   }
@@ -506,40 +536,23 @@ void setup() {
 
 
 void loop() {
-  if (!digitalRead(SWITCH_PIN)) {
-    switch_value = !switch_value;
-    delay(100);
+  int16_t main_speed = 100;
+
+  int16_t pos = 0;
+  while (1){
+    move(pos % 360, main_speed, 0);
+    pos++;
+    delay(10);
   }
 
-  read_compass();
-  read_IR_sensor();
-  read_line_sensor();
-  update_all_data();
-
-  if (DEBUG) { print_debug_data(0); }
-  create_raspberry_message();
-  send_raspberry_message();
-
-  if (RASPBERRY_SERIAL.available() > 0) {
-    recieve_data();
-  }
-  
-  debug_print("SWITCH: ");
-  debug_print(switch_value);
-  debug_print("    MODULE: ");
-  debug_print(module_value);
-  (switch_value) ? digitalWrite(SWITCH_LED_PIN, HIGH) : digitalWrite(SWITCH_LED_PIN, LOW);
-  (module_value) ? digitalWrite(MODULE_LED_PIN, HIGH) : digitalWrite(MODULE_LED_PIN, LOW);
-  (module_value && switch_value) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
-
-  if (module_value && switch_value) {
-    set_all_motors_speed(motors_data.motor_speed);
-    set_kicker_position(motors_data.kicker_position);
-    Serial.println("        MOVE!");
-  }
-  else {
-    stop_motors();
-    debug_println("        STOP!");
-  }
-  delay(10);
 }
+
+
+
+
+
+
+
+
+
+

@@ -19,7 +19,40 @@ use <IR_sensor_bracket.scad>;
 
 // IR seeker 3D model zo stranky
 // %rotate([0,0,180])translate([-21,-21,210])import("mrm-ir-finder3.stl");
+module LED_holes(diodeDia=7,height=10){
+    
+            for(A=[0:15:359])rotate([0,0,A])translate([0,45,0])cylinder(d=diodeDia,h=height,center=true);
+             if(0){
+                 rotate([0,0,0])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,30])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,60])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,90])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,120])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,150])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,180])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,210])translate([0,66,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,238.7])translate([0,65.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,270])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,300])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0,330])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+             }
+             if(0){
+                 rotate([0,0, 0+16.25])translate([0,66,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 30+16.7])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 60+14.25])translate([0,66,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 90+15.6])translate([0,66,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 120+15])translate([0,66.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 150+14.3])translate([0,66.2,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 180+13.7])translate([0,66,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 210+13.3])translate([0,65.5,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 239+14.58])translate([0,65.8,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 270+14.4])translate([0,65.7,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 300+15.2])translate([0,65.7,0])cylinder(d=diodeDia,h=height,center=true);
+                 rotate([0,0, 330+15.8])translate([0,66.3,0])cylinder(d=diodeDia,h=height,center=true);
+             }
 
+
+}
 module ball() {
     translate([0,-104.5,43/2])sphere(d = 43);
 }
@@ -160,27 +193,32 @@ module bottom_part () {
                 translate([A*72,0,10])
                     cube([30,39, 20], center=true);
                 
-                cylinder(d = 105, h = 3);
+                //*cylinder(d = 105, h = 3);
+                difference(){
+                    translate([0,0,-4])cylinder(d=robot_d,h=4);
+                    //translate([0,0,-6])cylinder(d=95,h=6);
+                }
                 
                 
             }
             // Line sensor
-            translate([0,0,63])
-                cylinder(d =75, h = 100, center=true);
-            difference() {
-                translate([0,0,63-100])
-                    cylinder(d =90, h = 100, center=true);
-                translate([0,0,0])
-                    cylinder(d =78, h = 200, center=true);
+            translate([0,0,10])LED_holes();
+            difference(){
+                translate([0,0,0])cylinder(d = 80, h = 200, center=true);
+                        
+                translate([0,0,7])difference() {
+                    for(A=[1,-1]) {
+                        translate([A*42,0,1.5])cube([20,15,3],center=true);                        
+                        translate([0,A*35,1.5])cube([15,20,3],center=true);
+                    }
+                    for(A=[1,-1]) {
+                        translate([A*37,0,0])cylinder(d=3.3,h=100,center=true);
+                        translate([0,A*30,0])cylinder(d=3.3,h=100,center=true);
+                    }
+                }
+                
             }
-            for (A = [0:15:359]) {
-                rotate([0,0,A]) translate([45,0,0])
-                    cylinder(d = 10, h = 100, center=true);
-            }
-            for (A = [0:90:359]) for (B = [15, 20, 25]) {
-                rotate([0,0,A]) translate([B,0,0])
-                    cylinder(d = 3.3, h = 100, center=true);
-            }
+            translate([0,0,14.5])cylinder(d = 100, h = 10, center=true);
             
             // Connection to upper parts
             platform_conection_holes();
@@ -190,7 +228,7 @@ module bottom_part () {
             wheels_cutout();
             
             // Motor brackets holes
-            //motor_bracket_holes();
+            motor_bracket_holes();
             
             // Driver holes
             motor_driver_bracket_holes();
@@ -229,7 +267,7 @@ module middle_part (brackets_support = 1) {
                         raspberry_bracket_support_all();
                     translate([30,-12.5,57.4]) rotate([0,0,90])
                         teensy_board_brackets_holes(6, 5);
-                    translate([-50,39,57.4])
+                    translate([-40,37,70])
                         level_shifter_holes(6, 5);
                 }
             }
@@ -264,7 +302,7 @@ module middle_part (brackets_support = 1) {
                 teensy_board_brackets_holes();
             
             // level_shifter
-            translate([-50,39,0])
+            translate([-40,37,70])
                 level_shifter_holes();
             
             // cable hole
@@ -383,7 +421,7 @@ module all(){
 //all();
 //IR_sensor_bracket();
 //ball();
-bottom_part();
+*bottom_part();
 *middle_part();
 *upper_part();
 //bottom_part();
@@ -402,12 +440,12 @@ middle_part(0);
     raspberry_bracket();
 %translate([30,-12.5,76.6]) rotate([0,0,90])
     teensy_board_bracket();
-#translate([-50,39,70]) level_shifter();
+#translate([-40,37,70]) level_shifter();
 
 %bottom_wall();
 /**/
 
-//bottom_part();
+bottom_part();
 
 
 
