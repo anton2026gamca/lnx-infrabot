@@ -349,7 +349,7 @@ void read_line_sensor() {
 
 
 void recieve_data() {
-  // String input = DEBUG_SERIAL.readStringUntil('\n');
+  //String input = DEBUG_SERIAL.readStringUntil('\n');
   String input = RASPBERRY_SERIAL.readStringUntil('\n');
   
   if (input.length() != 33 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[31] != '"' || input[32] != '}') {
@@ -396,9 +396,9 @@ void recieve_data() {
   debug_print("Default string: ");
   debug_println(input.c_str());
   debug_println("Extracted values:");
-  // for (int i = 0; i < 4; i++) {
-  //   debug_println(values[i]);
-  // }
+  //for (int i = 0; i < 4; i++) {
+  //  debug_println(values[i]);
+  //}
   for (int i = 0; i < MOTOR_COUNT; i++) {
     motors_data.motor_speed[i] = values[i];
   }
@@ -518,11 +518,11 @@ void loop() {
   if (RASPBERRY_SERIAL.available() > 0) {
     recieve_data();
   }
-  // Printout states and turn on LEDs
-  Serial.print("SWITCH: ");
-  Serial.print(switch_value);
-  Serial.print("    MODULE: ");
-  Serial.print(module_value);
+  
+  debug_print("SWITCH: ");
+  debug_print(switch_value);
+  debug_print("    MODULE: ");
+  debug_print(module_value);
   (switch_value) ? digitalWrite(SWITCH_LED_PIN, HIGH) : digitalWrite(SWITCH_LED_PIN, LOW);
   (module_value) ? digitalWrite(MODULE_LED_PIN, HIGH) : digitalWrite(MODULE_LED_PIN, LOW);
   (module_value && switch_value) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
@@ -534,7 +534,7 @@ void loop() {
   }
   else {
     stop_motors();
-    Serial.println("        STOP!");
+    debug_println("        STOP!");
   }
   delay(10);
 }
