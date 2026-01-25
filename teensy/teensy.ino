@@ -111,9 +111,8 @@ IRData IR_data;
 // Line sensor
 #define LINE_SENSOR_COUNT 12
 
-//const int line_pin[LINE_SENSOR_COUNT] = { 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 38, 39, 40, 41 };
 // pin mapping on teensy does not allow more place-eficient
-const int line_pin[LINE_SENSOR_COUNT] = { 23, 22, 21, 20, 24, 25, 17, 16, 15, 14, 26, 27, 41, 40, 39, 38 };
+const int line_pin[LINE_SENSOR_COUNT] = { 23, 22, 21, 20, 17, 16, 15, 14, 41, 40, 39, 38 };
 
 
 
