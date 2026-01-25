@@ -13,15 +13,19 @@
 // Speed
 struct Speeds {
   int16_t full;
+  int16_t high;
   int16_t main;
   int16_t turn;
   int16_t adjust_turn;
+  int16_t low;
 };
 Speeds speed = {
-  255, // full 255
-  70, // main 200
-  40, // turn 100
-  40, // adjust turn 70
+  255,  // full             = 255
+  200,  // high             = 200
+  150,  // main             = 150
+  100,  // turn             = 100
+  70,   // adjust turn      =  70
+  50,   // slowest possible =  45
 };
 
 // Compass
@@ -32,7 +36,9 @@ float heading_tolerance = 15; // tolerated missrotation
 float heading_adjust_zone = 60; // slower rotation in here
 
 // IR seeker
-float IR_zones[8][3] = { // bottom value, top value, add value (move = IR + add)
+#define NUM_OF_IR_ZONES 8
+
+float IR_zones[NUM_OF_IR_ZONES][3] = { // bottom value, top value, add value (move = IR + add)
   {  0,  60,  +0},
   { 60,  90, +10},
   { 90, 120, +20},
@@ -48,16 +54,17 @@ float IR_zones[8][3] = { // bottom value, top value, add value (move = IR + add)
 // ================================================
 
 // START/STOP
-#define USE_BLUETOOTH_MODULE 1
+#define SWITCH_PIN 31
+#define SWITCH_LED_PIN 28
+#define MODULE_SWITCH_PIN 32
+#define MODULE_SWITCH_LED_PIN 29
+#define MODULE_PIN 33
+#define MODULE_LED_PIN 30
 
-#define SWITCH_PIN 33
-#define MODULE_PIN 32
-#define SWITCH_LED_PIN 30
-#define MODULE_LED_PIN 31
-
-
+volatile bool use_bluetooth_module = true;
 volatile bool switch_value = false; // starting whith false value
 volatile bool module_value = true;  // if off, on first moment gets 0
+volatile bool run = false;
 
 // Serials
 #define RASPBERRY_SERIAL Serial8
@@ -145,11 +152,10 @@ IRData IR_data;
 
 
 // Line sensor
-#define LINE_SENSOR_COUNT 16
+#define LINE_SENSOR_COUNT 12
 
-//const int line_pin[LINE_SENSOR_COUNT] = { 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 38, 39, 40, 41 };
 // pin mapping on teensy does not allow more place-eficient
-const int line_pin[LINE_SENSOR_COUNT] = { 23, 22, 21, 20, 24, 25, 17, 16, 15, 14, 26, 27, 41, 40, 39, 38 };
+const int line_pin[LINE_SENSOR_COUNT] = { 23, 22, 21, 20, 17, 16, 15, 14, 41, 40, 39, 38 };
 
 
 
@@ -187,7 +193,7 @@ char message_data[DATA_STRING_LENGTH];
 
 // START/STOP
 void update_running_state() {
-  if (USE_BLUETOOTH_MODULE) {
+  if (use_bluetooth_module) {
     module_value = (digitalRead(MODULE_PIN) == HIGH);
   }
   else {
@@ -551,6 +557,7 @@ void send_raspberry_message() {
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(MODULE_LED_PIN, OUTPUT);
+  pinMode(MODULE_SWITCH_LED_PIN, OUTPUT);
   pinMode(SWITCH_LED_PIN, OUTPUT);
 
   DEBUG_SERIAL.begin(DEBUG_SERIAL_SPEED);
@@ -558,9 +565,10 @@ void setup() {
 
   pinMode(MODULE_PIN, INPUT);
   pinMode(SWITCH_PIN, INPUT_PULLUP);
+  pinMode(MODULE_SWITCH_PIN, INPUT_PULLUP);
   // Attach interrupts to both pins
   attachInterrupt(digitalPinToInterrupt(MODULE_PIN), update_running_state, CHANGE);
-  //attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), update_running_state, CHANGE); // used as button, not switch
+  update_running_state();
 
   // Motors
   for (int i = 0; i < 4; i++) {
@@ -602,44 +610,56 @@ void play() {
     go_to_ball();
   }
   else if (target_angle - heading_adjust_zone < compass_data.relative_heading && compass_data.relative_heading < target_angle - heading_tolerance) {
-    Serial.print("Rotation: Adjust");
+    Serial.println("Rotation: Adjust");
     turn_right(speed.adjust_turn);
   }
   else if (target_angle + heading_tolerance < compass_data.relative_heading && compass_data.relative_heading < target_angle + heading_adjust_zone) {
-    Serial.print("Rotation: Adjust");
+    Serial.println("Rotation: Adjust");
     turn_left(speed.adjust_turn);
   }
   else if (compass_data.relative_heading < target_angle - heading_adjust_zone) {
-    Serial.print("Rotation: Wrong!");
+    Serial.println("Rotation: Wrong!");
     turn_right(speed.turn);
   }
   else if (target_angle + heading_adjust_zone < compass_data.relative_heading) {
-    Serial.print("Rotation: Wrong!");
+    Serial.println("Rotation: Wrong!");
     turn_left(speed.turn);
   }
   else Serial.println("Rotation: ERROR!");
 }
 
 void go_to_ball() {
+  Serial.print("   IR_VALUE: ");
   if (IR_data.angle == IR_NO_SIGNAL) {
-    stop_motors();
-    Serial.println(IR_NO_SIGNAL);
+    move(speed.low, 180);
+    //stop_motors();
+    Serial.print("IR_NO_SIGNAL");
+    Serial.print("  MOVE DIR: ");
+    Serial.print(180);
   }
   //move(IR_data.angle, speed.main);
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < NUM_OF_IR_ZONES; i++) {
     if (IR_zones[i][0] < IR_data.angle && IR_data.angle < IR_zones[i][1]) {
       move(IR_data.angle + IR_zones[i][2], speed.main);
-      Serial.print("   Zone: ");
-      Serial.print(i);
-      Serial.print("  IR_VALUE: ");
       Serial.println(IR_data.angle);
+      Serial.print("  ZONE: ");
+      Serial.print(i);
+      Serial.print("  MOVE DIR: ");
+      Serial.print(IR_data.angle + IR_zones[i][2]);
+      
     }
   }
+  Serial.println();
 }
 
 void loop() {
   if (!digitalRead(SWITCH_PIN)) {
     switch_value = !switch_value;
+    delay(100);
+  }
+  if (!digitalRead(MODULE_SWITCH_PIN)) {
+    use_bluetooth_module = !use_bluetooth_module;
+    update_running_state();
     delay(100);
   }
 
@@ -651,15 +671,24 @@ void loop() {
   if (DEBUG) { print_debug_data(0); }
 
   // Printout states and turn on LEDs
-  Serial.print("SWITCH: ");
-  Serial.print(switch_value);
-  Serial.print("    MODULE: ");
-  Serial.print(module_value);
   (switch_value) ? digitalWrite(SWITCH_LED_PIN, HIGH) : digitalWrite(SWITCH_LED_PIN, LOW);
   (module_value) ? digitalWrite(MODULE_LED_PIN, HIGH) : digitalWrite(MODULE_LED_PIN, LOW);
-  (module_value && switch_value) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
-  switch_value = 1; //------------------------------------------------------------------------------------------------------------------------------------------------------------
-  if (module_value && switch_value) {
+  (use_bluetooth_module) ? digitalWrite(MODULE_SWITCH_LED_PIN, LOW) : digitalWrite(MODULE_SWITCH_LED_PIN, HIGH);
+  
+  run = (switch_value && module_value);
+  
+  (run) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
+
+  Serial.print("SWITCH: ");
+  Serial.print(switch_value);
+  Serial.print("     MODULE_SWITCH: ");
+  Serial.print(use_bluetooth_module);
+  Serial.print("    MODULE: ");
+  Serial.print(module_value);
+  Serial.print("    RUN: ");
+  Serial.print(run);
+
+  if (run) {
     Serial.println("        MOVE!");
     play();
   }
