@@ -33,7 +33,7 @@ class IRData:
 class ParsedTeensyData:
     compass: CompassData
     ir: IRData
-    line: list
+    line: list[int]
     raw: str
     timestamp: float
 
@@ -87,23 +87,24 @@ def open_serial(port: str, baud: int = TEENSY_BAUD, timeout: float = 1.0) -> ser
         raise RuntimeError(f"Failed to open serial port {port}: {e}.{hint}") from e
 
 
-def format_motor_command(motor_speeds: list) -> str:
+def format_message(motor_speeds: list[int], kicker_state: bool) -> str:
     if len(motor_speeds) != MOTOR_COUNT:
         raise ValueError(f"Expected {MOTOR_COUNT} motor speeds, got {len(motor_speeds)}")
     
-    clamped_speeds = []
+    clamped_values: list[int] = []
     for i, speed in enumerate(motor_speeds):
         if not isinstance(speed, (int, float)):
             raise ValueError(f"Motor {i} speed must be numeric, got {type(speed)}")
         clamped = max(-9999, min(9999, int(speed)))
-        clamped_speeds.append(clamped)
+        clamped_values.append(clamped)
+    clamped_values.append(1 if kicker_state else 0)
     
-    formatted_speeds = []
-    for speed in clamped_speeds:
+    formatted_values: list[str] = []
+    for speed in clamped_values:
         sign = '+' if speed >= 0 else '-'
-        formatted_speeds.append(f"{sign}{abs(speed):04d}")
+        formatted_values.append(f"{sign}{abs(speed):04d}")
     
-    data = ",".join(formatted_speeds)
+    data = ",".join(formatted_values)
     return '{"a"="' + data + '"}'
 
 
@@ -181,13 +182,13 @@ class TeensyCommunicator:
         self.ser.write(message.encode('utf-8'))
         self._log.debug("Sent: %s", message.strip())
     
-    def set_motors(self, motor_speeds: list) -> None:
-        message = format_motor_command(motor_speeds)
+    def set_motors(self, motor_speeds: list, kicker_state: bool) -> None:
+        message = format_message(motor_speeds, kicker_state)
         self.send_message(message)
-        self._log.info("Set motors: %s", motor_speeds)
+        self._log.info("Set motors: %s, Kicker state: %s", motor_speeds, kicker_state)
     
     def stop_motors(self) -> None:
-        self.set_motors([0, 0, 0, 0])
+        self.set_motors([0, 0, 0, 0], False)
 
 
 def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) -> None:

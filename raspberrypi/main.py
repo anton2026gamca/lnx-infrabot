@@ -96,6 +96,17 @@ def get_motor_speeds() -> list[int]:
     with motor_speeds_lock:
         return motor_speeds
 
+kicker_state: bool = False
+kicker_state_lock = threading.Lock()
+def set_kicker_state(state: bool):
+    global kicker_state
+    with kicker_state_lock:
+        kicker_state = state
+def get_kicker_state() -> bool:
+    global kicker_state
+    with kicker_state_lock:
+        return kicker_state
+
 
 
 def camera_thread(stop_event):
@@ -111,7 +122,7 @@ def logic_thread(stop_event):
 def hardware_communication_thread(stop_event):
     with teensy_communication.TeensyCommunicator() as communicator:
         while not stop_event.is_set():
-            communicator.set_motors(get_motor_speeds())
+            communicator.set_motors(get_motor_speeds(), get_kicker_state())
             data = communicator.read_data(timeout=0.5)
             if data:
                 set_hardware_data(data)
