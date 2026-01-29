@@ -12,16 +12,17 @@
 // ================================================
 
 // START/STOP
-#define USE_BLUETOOTH_MODULE 1
+#define SWITCH_PIN 31
+#define SWITCH_LED_PIN 28
+#define MODULE_SWITCH_PIN 32
+#define MODULE_SWITCH_LED_PIN 29
+#define MODULE_PIN 33
+#define MODULE_LED_PIN 30
 
-#define SWITCH_PIN 33
-#define MODULE_PIN 32
-#define SWITCH_LED_PIN 30
-#define MODULE_LED_PIN 31
-
-
+volatile bool use_bluetooht_module = true;
 volatile bool switch_value = false; // starting whith false value
 volatile bool module_value = true;  // if off, on first moment gets 0
+volatile bool run = false;
 
 // Serials
 #define RASPBERRY_SERIAL Serial8
@@ -108,11 +109,10 @@ IRData IR_data;
 
 
 // Line sensor
-#define LINE_SENSOR_COUNT 16
+#define LINE_SENSOR_COUNT 12
 
-//const int line_pin[LINE_SENSOR_COUNT] = { 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 38, 39, 40, 41 };
 // pin mapping on teensy does not allow more place-eficient
-const int line_pin[LINE_SENSOR_COUNT] = { 23, 22, 21, 20, 24, 25, 17, 16, 15, 14, 26, 27, 41, 40, 39, 38 };
+const int line_pin[LINE_SENSOR_COUNT] = { 23, 22, 21, 20, 17, 16, 15, 14, 41, 40, 39, 38 };
 
 
 
@@ -150,7 +150,7 @@ char message_data[DATA_STRING_LENGTH];
 
 // START/STOP
 void update_running_state() {
-  if (USE_BLUETOOTH_MODULE) {
+  if (use_bluetooht_module) {
     module_value = (digitalRead(MODULE_PIN) == HIGH);
   }
   else {
@@ -273,11 +273,6 @@ void set_kicker_position(int8_t position) {
   motors_data.kicker_position = position;
 }
 
-void set_kicker_position(int8_t position) {
-  digitalWrite(kicker_pin, position);
-  motors_data.kicker_position = position;
-}
-
 void stop_motors() {
   for (int i = 0; i < MOTOR_COUNT; i++) {
     set_motor_speed(i, 0);
@@ -354,7 +349,7 @@ void read_line_sensor() {
 
 
 void recieve_data() {
-  //String input = DEBUG_SERIAL.readStringUntil('\n');
+  // String input = DEBUG_SERIAL.readStringUntil('\n');
   String input = RASPBERRY_SERIAL.readStringUntil('\n');
   
   if (input.length() != 33 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[31] != '"' || input[32] != '}') {
@@ -401,9 +396,9 @@ void recieve_data() {
   debug_print("Default string: ");
   debug_println(input.c_str());
   debug_println("Extracted values:");
-  //for (int i = 0; i < 4; i++) {
-  //  debug_println(values[i]);
-  //}
+  // for (int i = 0; i < 4; i++) {
+  //   debug_println(values[i]);
+  // }
   for (int i = 0; i < MOTOR_COUNT; i++) {
     motors_data.motor_speed[i] = values[i];
   }
@@ -463,6 +458,7 @@ void send_raspberry_message() {
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(MODULE_LED_PIN, OUTPUT);
+  pinMode(MODULE_SWITCH_LED_PIN, OUTPUT);
   pinMode(SWITCH_LED_PIN, OUTPUT);
 
   DEBUG_SERIAL.begin(DEBUG_SERIAL_SPEED);
@@ -470,9 +466,9 @@ void setup() {
 
   pinMode(MODULE_PIN, INPUT);
   pinMode(SWITCH_PIN, INPUT_PULLUP);
+  pinMode(MODULE_SWITCH_PIN, INPUT_PULLUP);
   // Attach interrupts to both pins
   attachInterrupt(digitalPinToInterrupt(MODULE_PIN), update_running_state, CHANGE);
-  //attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), update_running_state, CHANGE); // used as button, not switch
 
   // Motors
   for (int i = 0; i < 4; i++) {
@@ -510,6 +506,11 @@ void loop() {
     switch_value = !switch_value;
     delay(100);
   }
+  if (!digitalRead(MODULE_SWITCH_PIN)) {
+    use_bluetooht_module = !use_bluetooht_module;
+    update_running_state();
+    delay(100);
+  }
 
   read_compass();
   read_IR_sensor();
@@ -523,23 +524,32 @@ void loop() {
   if (RASPBERRY_SERIAL.available() > 0) {
     recieve_data();
   }
-  
-  debug_print("SWITCH: ");
-  debug_print(switch_value);
-  debug_print("    MODULE: ");
-  debug_print(module_value);
+  // Printout states and turn on LEDs
   (switch_value) ? digitalWrite(SWITCH_LED_PIN, HIGH) : digitalWrite(SWITCH_LED_PIN, LOW);
   (module_value) ? digitalWrite(MODULE_LED_PIN, HIGH) : digitalWrite(MODULE_LED_PIN, LOW);
-  (module_value && switch_value) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
+  (use_bluetooht_module) ? digitalWrite(MODULE_SWITCH_LED_PIN, LOW) : digitalWrite(MODULE_SWITCH_LED_PIN, HIGH);
+  
+  run = (switch_value && module_value);
+  
+  (run) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
 
-  if (module_value && switch_value) {
+  Serial.print("SWITCH: ");
+  Serial.print(switch_value);
+  Serial.print("     MODULE_SWITCH: ");
+  Serial.print(use_bluetooht_module);
+  Serial.print("    MODULE: ");
+  Serial.print(module_value);
+  Serial.print("    RUN: ");
+  Serial.print(run);
+
+  if (run) {
     set_all_motors_speed(motors_data.motor_speed);
     set_kicker_position(motors_data.kicker_position);
     Serial.println("        MOVE!");
   }
   else {
     stop_motors();
-    debug_println("        STOP!");
+    Serial.println("        STOP!");
   }
   delay(10);
 }
