@@ -12,7 +12,7 @@ from serial.tools import list_ports
 LOG = logging.getLogger("teensy_communication")
 
 TEENSY_BAUD = 38400
-EXPECTED_FIELDS = 34
+EXPECTED_FIELDS = 30
 MOTOR_COUNT = 4
 
 
@@ -115,6 +115,7 @@ class TeensyCommunicator:
         self.timeout = timeout
         self.ser = None
         self._log = logging.getLogger(f"teensy_communication.{port}")
+        self.buffer: bytearray | None = None
         if auto_connect:
             self.connect()
 
@@ -141,7 +142,19 @@ class TeensyCommunicator:
     def read_line(self) -> str:
         if self.ser is None:
             raise RuntimeError("Serial port not open. Call connect() first.")
-        raw = self.ser.readline()
+        raw = None
+        
+        if self.buffer is None:
+            self.buffer = bytearray()
+
+        if b'\n' in self.buffer:
+            raw = self.buffer.split(b'\n', 1)[0] + b'\n'
+            self.buffer = self.buffer[len(raw):]
+        
+        read_bytes = self.ser.read_all()
+        if read_bytes:
+            self.buffer.extend(read_bytes)
+
         if not raw:
             return ""
         try:
@@ -158,12 +171,14 @@ class TeensyCommunicator:
             original_timeout = self.ser.timeout
             self.ser.timeout = timeout
         
+        
         try:
             line = self.read_line()
             if not line:
                 return None
             try:
                 parsed = parse_teensy_line(line)
+                self._log.debug("Received data: %s", parsed)
                 return parsed
             except ValueError as e:
                 self._log.warning("Failed to parse line: %s (%s)", line, e)
@@ -185,7 +200,7 @@ class TeensyCommunicator:
     def set_motors(self, motor_speeds: list, kicker_state: bool) -> None:
         message = format_message(motor_speeds, kicker_state)
         self.send_message(message)
-        self._log.info("Set motors: %s, Kicker state: %s", motor_speeds, kicker_state)
+        self._log.debug("Set motors: %s, Kicker state: %s", motor_speeds, kicker_state)
     
     def stop_motors(self) -> None:
         self.set_motors([0, 0, 0, 0], False)
@@ -204,7 +219,7 @@ def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) ->
                 data = teensy.read_line()
             else:
                 parsed = teensy.read_data()
-                if parsed is not None:
+                if parsed:
                     data = json.dumps(parsed, ensure_ascii=False)
             
             if data is None:
