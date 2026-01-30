@@ -1,40 +1,18 @@
+import logging
 import sys
 import threading
 import time
+from werkzeug.serving import make_server
+
 import camera.camera as camera
 import teensy_communication.teensy_communication as teensy_communication
-import helpers.helpers as helpers
 import web_server.api.api as api
-import logging
+from helpers.helpers import LogFormatter, RobotMode
 
 
 
-LOGGING_LEVEL = logging.DEBUG
 
-class LogFormatter(logging.Formatter):
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-
-    LEVEL_STYLES = {
-        logging.DEBUG:    "\033[36m",  # Cyan
-        logging.INFO:     "\033[32m",  # Green
-        logging.WARNING:  "\033[33m",  # Yellow
-        logging.ERROR:    "\033[31m",  # Red
-        logging.CRITICAL: "\033[41m",  # Red background
-    }
-
-    def format(self, record) -> str:
-        color = self.LEVEL_STYLES.get(record.levelno, "")
-        levelname = record.levelname
-
-        if color:
-            record.levelname = (
-                f"{self.BOLD}{color}{levelname}{self.RESET}"
-            )
-
-        msg = super().format(record)
-        record.levelname = levelname
-        return msg
+LOGGING_LEVEL = logging.INFO
 
 def setup_logger(name: str | None = None, level=LOGGING_LEVEL) -> logging.Logger:
     logger = logging.getLogger(name)
@@ -61,14 +39,12 @@ logic_logger = setup_logger("Logic Thread")
 hardware_logger = setup_logger("Hardware Thread")
 
 
-
 last_frame: camera.FrameData | None = None
 last_frame_lock = threading.Lock()
 def set_last_frame(frame: camera.FrameData | None):
     global last_frame
     with last_frame_lock:
         last_frame = frame
-        api.set_camera_frame(frame.frame if frame else None)
 def get_last_frame() -> camera.FrameData | None:
     global last_frame
     with last_frame_lock:
@@ -108,6 +84,17 @@ def get_kicker_state() -> bool:
         return kicker_state
 
 
+robot_mode: str = RobotMode.IDLE
+robot_mode_lock = threading.Lock()
+def set_robot_mode(mode: str):
+    global robot_mode
+    with robot_mode_lock:
+        robot_mode = mode
+def get_robot_mode() -> str:
+    global robot_mode
+    with robot_mode_lock:
+        return robot_mode
+
 
 def camera_thread(stop_event):
     while not stop_event.is_set():
@@ -117,33 +104,59 @@ def camera_thread(stop_event):
 
 def logic_thread(stop_event):
     while not stop_event.is_set():
-        pass
+        if get_robot_mode() == RobotMode.IDLE:
+            pass
+        if get_robot_mode() == RobotMode.MANUAL:
+            pass
+        if get_robot_mode() == RobotMode.AUTONOMOUS:
+            pass
 
 def hardware_communication_thread(stop_event):
-    with teensy_communication.TeensyCommunicator() as communicator:
+    with teensy_communication.TeensyCommunicator(port="/dev/ttyAMA0") as communicator:
         while not stop_event.is_set():
             communicator.set_motors(get_motor_speeds(), get_kicker_state())
-            data = communicator.read_data(timeout=0.5)
+            data = communicator.read_data(timeout=0.1)
             if data:
                 set_hardware_data(data)
                 hardware_logger.debug(f"Data: {data}")
 
+def api_thread(stop_event):
+    server = make_server('0.0.0.0', 5000, api.app, threaded=True)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        stop_event.wait()
+    finally:
+        server.shutdown()
+        server_thread.join(timeout=2)
+
+def api_get_camera_frame():
+    data = get_last_frame()
+    if data is None:
+        return None
+    return data.frame
 
 
 def main():
+    api.camera_frame_getter = api_get_camera_frame
+    api.hardware_data_getter = get_hardware_data
+    api.motor_speeds_getter = get_motor_speeds
+    api.kicker_state_getter = get_kicker_state
+    api.robot_mode_getter = get_robot_mode
+    api.robot_mode_setter = set_robot_mode
+    
     stop_event = threading.Event()
 
     threads = [
         threading.Thread(target=camera_thread, args=(stop_event,)),
         threading.Thread(target=logic_thread, args=(stop_event,)),
         threading.Thread(target=hardware_communication_thread, args=(stop_event,)),
+        threading.Thread(target=api_thread, args=(stop_event,)),
     ]
 
     for t in threads:
         logger.info(f"Starting thread: {t.name}")
         t.start()
-
-    api.start()
 
     logger.info("System running. Press Ctrl+C to stop.")
 
