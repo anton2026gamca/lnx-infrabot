@@ -28,7 +28,7 @@ volatile bool run = false;
 #define RASPBERRY_SERIAL Serial8
 #define RASPBERRY_SERIAL_SPEED 38400
 
-#define DEBUG false
+#define DEBUG true
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
