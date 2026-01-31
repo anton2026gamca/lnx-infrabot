@@ -44,3 +44,16 @@ class RobotMode:
     IDLE = "idle"
     MANUAL = "manual"
     AUTONOMOUS = "autonomous"
+
+
+class Suppress200Filter(logging.Filter):
+            def filter(self, record):
+                try:
+                    msg = record.getMessage()
+                    import re
+                    m = re.search(r'"\s*(\d{3})\s', msg)
+                    if m and m.group(1) == '200':
+                        return False
+                except Exception:
+                    pass
+                return True

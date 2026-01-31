@@ -178,7 +178,6 @@ class TeensyCommunicator:
                 return None
             try:
                 parsed = parse_teensy_line(line)
-                self._log.debug("Received data: %s", parsed)
                 return parsed
             except ValueError as e:
                 self._log.warning("Failed to parse line: %s (%s)", line, e)
@@ -195,12 +194,10 @@ class TeensyCommunicator:
             message = message + '\n'
         
         self.ser.write(message.encode('utf-8'))
-        self._log.debug("Sent: %s", message.strip())
     
     def set_motors(self, motor_speeds: list, kicker_state: bool) -> None:
         message = format_message(motor_speeds, kicker_state)
         self.send_message(message)
-        self._log.debug("Set motors: %s, Kicker state: %s", motor_speeds, kicker_state)
     
     def stop_motors(self) -> None:
         self.set_motors([0, 0, 0, 0], False)
