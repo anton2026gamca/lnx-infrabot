@@ -21,13 +21,15 @@ shared_data: dict = {
     'robot_mode': manager.Value('c', RobotMode.IDLE.encode()),
     'logs_buffer': manager.dict(),
     'next_log_id': manager.Value('i', 1),
+    'manual_control': manager.dict(),
     'locks': {
         'last_frame': manager.Lock(),
         'hardware_data': manager.Lock(),
         'motor_speeds': manager.Lock(),
         'kicker_state': manager.Lock(),
         'robot_mode': manager.Lock(),
-        'logs_buffer': manager.Lock()
+        'logs_buffer': manager.Lock(),
+        'manual_control': manager.Lock()
     }
 }
 
@@ -127,6 +129,20 @@ def get_logs(since_id: int = 0) -> tuple[list[dict], int]:
         last_id = max(shared_data['logs_buffer'].keys()) if shared_data['logs_buffer'] else 0
     return items, last_id
 
+def get_manual_control() -> RobotManualControl:
+    with shared_data['locks']['manual_control']:
+        return RobotManualControl(
+            move_angle=shared_data['manual_control'].get('move_angle', 0.0),
+            move_speed=shared_data['manual_control'].get('move_speed', 0.0),
+            rotate=shared_data['manual_control'].get('rotate', 0.0)
+        )
+
+def set_manual_control(control: RobotManualControl) -> None:
+    with shared_data['locks']['manual_control']:
+        shared_data['manual_control'].clear()
+        shared_data['manual_control']['move_angle'] = control.move_angle
+        shared_data['manual_control']['move_speed'] = control.move_speed
+        shared_data['manual_control']['rotate'] = control.rotate
 
 def camera_process(stop_event):
     try:
@@ -156,13 +172,21 @@ def camera_process(stop_event):
 def logic_process(stop_event):
     try:
         while not stop_event.is_set():
-            if get_robot_mode() == RobotMode.IDLE:
+            start_time = time.time()
+
+            mode = get_robot_mode()
+            if mode == RobotMode.IDLE:
                 pass
-            if get_robot_mode() == RobotMode.MANUAL:
+            elif mode == RobotMode.MANUAL:
+                control = get_manual_control()
+                motors = calculate_motors_speeds(control.move_angle, control.move_speed * 255, control.rotate)
+                logic_logger.info(f"Manual control: move_angle={control.move_angle:.2f}, move_speed={control.move_speed:.2f}, rotate={control.rotate:.2f} => motors={motors}")
+                set_motor_speeds(motors)
+            elif mode == RobotMode.AUTONOMOUS:
                 pass
-            if get_robot_mode() == RobotMode.AUTONOMOUS:
-                pass
-            time.sleep(1.0 / 60)
+
+            sleep_duration = max(0.0, (0.015) - (time.time() - start_time))
+            time.sleep(sleep_duration)
     except KeyboardInterrupt:
         pass
     except Exception as e:
@@ -205,12 +229,15 @@ def api_get_camera_frame():
 
 
 def main():
+    api.logger = api_logger
     api.camera_frame_getter = api_get_camera_frame
     api.hardware_data_getter = get_hardware_data
     api.motor_speeds_getter = get_motor_speeds
     api.kicker_state_getter = get_kicker_state
     api.robot_mode_getter = get_robot_mode
     api.robot_mode_setter = set_robot_mode
+    api.manual_control_getter = get_manual_control
+    api.manual_control_setter = set_manual_control
     api.logs_getter = get_logs
     
     

@@ -1,8 +1,11 @@
 import cv2
+import json
+import logging
 import time
 from flask import Flask, Response, request, jsonify
-from helpers.helpers import RobotMode
 from werkzeug.serving import make_server
+
+from helpers.helpers import RobotMode, RobotManualControl
 
 
 
@@ -16,7 +19,12 @@ kicker_state_getter = None
 
 robot_mode_getter = None
 robot_mode_setter = None
+manual_control_getter = None
+manual_control_setter = None
+
 logs_getter = None
+
+logger = logging.getLogger("API Process")
 
 
 def gen_frames():
@@ -41,6 +49,7 @@ def gen_frames():
 @app.route('/api/video_feed')
 def video_feed():
     return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
 
 @app.route('/api/get_sensor_data')
 def sensor_data():
@@ -69,6 +78,7 @@ def sensor_data():
         "timestamp": data.timestamp
     })
 
+
 @app.route('/api/get_logs')
 def get_logs():
     if logs_getter is None:
@@ -86,6 +96,7 @@ def get_logs():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/api/get_mode')
 def get_state():
     if robot_mode_getter is None:
@@ -96,17 +107,44 @@ def get_state():
 
 @app.route('/api/set_mode', methods=['POST'])
 def set_mode():
-    mode = request.json.get('mode', None)
-    if not mode or not mode in RobotMode.__dict__.values():
-        return jsonify({"error": "Invalid mode"}), 400
+    mode = request.args.get('mode', None)
+    if mode is None:
+        mode = request.json.get('mode', None)
+    if mode is None or not mode in [RobotMode.IDLE, RobotMode.MANUAL, RobotMode.AUTONOMOUS]:
+        return jsonify({"error": "Invalid mode"}), 401
     if robot_mode_setter is None:
         return jsonify({"error": "Internal server error"}), 503
     robot_mode_setter(mode)
     return jsonify({"status": "ok"})
 
 
+@app.route('/api/set_manual_control', methods=['POST'])
+def set_manual_control():
+    data_str = request.data
+    if data_str is None:
+        return jsonify({"error": f"Invalid request"}), 400
+    data = json.loads(data_str)
+    if data.get('move', None) is None or \
+       not isinstance(data['move'].get('angle', None), (int, float)) or \
+       not isinstance(data['move'].get('speed', None), (int, float)) or \
+       not isinstance(data.get('rotate', None), (int, float)):
+        return jsonify({"error": f"Invalid request data \"{data_str}\""}), 400
+
+    if manual_control_setter is None:
+        return jsonify({"error": "Internal server error"}), 503
+
+    control = RobotManualControl(
+        move_angle=data['move']['angle'],
+        move_speed=data['move']['speed'],
+        rotate=data['rotate']
+    )
+    manual_control_setter(control)
+    return jsonify({"status": "ok"})
+
+
 def start(host: str = '0.0.0.0', port: int = 5000):
     server = make_server(host=host, port=port, app=app, threaded=True)
+    logger.info(f"API server started on {host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

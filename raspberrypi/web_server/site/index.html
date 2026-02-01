@@ -5,6 +5,7 @@
     <title>Robot Control Interface</title>
     <style>
       * { box-sizing: border-box; }
+      
       body { 
         background: #1a1a1a; 
         color: white; 
@@ -343,6 +344,24 @@
       ::-webkit-scrollbar-thumb:hover {
         background: #666;
       }
+
+      /* Manual Control Box */
+      .manual-control-box {
+        background: #222;
+        border-radius: 10px;
+        padding: 12px;
+        min-height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: text;
+        margin: 2px;
+      }
+
+      .manual-control-box:focus {
+        box-shadow: 0 0 0 2px #ffd700;
+        outline: none;
+      }
     </style>
   </head>
   <body>
@@ -361,7 +380,7 @@
           <div class="logs-header">
             <span class="panel-header" style="margin: 0; padding: 0; border: none;">Logs</span>
             <span>
-              <span class="toggle-btn message-type-toggle selected" id="logs-debug-toggle">DEBUG</span>
+              <span class="toggle-btn message-type-toggle" id="logs-debug-toggle">DEBUG</span>
               <span class="toggle-btn message-type-toggle selected" id="logs-info-toggle">INFO</span>
               <span class="toggle-btn message-type-toggle selected" id="logs-warn-toggle">WARN</span>
             </span>
@@ -502,6 +521,16 @@
               </div>
             </div>
 
+            <div class="control-group" id="manual-control-group" style="display: none;">
+              <div class="control-group-label">Manual Control (focus here)</div>
+              <div tabindex="0" id="manual-control-box" class="manual-control-box">
+                <div style="text-align: center; color: #ccc;">
+                  <div>Use <strong>W/A/S/D</strong> to move — <strong>← →</strong> to rotate</div>
+                  <div style="font-size: 0.9em; color: #888; margin-top: 6px;">Click to focus, press keys to control</div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -589,8 +618,11 @@
           return `<div style="font-family:monospace;margin-top:4px">${msg}</div>`;
         }).join('');
 
+        const scrollToBottom = logsElement.scrollTop + logsElement.clientHeight >= logsElement.scrollHeight - 20;
         logsElement.innerHTML = html || '[No logs]';
-        logsElement.scrollTop = logsElement.scrollHeight;
+        if (scrollToBottom) {
+          logsElement.scrollTop = logsElement.scrollHeight;
+        }
       }
 
       async function updateLogs() {
@@ -616,12 +648,94 @@
         manual: document.getElementById('mode-manual'),
       };
       let selectedMode = modeButtons.idle;
+      const manualControlGroup = document.getElementById('manual-control-group');
+      const manualControlBox = document.getElementById('manual-control-box');
+      const pressedKeys = new Set();
+
+      async function sendManualCommand(payload) {
+        try {
+          const body = Object.assign({}, payload);
+          if (body.move && typeof body.move.angle === 'number' && typeof body.move.speed === 'number') {
+            body.move.angle = ((body.move.angle % 360) + 360) % 360;
+            body.move.speed = Math.max(0, Math.min(1, body.move.speed));
+          } else {
+            body.move = null;
+          }
+          if (typeof body.rotate !== 'number') body.rotate = 0;
+          body.rotate = Math.max(-1, Math.min(1, body.rotate));
+          await fetch('/api/set_manual_control', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+          });
+        } catch (e) {
+          
+        }
+      }
       
       Object.values(modeButtons).forEach(btn => {
         btn.addEventListener('click', async () => {
           await fetch(`/api/set_mode?mode=${btn.id.split('-', 2)[1]}`, { method: 'POST' });
         });
       });
+
+      function computeCommandFromKeys(keys) {
+        let dy = 0, dx = 0;
+        if (keys.has('w')) dy += 1;
+        if (keys.has('s')) dy -= 1;
+        if (keys.has('d')) dx += 1;
+        if (keys.has('a')) dx -= 1;
+
+        const mag = Math.hypot(dx, dy);
+        if (mag === 0) {
+          const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
+          return { move: { angle: 0, speed: 0 }, rotate: Math.max(-1, Math.min(1, rotate)) };
+        }
+
+        const angleRad = Math.atan2(dx, dy);
+        let angleDeg = angleRad * (180 / Math.PI);
+        angleDeg = ((angleDeg % 360) + 360) % 360;
+
+        const move = { angle: Number(angleDeg.toFixed(1)), speed: 1 };
+
+        const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
+        return { move, rotate: Math.max(-1, Math.min(1, rotate)) };
+      }
+
+      function sendCurrentKeysCommand() {
+        const { move, rotate } = computeCommandFromKeys(pressedKeys);
+        if (!move && (!rotate || rotate === 0)) {
+          sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 });
+        } else {
+          sendManualCommand({ move, rotate });
+        }
+      }
+
+      function handleManualKeyDown(e) {
+        const k = e.key.toLowerCase();
+        const allowed = ["w","a","s","d","arrowleft","arrowright"];
+        if (!allowed.includes(k)) return;
+        if (!pressedKeys.has(k)) {
+          pressedKeys.add(k);
+          sendCurrentKeysCommand();
+        }
+        e.preventDefault();
+      }
+
+      function handleManualKeyUp(e) {
+        const k = e.key.toLowerCase();
+        const allowed = ["w","a","s","d","arrowleft","arrowright"];
+        if (!allowed.includes(k)) return;
+        if (pressedKeys.has(k)) pressedKeys.delete(k);
+        sendCurrentKeysCommand();
+        e.preventDefault();
+      }
+
+      if (manualControlBox) {
+        manualControlBox.addEventListener('keydown', handleManualKeyDown);
+        manualControlBox.addEventListener('keyup', handleManualKeyUp);
+        manualControlBox.addEventListener('blur', () => { pressedKeys.clear(); sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 }); });
+      }
 
       function changeModeTo(mode) {
         Object.values(modeButtons).forEach(btn => {
@@ -632,6 +746,15 @@
             btn.classList.remove("selected");
           }
         });
+        if (manualControlGroup) {
+          if (mode === 'manual') {
+            manualControlGroup.style.display = '';
+            setTimeout(() => manualControlBox && manualControlBox.focus(), 40);
+          } else {
+            manualControlGroup.style.display = 'none';
+            manualControlBox && manualControlBox.blur();
+          }
+        }
       }
       
       async function updateMode() {
