@@ -6,6 +6,7 @@ from flask import Flask, Response, request, jsonify
 from werkzeug.serving import make_server
 
 from helpers.helpers import RobotMode, RobotManualControl
+from config import API_VIDEO_JPEG_QUALITY, API_VIDEO_TARGET_FPS, API_HOST, API_PORT
 
 
 
@@ -28,31 +29,48 @@ logger = logging.getLogger("API Process")
 
 
 def gen_frames():
-    target_fps = 30
-    sleep_time = None
-    if target_fps and target_fps > 0:
-        sleep_time = 1.0 / float(target_fps)
+    sleep_time = 1.0 / API_VIDEO_TARGET_FPS if API_VIDEO_TARGET_FPS > 0 else 0
+    last_frame_data = None
+    frame_count = 0
+    
+    encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), API_VIDEO_JPEG_QUALITY]
 
     while True:
         if sleep_time:
             time.sleep(sleep_time)
         
-        if camera_frame_getter is None or camera_frame_getter() is None:
+        if camera_frame_getter is None:
             continue
         
-        ret, buffer = cv2.imencode('.jpg', camera_frame_getter())
+        frame = camera_frame_getter()
+        if frame is None:
+            if last_frame_data:
+                yield last_frame_data
+            continue
+        
+        ret, buffer = cv2.imencode('.jpg', frame, encode_params)
+        if not ret:
+            continue
+            
         frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        last_frame_data = (b'--frame\r\n'
+                          b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        yield last_frame_data
+        frame_count += 1
 
 
 @app.route('/api/video_feed')
 def video_feed():
-    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    response = Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/api/get_sensor_data')
 def sensor_data():
+    """Get sensor data with optimized JSON serialization."""
     if hardware_data_getter is None:
         return jsonify({"error": "Hardware data not available"}), 503
     
@@ -60,7 +78,7 @@ def sensor_data():
     if data is None:
         return jsonify({"error": "No data received yet"}), 503
     
-    return jsonify({
+    response = {
         "compass": {
             "heading": data.compass.heading,
             "pitch": data.compass.pitch,
@@ -76,7 +94,8 @@ def sensor_data():
         "motors": motor_speeds_getter() if motor_speeds_getter else [0, 0, 0, 0],
         "kicker": kicker_state_getter() if kicker_state_getter else False,
         "timestamp": data.timestamp
-    })
+    }
+    return jsonify(response)
 
 
 @app.route('/api/get_logs')
@@ -98,7 +117,7 @@ def get_logs():
 
 
 @app.route('/api/get_mode')
-def get_state():
+def get_mode():
     if robot_mode_getter is None:
         return jsonify({"error": "Internal server error"}), 503
     
@@ -142,7 +161,7 @@ def set_manual_control():
     return jsonify({"status": "ok"})
 
 
-def start(host: str = '0.0.0.0', port: int = 5000):
+def start(host: str = API_HOST, port: int = API_PORT):
     server = make_server(host=host, port=port, app=app, threaded=True)
     logger.info(f"API server started on {host}:{port}")
     try:

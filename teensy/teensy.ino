@@ -152,8 +152,7 @@ char message_data[DATA_STRING_LENGTH];
 void update_running_state() {
   if (use_bluetooht_module) {
     module_value = (digitalRead(MODULE_PIN) == HIGH);
-  }
-  else {
+  } else {
     module_value = (true);
   }
 }
@@ -551,11 +550,13 @@ void loop() {
   if (run) {
     set_all_motors_speed(motors_data.motor_speed);
     set_kicker_position(motors_data.kicker_position);
-    debug_println("        MOVE!");
+    debug_print("        MOVE!");
   }
   else {
     stop_motors();
-    debug_println("        STOP!");
+    debug_print("        STOP!");
   }
+  debug_println("");
+  
   delay(10);
 }

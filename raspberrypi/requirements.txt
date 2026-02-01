@@ -1,0 +1,17 @@
+# Camera support
+picamera2>=0.3.0
+
+# Computer vision
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Web server
+Flask>=2.3.0
+Werkzeug>=2.3.0
+
+# Serial communication
+pyserial>=3.5
+
+# Optional: for better performance profiling
+# psutil>=5.9.0
+# memory_profiler>=0.60.0

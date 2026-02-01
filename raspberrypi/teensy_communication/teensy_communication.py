@@ -1,19 +1,27 @@
 import argparse
-from dataclasses import dataclass
 import json
 import logging
 import re
+import serial
 import sys
 import time
-import serial
+from dataclasses import dataclass
 from serial.tools import list_ports
 
 
 LOG = logging.getLogger("teensy_communication")
 
-TEENSY_BAUD = 38400
+DEFAULT_TEENSY_PORT = "/dev/ttyAMA0"
+DEFAULT_TEENSY_BAUD = 38400
+DEFAULT_TEENSY_TIMEOUT = 1
+
 EXPECTED_FIELDS = 30
-MOTOR_COUNT = 4
+try:
+    from config import MOTOR_COUNT
+except ImportError:
+    MOTOR_COUNT = 4
+
+LINE_PATTERN = re.compile(r'^\{\s*"a"\s*=\s*"(?P<data>.*)"\s*\}\s*$')
 
 
 @dataclass
@@ -40,7 +48,7 @@ class ParsedTeensyData:
 
 def parse_teensy_line(line: str) -> ParsedTeensyData:
     line = line.strip()
-    m = re.match(r'^\{\s*"a"\s*=\s*"(?P<data>.*)"\s*\}\s*$', line)
+    m = LINE_PATTERN.match(line)
     if not m:
         raise ValueError("Line does not match wrapper {\"a\"=\"...\"}")
 
@@ -50,23 +58,25 @@ def parse_teensy_line(line: str) -> ParsedTeensyData:
         raise ValueError(f"Wrong number of fields: expected {EXPECTED_FIELDS}, got {len(parts)}")
 
     try:
+        int_parts = [int(p) for p in parts]
+        
         parsed = ParsedTeensyData(
             CompassData(
-                int(parts[0]),
-                int(parts[1]),
-                int(parts[2]),
+                int_parts[0],
+                int_parts[1],
+                int_parts[2],
             ),
             IRData(
-                int(parts[3]),
-                int(parts[4]),
-                [int(x) for x in parts[5:17]],
-                int(parts[17]),
+                int_parts[3],
+                int_parts[4],
+                int_parts[5:17],
+                int_parts[17],
             ),
-            [int(x) for x in parts[18:]],
+            int_parts[18:],
             line,
             time.time(),
         )
-    except Exception as e:
+    except (ValueError, IndexError) as e:
         raise ValueError(f"Failed to parse numeric fields: {e}")
 
     return parsed
@@ -76,7 +86,7 @@ def list_serial_ports() -> list[str]:
     return [p.device for p in list_ports.comports()]
 
 
-def open_serial(port: str, baud: int = TEENSY_BAUD, timeout: float = 1.0) -> serial.Serial:
+def open_serial(port: str, baud: int = DEFAULT_TEENSY_BAUD, timeout: float = DEFAULT_TEENSY_TIMEOUT) -> serial.Serial:
     try:
         return serial.Serial(port, baudrate=baud, timeout=timeout)
     except serial.SerialException as e:
@@ -91,25 +101,21 @@ def format_message(motor_speeds: list[int], kicker_state: bool) -> str:
     if len(motor_speeds) != MOTOR_COUNT:
         raise ValueError(f"Expected {MOTOR_COUNT} motor speeds, got {len(motor_speeds)}")
     
-    clamped_values: list[int] = []
+    formatted_values = []
     for i, speed in enumerate(motor_speeds):
         if not isinstance(speed, (int, float)):
             raise ValueError(f"Motor {i} speed must be numeric, got {type(speed)}")
         clamped = max(-9999, min(9999, int(speed)))
-        clamped_values.append(clamped)
+        sign = '+' if clamped >= 0 else '-'
+        formatted_values.append(f"{sign}{abs(clamped):04d}")
     
-    formatted_values: list[str] = []
-    for speed in clamped_values:
-        sign = '+' if speed >= 0 else '-'
-        formatted_values.append(f"{sign}{abs(speed):04d}")
     formatted_values.append('1' if kicker_state else '0')
-    
     data = ",".join(formatted_values)
-    return '{"a"="' + data + '"}'
+    return f'{{"a"="{data}"}}'
 
 
 class TeensyCommunicator:
-    def __init__(self, port: str = "/dev/serial0", baud: int = TEENSY_BAUD, timeout: float = 1.0, auto_connect: bool = True) -> None:
+    def __init__(self, port: str = DEFAULT_TEENSY_PORT, baud: int = DEFAULT_TEENSY_BAUD, timeout: float = DEFAULT_TEENSY_TIMEOUT, auto_connect: bool = True) -> None:
         self.port = port
         self.baud = baud
         self.timeout = timeout
@@ -142,25 +148,31 @@ class TeensyCommunicator:
     def read_line(self) -> str:
         if self.ser is None:
             raise RuntimeError("Serial port not open. Call connect() first.")
-        raw = None
         
         if self.buffer is None:
             self.buffer = bytearray()
 
-        if b'\n' in self.buffer:
-            raw = self.buffer.split(b'\n', 1)[0] + b'\n'
-            self.buffer = self.buffer[len(raw):]
+        newline_idx = self.buffer.find(b'\n')
+        if newline_idx >= 0:
+            raw = bytes(self.buffer[:newline_idx + 1])
+            self.buffer = self.buffer[newline_idx + 1:]
+            try:
+                return raw.decode("utf-8", errors="replace").strip()
+            except Exception:
+                return ""
         
         read_bytes = self.ser.read_all()
         if read_bytes:
             self.buffer.extend(read_bytes)
-
-        if not raw:
-            return ""
-        try:
-            return raw.decode("utf-8", errors="replace").strip()
-        except Exception:
-            return raw.decode(errors="replace").strip()
+            newline_idx = self.buffer.find(b'\n')
+            if newline_idx >= 0:
+                raw = bytes(self.buffer[:newline_idx + 1])
+                self.buffer = self.buffer[newline_idx + 1:]
+                try:
+                    return raw.decode("utf-8", errors="replace").strip()
+                except Exception:
+                    return ""
+        return ""
     
     def read_data(self, timeout: float | None = None) -> ParsedTeensyData | None:
         if self.ser is None:
@@ -170,7 +182,6 @@ class TeensyCommunicator:
         if timeout is not None:
             original_timeout = self.ser.timeout
             self.ser.timeout = timeout
-        
         
         try:
             line = self.read_line()
@@ -189,10 +200,8 @@ class TeensyCommunicator:
     def send_message(self, message: str) -> None:
         if self.ser is None:
             raise RuntimeError("Serial port not open. Call connect() first.")
-        
         if not message.endswith('\n'):
             message = message + '\n'
-        
         self.ser.write(message.encode('utf-8'))
     
     def set_motors(self, motor_speeds: list, kicker_state: bool) -> None:
@@ -235,7 +244,7 @@ def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) ->
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Teensy serial receiver and parser")
-    ap.add_argument("--port", "-p", default="/dev/serial0", help="Serial port (default /dev/serial0 - Pi UART TX/RX pins)")
+    ap.add_argument("--port", "-p", default=DEFAULT_TEENSY_PORT, help=f"Serial port (default {DEFAULT_TEENSY_PORT} - Pi UART TX/RX pins)")
     ap.add_argument("--out", "-o", help="Output file (jsonl)")
     ap.add_argument("--raw", action="store_true", help="Print raw incoming lines before parsing (debug)")
     ap.add_argument("--log", default="info", help="Logging level")
@@ -248,7 +257,6 @@ def main() -> int:
     except Exception as e:
         LOG.exception("Fatal error: %s", e)
         return 2
-
     return 0
 
 

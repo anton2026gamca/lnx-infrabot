@@ -1,37 +1,44 @@
 import logging
 import multiprocessing
+import multiprocessing.shared_memory
+import numpy as np
 import time
 
 import camera.camera as camera
 import teensy_communication.teensy_communication as teensy_communication
 import web_server.api.api as api
 from helpers.helpers import RobotMode, Suppress200Filter, setup_logger, BufferedLogHandler, RobotManualControl, calculate_motors_speeds
+from config import (
+    LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
+    CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
+    TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT
+)
 
-
-
-LOGGING_LEVEL = logging.DEBUG
 
 
 manager = multiprocessing.Manager()
+
 shared_data: dict = {
-    'last_frame': manager.dict(),
+    'frame_buffer': None,
+    'frame_timestamp': multiprocessing.Value('d', 0.0),
+    'frame_ready': multiprocessing.Value('b', False),
     'hardware_data': manager.dict(),
-    'motor_speeds': manager.list([0, 0, 0, 0]),
-    'kicker_state': manager.Value('b', False),
-    'robot_mode': manager.Value('c', RobotMode.IDLE.encode()),
+    'motor_speeds': multiprocessing.Array('i', [0, 0, 0, 0]),
+    'kicker_state': multiprocessing.Value('b', False),
+    'robot_mode': multiprocessing.Array('b', 20),
     'logs_buffer': manager.dict(),
-    'next_log_id': manager.Value('i', 1),
-    'manual_control': manager.dict(),
+    'next_log_id': multiprocessing.Value('i', 1),
+    'manual_control': multiprocessing.Array('d', [0.0, 0.0, 0.0]),
     'locks': {
-        'last_frame': manager.Lock(),
-        'hardware_data': manager.Lock(),
-        'motor_speeds': manager.Lock(),
-        'kicker_state': manager.Lock(),
-        'robot_mode': manager.Lock(),
-        'logs_buffer': manager.Lock(),
-        'manual_control': manager.Lock()
+        'frame': multiprocessing.Lock(),
+        'hardware_data': multiprocessing.Lock(),
+        'robot_mode': multiprocessing.Lock(),
+        'logs_buffer': multiprocessing.Lock(),
     }
 }
+
+
+LOGGING_LEVEL = getattr(logging, LOG_LEVEL)
 
 logger = setup_logger(
     level=LOGGING_LEVEL, logs_dict=shared_data['logs_buffer'], 
@@ -63,21 +70,58 @@ api_logger = setup_logger(
     next_log_id=shared_data['next_log_id']
 )
 
+try:
+    shared_data['frame_buffer'] = multiprocessing.shared_memory.SharedMemory(create=True, size=FRAME_SIZE_B)
+except Exception:
+    logger.error("Failed to create shared memory for frame buffer, falling back to dict storage")
+    shared_data['frame_buffer'] = manager.dict()
+
+idle_bytes = RobotMode.IDLE.encode()[:20]
+for i in range(len(idle_bytes)):
+    shared_data['robot_mode'][i] = idle_bytes[i]
+
+
+
 def set_last_frame(frame: camera.FrameData | None):
-    with shared_data['locks']['last_frame']:
-        shared_data['last_frame'].clear()
-        if frame:
-            shared_data['last_frame']['frame'] = frame.frame
-            shared_data['last_frame']['timestamp'] = frame.timestamp
+    if frame is None:
+        shared_data['frame_ready'].value = False
+        return
+    
+    if isinstance(shared_data['frame_buffer'], multiprocessing.shared_memory.SharedMemory):
+        frame_flat = frame.frame.flatten()
+        if len(frame_flat) <= FRAME_SIZE_B:
+            np_array = np.ndarray(frame_flat.shape, dtype=np.uint8, buffer=shared_data['frame_buffer'].buf)
+            np_array[:] = frame_flat[:]
+            shared_data['frame_timestamp'].value = frame.timestamp
+            shared_data['frame_ready'].value = True
+    else:
+        with shared_data['locks']['frame']:
+            shared_data['frame_buffer']['frame'] = frame.frame
+            shared_data['frame_buffer']['timestamp'] = frame.timestamp
+            shared_data['frame_ready'].value = True
 
 def get_last_frame() -> camera.FrameData | None:
-    with shared_data['locks']['last_frame']:
-        if not shared_data['last_frame']:
+    if not shared_data['frame_ready'].value:
+        return None
+    
+    if isinstance(shared_data['frame_buffer'], multiprocessing.shared_memory.SharedMemory):
+        try:
+            np_array = np.ndarray((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8, buffer=shared_data['frame_buffer'].buf)
+            frame_copy = np.copy(np_array)
+            return camera.FrameData(
+                frame=frame_copy,
+                timestamp=shared_data['frame_timestamp'].value
+            )
+        except Exception:
             return None
-        return camera.FrameData(
-            frame=shared_data['last_frame']['frame'],
-            timestamp=shared_data['last_frame']['timestamp']
-        )
+    else:
+        with shared_data['locks']['frame']:
+            if not shared_data['frame_buffer']:
+                return None
+            return camera.FrameData(
+                frame=shared_data['frame_buffer']['frame'],
+                timestamp=shared_data['frame_buffer']['timestamp']
+            )
 
 def set_hardware_data(data: teensy_communication.ParsedTeensyData | None):
     with shared_data['locks']['hardware_data']:
@@ -96,28 +140,41 @@ def get_hardware_data() -> teensy_communication.ParsedTeensyData | None:
         return data
 
 def set_motor_speeds(speeds: list[int]):
-    with shared_data['locks']['motor_speeds']:
-        shared_data['motor_speeds'][:] = speeds
+    for i in range(min(4, len(speeds))):
+        shared_data['motor_speeds'][i] = speeds[i]
 
 def get_motor_speeds() -> list[int]:
-    with shared_data['locks']['motor_speeds']:
-        return list(shared_data['motor_speeds'])
+    return list(shared_data['motor_speeds'])
 
 def set_kicker_state(state: bool):
-    with shared_data['locks']['kicker_state']:
-        shared_data['kicker_state'].value = state
+    shared_data['kicker_state'].value = state
 
 def get_kicker_state() -> bool:
-    with shared_data['locks']['kicker_state']:
-        return shared_data['kicker_state'].value
+    return shared_data['kicker_state'].value
 
 def set_robot_mode(mode: str):
     with shared_data['locks']['robot_mode']:
-        shared_data['robot_mode'].value = mode.encode()
+        encoded = mode.encode()[:20]
+        for i in range(len(encoded)):
+            shared_data['robot_mode'][i] = encoded[i]
+        if len(encoded) < 20:
+            shared_data['robot_mode'][len(encoded)] = 0
 
 def get_robot_mode() -> str:
     with shared_data['locks']['robot_mode']:
-        return shared_data['robot_mode'].value.decode()
+        parts_int = []
+        parts_bytes = []
+        for c in shared_data['robot_mode']:
+            if c == 0 or c == b'\x00':
+                break
+            if isinstance(c, int):
+                parts_int.append(c)
+            else:
+                parts_bytes.append(c)
+        if parts_bytes and not parts_int:
+            return b''.join(parts_bytes).decode()
+        else:
+            return bytes(parts_int).decode()
 
 def get_logs(since_id: int = 0) -> tuple[list[dict], int]:
     with shared_data['locks']['logs_buffer']:
@@ -130,40 +187,51 @@ def get_logs(since_id: int = 0) -> tuple[list[dict], int]:
     return items, last_id
 
 def get_manual_control() -> RobotManualControl:
-    with shared_data['locks']['manual_control']:
-        return RobotManualControl(
-            move_angle=shared_data['manual_control'].get('move_angle', 0.0),
-            move_speed=shared_data['manual_control'].get('move_speed', 0.0),
-            rotate=shared_data['manual_control'].get('rotate', 0.0)
-        )
+    return RobotManualControl(
+        move_angle=shared_data['manual_control'][0],
+        move_speed=shared_data['manual_control'][1],
+        rotate=shared_data['manual_control'][2]
+    )
 
 def set_manual_control(control: RobotManualControl) -> None:
-    with shared_data['locks']['manual_control']:
-        shared_data['manual_control'].clear()
-        shared_data['manual_control']['move_angle'] = control.move_angle
-        shared_data['manual_control']['move_speed'] = control.move_speed
-        shared_data['manual_control']['rotate'] = control.rotate
+    shared_data['manual_control'][0] = control.move_angle
+    shared_data['manual_control'][1] = control.move_speed
+    shared_data['manual_control'][2] = control.rotate
 
 def camera_process(stop_event):
     try:
-        logging.getLogger("picamera2.picamera2").setLevel(logging.INFO)
+        if LOGGING_LEVEL == logging.DEBUG:
+            logging.getLogger("picamera2.picamera2").setLevel(logging.INFO)
 
         frames = 0
+        frames_processed = 0
         time_start = time.time()
+        last_frame_time = 0
 
         camera_logger.info("Initializing camera...")
         camera.init_camera()
         camera_logger.info("Camera initialized successfully")
         
         while not stop_event.is_set():
+            current_time = time.time()
+            
+            time_elapsed = current_time - last_frame_time
+            if time_elapsed < CAMERA_MIN_FRAME_INTERVAL:
+                time.sleep(CAMERA_MIN_FRAME_INTERVAL - time_elapsed - 0.001)
+                continue
+            
             frame = camera.get_frame()
             frames += 1
-            set_last_frame(frame)
             
-            if time.time() > time_start + 1:
-                camera_logger.debug(f"Camera FPS: {frames}")
+            set_last_frame(frame)
+            frames_processed += 1
+            last_frame_time = current_time
+            
+            if current_time > time_start + 1:
+                camera_logger.debug(f"Camera FPS: {frames} (processed: {frames_processed})")
                 frames = 0
-                time_start = time.time()
+                frames_processed = 0
+                time_start = current_time
     except KeyboardInterrupt:
         pass
     except Exception as e:
@@ -171,22 +239,31 @@ def camera_process(stop_event):
 
 def logic_process(stop_event):
     try:
+        last_log_time = 0
+        
         while not stop_event.is_set():
             start_time = time.time()
 
             mode = get_robot_mode()
             if mode == RobotMode.IDLE:
-                pass
+                time.sleep(IDLE_SLEEP_DURATION)
+                continue
             elif mode == RobotMode.MANUAL:
                 control = get_manual_control()
                 motors = calculate_motors_speeds(control.move_angle, control.move_speed * 255, control.rotate)
-                logic_logger.info(f"Manual control: move_angle={control.move_angle:.2f}, move_speed={control.move_speed:.2f}, rotate={control.rotate:.2f} => motors={motors}")
+                
+                if start_time - last_log_time > 0.5:
+                    logic_logger.info(f"Manual control: move_angle={control.move_angle:.2f}, move_speed={control.move_speed:.2f}, rotate={control.rotate:.2f} => motors={motors}")
+                    last_log_time = start_time
+                
                 set_motor_speeds(motors)
             elif mode == RobotMode.AUTONOMOUS:
                 pass
 
-            sleep_duration = max(0.0, (0.015) - (time.time() - start_time))
-            time.sleep(sleep_duration)
+            elapsed = time.time() - start_time
+            sleep_duration = max(0.0, LOGIC_LOOP_PERIOD - elapsed - 0.001)
+            if sleep_duration > 0:
+                time.sleep(sleep_duration)
     except KeyboardInterrupt:
         pass
     except Exception as e:
@@ -197,7 +274,7 @@ def hardware_communication_process(stop_event):
         messages = 0
         time_start = time.time()
 
-        with teensy_communication.TeensyCommunicator(port="/dev/ttyAMA0") as communicator:
+        with teensy_communication.TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
             while not stop_event.is_set():
                 communicator.set_motors(get_motor_speeds(), get_kicker_state())
                 data = communicator.read_data(timeout=0.1)
@@ -241,10 +318,10 @@ def main():
     api.logs_getter = get_logs
     
     
-    for logger_name in ('werkzeug', 'werkzeug.serving'):
-        wl = logging.getLogger(logger_name)
-        wl.setLevel(logging.INFO)
-        wl.addFilter(Suppress200Filter())
+    for logger_name in ('werkzeug',):
+        l = logging.getLogger(logger_name)
+        l.setLevel(logging.INFO)
+        l.addFilter(Suppress200Filter())
         
         buffer_handler = BufferedLogHandler(
             shared_data['logs_buffer'],
@@ -252,7 +329,7 @@ def main():
             shared_data['next_log_id']
         )
         buffer_handler.setLevel(logging.INFO)
-        wl.addHandler(buffer_handler)
+        l.addHandler(buffer_handler)
     
     stop_event = multiprocessing.Event()
 
@@ -283,6 +360,13 @@ def main():
             logger.warning(f"Process {p.name} did not terminate, forcing...")
             p.terminate()
             p.join()
+    
+    if isinstance(shared_data['frame_buffer'], multiprocessing.shared_memory.SharedMemory):
+        try:
+            shared_data['frame_buffer'].close()
+            shared_data['frame_buffer'].unlink()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

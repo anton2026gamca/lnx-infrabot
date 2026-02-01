@@ -1,19 +1,13 @@
 import logging
 import math
 import sys
+from dataclasses import dataclass
+
+from config import MOTOR_LOCATIONS, LOG_BUFFER_MAX_ENTRIES
 
 
 
-def calculate_motors_speeds(move_angle: float, move_speed: float, rotate: float) -> list[int]:
-    MOTOR_LOCATIONS = [45, 135, 225, 315]
-    rad = math.radians(move_angle)
-    speeds = []
-    for motor_angle in MOTOR_LOCATIONS:
-        motor_rad = math.radians(motor_angle)
-        motor_speed = move_speed * math.cos(rad - motor_rad) + rotate
-        speeds.append(int(motor_speed))
-    return speeds
-
+# ==================== LOGGING HELPERS ====================
 
 class LogFormatter(logging.Formatter):
     RESET = "\033[0m"
@@ -40,13 +34,6 @@ class LogFormatter(logging.Formatter):
         record.levelname = levelname
         return msg
 
-
-class RobotMode:
-    IDLE = "idle"
-    MANUAL = "manual"
-    AUTONOMOUS = "autonomous"
-
-
 class Suppress200Filter(logging.Filter):
     def filter(self, record):
         try:
@@ -65,8 +52,8 @@ class BufferedLogHandler(logging.Handler):
         self.logs_dict = logs_dict
         self.logs_lock = logs_lock
         self.next_log_id = next_log_id
-        self.oldest_log_id = 0
         self.max_entries = max_entries
+        self._cleanup_threshold = int(max_entries * 1.2)
         if formatter:
             self.setFormatter(formatter)
         elif LogFormatter is not None:
@@ -86,13 +73,14 @@ class BufferedLogHandler(logging.Handler):
                 self.logs_dict[lid] = entry
                 self.next_log_id.value += 1
 
-                try:
-                    if self.max_entries is not None:
-                        while len(self.logs_dict) > self.max_entries:
-                            del self.logs_dict[self.oldest_log_id]
-                            self.oldest_log_id += 1
-                except Exception:
-                    pass
+                if len(self.logs_dict) > self._cleanup_threshold:
+                    sorted_keys = sorted(self.logs_dict.keys())
+                    to_remove = len(self.logs_dict) - self.max_entries
+                    for key in sorted_keys[:to_remove]:
+                        try:
+                            del self.logs_dict[key]
+                        except KeyError:
+                            pass
         except Exception:
             self.handleError(record)
 
@@ -112,15 +100,31 @@ def setup_logger(name: str | None = None, level=logging.DEBUG, logs_dict=None, l
     logger.addHandler(handler)
     
     if logs_dict is not None and logs_lock is not None and next_log_id is not None:
-        buffer_handler = BufferedLogHandler(logs_dict, logs_lock, next_log_id)
+        buffer_handler = BufferedLogHandler(logs_dict, logs_lock, next_log_id, max_entries=LOG_BUFFER_MAX_ENTRIES)
         buffer_handler.setLevel(level)
         logger.addHandler(buffer_handler)
     
     return logger
 
 
+# ==================== ROBOT CONTROL HELPERS ====================
+
+class RobotMode:
+    IDLE = "idle"
+    MANUAL = "manual"
+    AUTONOMOUS = "autonomous"
+
+@dataclass
 class RobotManualControl:
-    def __init__(self, move_angle: float = 0.0, move_speed: float = 0.0, rotate: float = 0.0):
-        self.move_angle = move_angle
-        self.move_speed = move_speed
-        self.rotate = rotate
+    move_angle: float = 0.0
+    move_speed: float = 0.0
+    rotate: float = 0.0
+
+def calculate_motors_speeds(move_angle: float, move_speed: float, rotate: float) -> list[int]:
+    rad = math.radians(move_angle)
+    speeds = []
+    for motor_angle in MOTOR_LOCATIONS:
+        motor_rad = math.radians(motor_angle)
+        motor_speed = move_speed * math.cos(rad - motor_rad) + rotate
+        speeds.append(int(motor_speed))
+    return speeds
