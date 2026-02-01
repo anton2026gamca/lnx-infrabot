@@ -11,7 +11,7 @@
 // =                Definitions                   =
 // ================================================
 
-// START/STOP
+// ========== Control Switches ==========
 #define SWITCH_PIN 31
 #define SWITCH_LED_PIN 28
 #define MODULE_SWITCH_PIN 32
@@ -19,128 +19,160 @@
 #define MODULE_PIN 33
 #define MODULE_LED_PIN 30
 
-volatile bool use_bluetooht_module = true;
-volatile bool switch_value = false; // starting whith false value
-volatile bool module_value = true;  // if off, on first moment gets 0
-volatile bool run = false;
+// Control state variables
+volatile bool use_bluetooth_module = true;
+volatile bool switch_value = false;  // Manual switch state
+volatile bool module_value = true;   // Bluetooth module state
+volatile bool run = false;           // Overall run state
 
-// Serials
+// ========== Serial Communication ==========
 #define RASPBERRY_SERIAL Serial8
 #define RASPBERRY_SERIAL_SPEED 38400
 
-#define DEBUG false
+#define DEBUG_ENABLED false
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
-void debug_println(const char *msg) {
-#if DEBUG
-  DEBUG_SERIAL.println(msg);
-#endif
-}
+// Debug levels
+enum DebugLevel {
+  DEBUG_INFO,
+  DEBUG_WARN,
+  DEBUG_ERROR
+};
 
-void debug_println(const float msg) {
-#if DEBUG
-  DEBUG_SERIAL.println(msg);
-#endif
-}
-
-void debug_print(const char *msg) {
-#if DEBUG
+// Enhanced debug system with levels and formatting
+template<typename T>
+inline void debug_print(const T& msg) {
+#if DEBUG_ENABLED
   DEBUG_SERIAL.print(msg);
 #endif
 }
 
-void debug_print(const float msg) {
-#if DEBUG
-  DEBUG_SERIAL.print(msg);
+template<typename T>
+inline void debug_println(const T& msg) {
+#if DEBUG_ENABLED
+  DEBUG_SERIAL.println(msg);
+#endif
+}
+
+inline void debug_println() {
+#if DEBUG_ENABLED
+  DEBUG_SERIAL.println();
+#endif
+}
+
+// Debug with level prefix
+template<typename T>
+void debug_log(DebugLevel level, const T& msg) {
+#if DEBUG_ENABLED
+  switch(level) {
+    case DEBUG_INFO:  DEBUG_SERIAL.print("[INFO]  "); break;
+    case DEBUG_WARN:  DEBUG_SERIAL.print("[WARN]  "); break;
+    case DEBUG_ERROR: DEBUG_SERIAL.print("[ERROR] "); break;
+  }
+  DEBUG_SERIAL.println(msg);
 #endif
 }
 
 
-// Motors
+// ========== Motors Configuration ==========
 #define MOTOR_COUNT 4
+#define PWM_INDEX 0
+#define DIR_INDEX 1
+#define MOTOR_STOPPED 0
+#define KICKER_OUT 1
+#define KICKER_IN 0
+
+// Motor pin configuration: [PWM_PIN, DIR_PIN]
 const int motor_pin[MOTOR_COUNT][2] = {
-    {6, 5},   // M1PWM, M1DIR
-    {8, 7},   // M2PWM, M2DIR
-    {10, 9},  // M3PWM, M3DIR
-    {12, 11}  // M4PWM, M4DIR
+    {6, 5},   // M1: PWM=6, DIR=5
+    {8, 7},   // M2: PWM=8, DIR=7
+    {10, 9},  // M3: PWM=10, DIR=9
+    {12, 11}  // M4: PWM=12, DIR=11
 };
-const int kicker_pin = 4;  // ON/OFF
+const int kicker_pin = 4;
 
-int16_t motor_speed[MOTOR_COUNT] = {0, 0, 0, 0};
-int8_t kicker_position = 0; // 1 = out (kick) 0 = in
-
-struct motors {
+// Motor state structure
+struct MotorsData {
   int16_t motor_speed[MOTOR_COUNT];
-  int8_t kicker_position;
+  int8_t kicker_position;  // 0=in, 1=out
 };
 
-motors motors_data;
+MotorsData motors_data = {{0, 0, 0, 0}, KICKER_IN};
 
 
-// BNO05
-Adafruit_BNO055 bno = Adafruit_BNO055(55);
+// ========== BNO055 Compass Sensor ==========
+#define BNO055_ID 55
+Adafruit_BNO055 bno = Adafruit_BNO055(BNO055_ID);
 bool bno_initialized = false;
 
 struct CompassData {
-  float heading;
-  float pitch;
-  float roll;
+  float heading;  // 0-360 degrees
+  float pitch;    // -180 to +180 degrees
+  float roll;     // -180 to +180 degrees
 };
-CompassData compass_data;
+CompassData compass_data = {0.0, 0.0, 0.0};
 
 
-// MRM-IR_data-Finder3
+// ========== MRM-IR-Finder3 Sensor ==========
 #define IR_I2C_ADDRESS 0x10
 #define IR_ANGLE_AND_DISTANCE_REGISTER 0x00
 #define IR_ANGLE_AND_DISTANCE_BYTES_COUNT 4
 #define IR_RAW_REGISTER 0x01
 #define IR_RAW_BYTES_COUNT 12
 #define IR_SENSOR_COUNT 12
-#define IR_NO_SIGNAL 999
+#define IR_NO_SIGNAL 999  // Special value indicating no ball detected
+#define IR_NO_SIGNAL_ANGLE 180
+#define IR_NO_SIGNAL_DISTANCE 0
 
 struct IRData {
-  uint16_t angle;                     // DIR
-  uint16_t distance;                  // CM
-  uint8_t sensor_IR[IR_SENSOR_COUNT]; // RAW values from sensors
-  uint8_t status;                     // 13th byte: status/flag
+  uint16_t angle;                     // Ball direction (0-359 degrees, or 999 if no signal)
+  uint16_t distance;                  // Ball distance in cm
+  uint8_t sensor_IR[IR_SENSOR_COUNT]; // Raw values from 12 IR sensors
+  uint8_t status;                     // Status byte from sensor
 };
-IRData IR_data;
+IRData ir_data = {IR_NO_SIGNAL, 0, {0}, 0};
 
 
-// Line sensor
+// ========== Line Sensors ==========
 #define LINE_SENSOR_COUNT 12
 
-// pin mapping on teensy does not allow more place-eficient
-const int line_pin[LINE_SENSOR_COUNT] = { 23, 22, 21, 20, 17, 16, 15, 14, 41, 40, 39, 38 };
-
-
+// Teensy analog pin mapping for line sensors
+// Note: Non-sequential due to Teensy hardware constraints
+const int line_pin[LINE_SENSOR_COUNT] = {
+  23, 22, 21, 20,  // Sensors 0-3
+  17, 16, 15, 14,  // Sensors 4-7
+  41, 40, 39, 38   // Sensors 8-11
+};
 
 struct LineData {
-  int16_t sensor_line[LINE_SENSOR_COUNT];
+  int16_t sensor_line[LINE_SENSOR_COUNT];  // Analog values (0-1023)
 };
-LineData line_data;
+LineData line_data = {{0}};
 
 
-// Data collection
-#define BNO_DATA_STRING_LENGTH ((4 + 1) * 3)                                                        // -xxx,+yyy,+zzz,
-#define IR_SENSOR_DATA_STRING_LENGTH ((3 + 1) + (4 + 1) + (3 + 1) * IR_SENSOR_COUNT + (1 + 1) - 1) // aaa,dddd,12*[vvv,]s,
-#define LINE_SENSOR_DATA_STRING_LENGTH ((4 + 1) * LINE_SENSOR_COUNT)                                      // 12*[cccc,]
+// ========== Data Collection & Message Format ==========
+// Message format: {"a"="HHH,±PPP,±RRR,AAA,DDDD,V1,V2,...V12,S,L1,L2,...L12"}
+// HHH = Heading (3 digits), PPP = Pitch (signed, 3 digits), RRR = Roll (signed, 3 digits)
+// AAA = IR Angle (3 digits), DDDD = IR Distance (4 digits)
+// V1-V12 = IR sensor raw values (3 digits each)
+// S = IR status (1 digit), L1-L12 = Line sensor values (4 digits each)
+
+#define BNO_DATA_STRING_LENGTH ((4 + 1) * 3)  // HHH,±PPP,±RRR,
+#define IR_SENSOR_DATA_STRING_LENGTH ((3 + 1) + (4 + 1) + (3 + 1) * IR_SENSOR_COUNT + (1 + 1) - 1)
+#define LINE_SENSOR_DATA_STRING_LENGTH ((4 + 1) * LINE_SENSOR_COUNT)
 #define ALL_DATA_LENGTH (BNO_DATA_STRING_LENGTH + IR_SENSOR_DATA_STRING_LENGTH + LINE_SENSOR_DATA_STRING_LENGTH - 1)
-// -xxx,+yyy,+zzz,aaa,dddd,12*[vvv,]s,12*[cccc,] - ','
-#define DATA_STRING_LENGTH (1 + 5 + ALL_DATA_LENGTH + 1 + 1 + 1) // {"a"="..."}\0
-// "a"="+xxx,+yyy,+zzz,aaa,dddd,12*[vvv,]s,12*[cccc,] - ','"\0
+#define DATA_STRING_LENGTH (1 + 5 + ALL_DATA_LENGTH + 1 + 1 + 1)  // {"a"="..."}\0
 
-struct AllData {
-  motors motors_data;
+struct SensorData {
+  MotorsData motors_data;
   CompassData compass_data;
-  IRData IR_data;
+  IRData ir_data;
   LineData line_data;
 };
 
-AllData all_data;
-
-char message_data[DATA_STRING_LENGTH];
+SensorData sensor_data;
+char tx_message_buffer[DATA_STRING_LENGTH];
 
 
 
@@ -148,67 +180,61 @@ char message_data[DATA_STRING_LENGTH];
 // =                 Functions                    =
 // ================================================
 
-// START/STOP
+// ========== Control State Management ==========
 void update_running_state() {
-  if (use_bluetooht_module) {
-    module_value = (digitalRead(MODULE_PIN) == HIGH);
-  } else {
-    module_value = (true);
-  }
+  // If using Bluetooth module, read its state; otherwise, always enabled
+  module_value = use_bluetooth_module ? (digitalRead(MODULE_PIN) == HIGH) : true;
 }
 
-// Debug
-void print_debug_data(int clear) {
+// ========== Debug Functions ==========
+void print_sensor_debug_info() {
+  // Motor status
   debug_print("Motors: ");
   for (int i = 0; i < MOTOR_COUNT; i++) {
+    debug_print("M");
     debug_print(i);
-    debug_print(":");
-    debug_print(all_data.motors_data.motor_speed[i]);
-    debug_print("   ");
+    debug_print("=");
+    debug_print(sensor_data.motors_data.motor_speed[i]);
+    debug_print(" ");
   }
-  debug_print("Kicker:");
-  debug_println(all_data.motors_data.kicker_position);
+  debug_print(" | Kicker=");
+  debug_println(sensor_data.motors_data.kicker_position);
   
-  debug_print("Heading: ");
-  debug_print(all_data.compass_data.heading);
-  debug_print("\t\tPitch: ");
-  debug_print(all_data.compass_data.pitch);
-  debug_print("\tRoll: ");
-  debug_println(all_data.compass_data.roll);
+  // Compass orientation
+  debug_print("Compass: H=");
+  debug_print(sensor_data.compass_data.heading);
+  debug_print(" P=");
+  debug_print(sensor_data.compass_data.pitch);
+  debug_print(" R=");
+  debug_println(sensor_data.compass_data.roll);
   
-  debug_print("IR_data_DIR: ");
-  debug_print(all_data.IR_data.angle);
-  debug_print("   IR_data_Dist: ");
-  debug_print(all_data.IR_data.distance);
-  debug_print("   ");
+  // IR sensor ball detection
+  debug_print("IR Ball: Angle=");
+  debug_print(sensor_data.ir_data.angle);
+  debug_print(" Dist=");
+  debug_print(sensor_data.ir_data.distance);
+  debug_print("cm | Sensors: ");
   for (int i = 0; i < IR_SENSOR_COUNT; i++) {
-    debug_print(i);
-    debug_print(":");
-    debug_print(all_data.IR_data.sensor_IR[i]);
-    debug_print("   ");
+    debug_print(sensor_data.ir_data.sensor_IR[i]);
+    debug_print(" ");
   }
-  debug_print("Status:  ");
-  debug_println(all_data.IR_data.status);
+  debug_print("| Status=");
+  debug_println(sensor_data.ir_data.status);
   
-  debug_print("Line:  ");
+  // Line sensors
+  debug_print("Line: ");
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
-    debug_print(i);
-    debug_print(":");
-    debug_print(all_data.line_data.sensor_line[i]);
-    debug_print("   ");
+    debug_print(sensor_data.line_data.sensor_line[i]);
+    debug_print(" ");
   }
-  debug_println("");
-  debug_println("-------------------------------------------------------------------------");
+  debug_println();
+  debug_println("========================================");
 }
 
-// Helpers
+// ========== String Formatting Helpers ==========
 void format_number_with_sign(float input_number, char final_string[], int width) {
   int number = round(input_number);
-  if (number < 0) {
-    final_string[0] = '-';
-  } else {
-    final_string[0] = '+';
-  }
+  final_string[0] = (number < 0) ? '-' : '+';
   int value = abs(number);
 
   for (int i = width; i > 0; i--) {
@@ -231,9 +257,9 @@ void format_number(float input_number, char final_string[], int width) {
   final_string[width + 1] = '\0';
 }
 
-int append_number_to_string(float number, char *target_string, int position, int number_string_length, int sign) {
+inline int append_number_to_string(float number, char *target_string, int position, int number_string_length, bool with_sign) {
   char num_str[number_string_length + 3];
-  if (sign == 1) {
+  if (with_sign) {
     format_number_with_sign(number, num_str, number_string_length);
   } else {
     format_number(number, num_str, number_string_length);
@@ -243,21 +269,18 @@ int append_number_to_string(float number, char *target_string, int position, int
   return position + len;
 }
 
-int append_char_to_string(char c, char *target_string, int position) {
+inline int append_char_to_string(char c, char *target_string, int position) {
   target_string[position] = c;
   return position + 1;
 }
 
-// Main functions
-
+// ========== Motor Control Functions ==========
 void set_motor_speed(int motor_ID, int speed) {
-  int pwm = abs(speed);
-  if (speed < 0) {
-    digitalWrite(motor_pin[motor_ID][1], LOW);
-  } else {
-    digitalWrite(motor_pin[motor_ID][1], HIGH);
-  }
-  analogWrite(motor_pin[motor_ID][0], pwm);
+  if (motor_ID < 0 || motor_ID >= MOTOR_COUNT) return;
+  
+  int pwm = constrain(abs(speed), 0, 255);
+  digitalWrite(motor_pin[motor_ID][DIR_INDEX], (speed >= 0) ? HIGH : LOW);
+  analogWrite(motor_pin[motor_ID][PWM_INDEX], pwm);
 }
 
 void set_all_motors_speed(int16_t m_speed[MOTOR_COUNT]) {
@@ -268,295 +291,320 @@ void set_all_motors_speed(int16_t m_speed[MOTOR_COUNT]) {
 }
 
 void set_kicker_position(int8_t position) {
+  position = constrain(position, KICKER_IN, KICKER_OUT);
   digitalWrite(kicker_pin, position);
   motors_data.kicker_position = position;
 }
 
 void stop_motors() {
   for (int i = 0; i < MOTOR_COUNT; i++) {
-    set_motor_speed(i, 0);
-    motors_data.motor_speed[i] = 0;
+    set_motor_speed(i, MOTOR_STOPPED);
+    motors_data.motor_speed[i] = MOTOR_STOPPED;
   }
-  digitalWrite(kicker_pin, 0);
-  motors_data.kicker_position = 0;
+  set_kicker_position(KICKER_IN);
 }
 
+// ========== Sensor Reading Functions ==========
 void read_compass() {
   if (!bno_initialized) {
     return;
   }
+  
   sensors_event_t event;
   bno.getEvent(&event);
 
-  compass_data.heading = event.orientation.x;
+  compass_data.heading = fmod(event.orientation.x + 360.0, 360.0);
   compass_data.pitch = event.orientation.y;
   compass_data.roll = event.orientation.z;
 }
 
 
-void read_IR_sensor() {
+void read_ir_sensor() {
   Wire.beginTransmission(IR_I2C_ADDRESS);
   Wire.write(IR_ANGLE_AND_DISTANCE_REGISTER);
-  Wire.endTransmission();
+  if (Wire.endTransmission() != 0) {
+    debug_log(DEBUG_ERROR, "IR sensor communication error");
+    ir_data.angle = IR_NO_SIGNAL;
+    ir_data.distance = 0;
+    return;
+  }
+  
   Wire.requestFrom(IR_I2C_ADDRESS, IR_ANGLE_AND_DISTANCE_BYTES_COUNT);
-
   if (Wire.available() >= IR_ANGLE_AND_DISTANCE_BYTES_COUNT) {
-    uint16_t angle = Wire.read() << 8;
-    angle |= Wire.read();
-    uint16_t distance = Wire.read() << 8;
-    distance |= Wire.read();
+    uint16_t angle = (Wire.read() << 8) | Wire.read();
+    uint16_t distance = (Wire.read() << 8) | Wire.read();
     
-    if (angle == 180 && distance == 0) {
-      IR_data.angle = IR_NO_SIGNAL;
-      IR_data.distance = 0;
+    if (angle == IR_NO_SIGNAL_ANGLE && distance == IR_NO_SIGNAL_DISTANCE) {
+      ir_data.angle = IR_NO_SIGNAL;
+      ir_data.distance = 0;
     } else {
-      IR_data.angle = angle;
-      IR_data.distance = distance;
+      ir_data.angle = angle;
+      ir_data.distance = distance;
     }
   } else {
-    IR_data.angle = IR_NO_SIGNAL;
-    IR_data.distance = 0;
-    debug_println("No IR_data signal detected");
+    ir_data.angle = IR_NO_SIGNAL;
+    ir_data.distance = 0;
   }
 
+  // Read raw sensor values
   Wire.beginTransmission(IR_I2C_ADDRESS);
   Wire.write(IR_RAW_REGISTER);
   Wire.endTransmission();
   Wire.requestFrom(IR_I2C_ADDRESS, IR_RAW_BYTES_COUNT);
 
   for (int i = 0; i < IR_SENSOR_COUNT; i++) {
-    if (Wire.available()) {
-      IR_data.sensor_IR[i] = Wire.read();
-    } else {
-      IR_data.sensor_IR[i] = 0;
-    }
+    ir_data.sensor_IR[i] = Wire.available() ? Wire.read() : 0;
   }
   
-  if (Wire.available()) {
-    IR_data.status = Wire.read();
-  } else {
-    IR_data.status = 0;
-  }
+  ir_data.status = Wire.available() ? Wire.read() : 0;
 }
 
 
-void read_line_sensor() {
+void read_line_sensors() {
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     line_data.sensor_line[i] = analogRead(line_pin[i]);
   }
 }
 
 
-void recieve_data() {
-  // Expected format: {"a"="+xxxx,+xxxx,+xxxx,+xxxx,x"}
-
-  // String input = DEBUG_SERIAL.readStringUntil('\n');
+// ========== Communication Functions ==========
+bool parse_motor_command() {
+  // Expected format: {"a"="±MMMM,±MMMM,±MMMM,±MMMM,K"}
+  // MMMM = motor speed (signed, 0 to 255), K = kicker (0 or 1)
+  
   String input = RASPBERRY_SERIAL.readStringUntil('\n');
+  if (input.length() == 0) return false;
 
-  debug_print("Received string: ");
-  Serial.println(input.c_str());
+  debug_print("RX: ");
+  debug_println(input.c_str());
   
-  if (input.length() != 33 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[31] != '"' || input[32] != '}') {
-    debug_println("Invalid string! Expected format: {\"a\"=\"+xxxx,+xxxx,+xxxx,+xxxx,x\"}");
-    return;
-  }
-
-  String data = input.substring(6, 31);
-
-  if (data[5] != ',' || data[11] != ',' || data[17] != ','|| data[23] != ',') {
-    debug_println("Wrong comma structure!");
-    return;
+  const int EXPECTED_LENGTH = 33;
+  if (input.length() != EXPECTED_LENGTH) {
+    debug_log(DEBUG_ERROR, "Invalid message length");
+    return false;
   }
   
-  for (int i = 0; i < 4; i += 1) {
-    if (data[i * 6] != '+' && data[i * 6] != '-') {
-      debug_println("Wrong sign!");
-      return;
-    }
+  if (input[0] != '{' || input[1] != '"' || input[2] != 'a' || 
+      input[3] != '"' || input[4] != '=' || input[5] != '"' ||
+      input[31] != '"' || input[32] != '}') {
+    debug_log(DEBUG_ERROR, "Invalid JSON structure");
+    return false;
+  }
+
+  String data = input.substring(6, 31);  // "±MMMM,±MMMM,±MMMM,±MMMM,K"
+
+  if (data[5] != ',' || data[11] != ',' || data[17] != ',' || data[23] != ',') {
+    debug_log(DEBUG_ERROR, "Invalid comma positions");
+    return false;
   }
   
   for (int i = 0; i < MOTOR_COUNT; i++) {
-    for (int j = 1; j < 5; j++) {
-      if (data[i * 6 + j] < '0' || data[i * 6 + j] > '9') {
-        debug_print("Wrong number at:");
-        debug_println(i * 6 + j);
-        return;
+    char sign = data[i * 6];
+    if (sign != '+' && sign != '-') {
+      debug_log(DEBUG_ERROR, "Invalid sign character");
+      return false;
+    }
+    
+    for (int j = 1; j <= 4; j++) {
+      if (!isdigit(data[i * 6 + j])) {
+        debug_log(DEBUG_ERROR, "Invalid motor value digit");
+        return false;
       }
     }
   }
-  if (data[24] < '0' || data[24] > '9') {
-    debug_print("Wrong number at:");
-    debug_println(24);
-    return;
+  
+  if (!isdigit(data[24])) {
+    debug_log(DEBUG_ERROR, "Invalid kicker value");
+    return false;
   }
 
-  int values[MOTOR_COUNT + 1];
-  values[0] = data.substring(0, 5).toInt();
-  values[1] = data.substring(6, 11).toInt();
-  values[2] = data.substring(12, 17).toInt();
-  values[3] = data.substring(18, 23).toInt();
-  values[4] = data.substring(24, 25).toInt();
-
-  // debug_println("Extracted values:");
-  // for (int i = 0; i < 4; i++) {
-  //   debug_println(values[i]);
-  // }
   for (int i = 0; i < MOTOR_COUNT; i++) {
-    motors_data.motor_speed[i] = values[i];
+    motors_data.motor_speed[i] = data.substring(i * 6, i * 6 + 5).toInt();
   }
-  motors_data.kicker_position = values[4];
+  
+  motors_data.kicker_position = data.substring(24, 25).toInt();
+  motors_data.kicker_position = constrain(motors_data.kicker_position, KICKER_IN, KICKER_OUT);
+  
+  debug_log(DEBUG_INFO, "Command parsed successfully");
+  return true;
 }
 
-void update_all_data() {
-  all_data.compass_data = compass_data;
-  all_data.IR_data = IR_data;
-  all_data.motors_data = motors_data;
-  all_data.line_data = line_data;
+inline void update_sensor_data_struct() {
+  sensor_data.compass_data = compass_data;
+  sensor_data.ir_data = ir_data;
+  sensor_data.motors_data = motors_data;
+  sensor_data.line_data = line_data;
 }
 
 
-void create_raspberry_message() {
-  for (int i = 0; i < DATA_STRING_LENGTH; i++) {
-    message_data[i] = '#';
-  }
-
-  int position = 0;
-  // message start
-  position = append_char_to_string('{', message_data, position);
-  position = append_char_to_string('"', message_data, position);
-  position = append_char_to_string('a', message_data, position);
-  position = append_char_to_string('"', message_data, position);
-  position = append_char_to_string('=', message_data, position);
-  position = append_char_to_string('"', message_data, position);
-  // compass
-  position = append_number_to_string(all_data.compass_data.heading, message_data, position, 3, 0);
-  position = append_number_to_string(all_data.compass_data.pitch, message_data, position, 3, 1);
-  position = append_number_to_string(all_data.compass_data.roll, message_data, position, 3, 1);
-  // IR sensor
-  position = append_number_to_string(all_data.IR_data.angle, message_data, position, 3, 0);
-  position = append_number_to_string(all_data.IR_data.distance, message_data, position, 4, 0);
+void build_sensor_message() {
+  int pos = 0;
+  
+  // JSON wrapper start: {"a"="
+  pos = append_char_to_string('{', tx_message_buffer, pos);
+  pos = append_char_to_string('"', tx_message_buffer, pos);
+  pos = append_char_to_string('a', tx_message_buffer, pos);
+  pos = append_char_to_string('"', tx_message_buffer, pos);
+  pos = append_char_to_string('=', tx_message_buffer, pos);
+  pos = append_char_to_string('"', tx_message_buffer, pos);
+  
+  // Compass data: HHH,±PPP,±RRR,
+  pos = append_number_to_string(sensor_data.compass_data.heading, tx_message_buffer, pos, 3, false);
+  pos = append_number_to_string(sensor_data.compass_data.pitch, tx_message_buffer, pos, 3, true);
+  pos = append_number_to_string(sensor_data.compass_data.roll, tx_message_buffer, pos, 3, true);
+  
+  // IR data: AAA,DDDD,V1,...V12,S,
+  pos = append_number_to_string(sensor_data.ir_data.angle, tx_message_buffer, pos, 3, false);
+  pos = append_number_to_string(sensor_data.ir_data.distance, tx_message_buffer, pos, 4, false);
   for (int i = 0; i < IR_SENSOR_COUNT; i++) {
-    position = append_number_to_string(all_data.IR_data.sensor_IR[i], message_data, position, 3, 0);
+    pos = append_number_to_string(sensor_data.ir_data.sensor_IR[i], tx_message_buffer, pos, 3, false);
   }
-  position = append_number_to_string(all_data.IR_data.status, message_data, position, 1, 0);
-  // Line sensor
+  pos = append_number_to_string(sensor_data.ir_data.status, tx_message_buffer, pos, 1, false);
+  
+  // Line sensor data: L1,...L12,
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
-    position = append_number_to_string(all_data.line_data.sensor_line[i], message_data, position, 4, 0);
+    pos = append_number_to_string(sensor_data.line_data.sensor_line[i], tx_message_buffer, pos, 4, false);
   }
-  // message end
-  position = position - 1; // delete last ','
-  position = append_char_to_string('"', message_data, position);
-  position = append_char_to_string('}', message_data, position);
-  position = append_char_to_string('\0', message_data, position);
+  
+  // JSON wrapper end: "} (remove trailing comma)
+  pos--;
+  pos = append_char_to_string('"', tx_message_buffer, pos);
+  pos = append_char_to_string('}', tx_message_buffer, pos);
+  tx_message_buffer[pos] = '\0';
 }
 
-void send_raspberry_message() {
-  RASPBERRY_SERIAL.println(message_data);
-  debug_println(message_data);
+void transmit_sensor_data() {
+  RASPBERRY_SERIAL.println(tx_message_buffer);
+  debug_print("TX: ");
+  debug_println(tx_message_buffer);
 }
 
 
 
+// ========== Setup & Main Loop ==========
 void setup() {
+  // Initialize LED pins
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(MODULE_LED_PIN, OUTPUT);
   pinMode(MODULE_SWITCH_LED_PIN, OUTPUT);
   pinMode(SWITCH_LED_PIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
+  // Initialize serial communication
   DEBUG_SERIAL.begin(DEBUG_SERIAL_SPEED);
   RASPBERRY_SERIAL.begin(RASPBERRY_SERIAL_SPEED);
+  delay(100);
+  debug_println("\n=== LNX Infrabot Teensy Controller ===");
+  debug_println("Initializing...");
 
+  // Initialize control pins and interrupts
   pinMode(MODULE_PIN, INPUT);
   pinMode(SWITCH_PIN, INPUT_PULLUP);
   pinMode(MODULE_SWITCH_PIN, INPUT_PULLUP);
-  // Attach interrupts to both pins
   attachInterrupt(digitalPinToInterrupt(MODULE_PIN), update_running_state, CHANGE);
+  update_running_state();
+  debug_println("Control switches initialized");
 
-  // Motors
-  for (int i = 0; i < 4; i++) {
-    pinMode(motor_pin[i][0], OUTPUT);
-    pinMode(motor_pin[i][1], OUTPUT);
-    analogWrite(motor_pin[i][0], motor_speed[i]);
+  // Initialize motor pins
+  for (int i = 0; i < MOTOR_COUNT; i++) {
+    pinMode(motor_pin[i][PWM_INDEX], OUTPUT);
+    pinMode(motor_pin[i][DIR_INDEX], OUTPUT);
   }
   pinMode(kicker_pin, OUTPUT);
+  stop_motors();  // Ensure motors start stopped
+  debug_println("Motors initialized");
 
-  // Compass
+  // Initialize BNO055 compass
+  debug_print("Initializing BNO055 compass... ");
   if (bno.begin()) {
     bno_initialized = true;
     delay(1000);
     bno.setExtCrystalUse(true);
+    debug_log(DEBUG_INFO, "BNO055 initialized successfully");
   } else {
-    debug_println("Failed to initialize BNO055!");
-    compass_data.heading = 0;
-    compass_data.pitch = 0;
-    compass_data.roll = 0;
+    bno_initialized = false;
+    debug_log(DEBUG_WARN, "BNO055 not found - operating without compass");
   }
 
-  // IR_data finder
+  // Initialize I2C for IR sensor
   Wire.begin();
-  debug_println("MRM-IR_data-Finder3 dual read start");
+  debug_println("IR sensor initialized (MRM-IR-Finder3)");
 
-  // Line sensor
+  // Initialize line sensor pins
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     pinMode(line_pin[i], INPUT);
   }
+  debug_println("Line sensors initialized");
+  
+  debug_println("=== Initialization complete ===");
+  debug_println();
 }
 
 
 void loop() {
-  if (!digitalRead(SWITCH_PIN)) {
+  // Handle manual switch debouncing (active LOW)
+  static unsigned long last_switch_time = 0;
+  static unsigned long last_module_switch_time = 0;
+  unsigned long current_time = millis();
+  
+  if (!digitalRead(SWITCH_PIN) && (current_time - last_switch_time > 200)) {
     switch_value = !switch_value;
-    delay(100);
+    last_switch_time = current_time;
+    debug_log(DEBUG_INFO, switch_value ? "Manual switch: ON" : "Manual switch: OFF");
   }
-  if (!digitalRead(MODULE_SWITCH_PIN)) {
-    use_bluetooht_module = !use_bluetooht_module;
+  
+  if (!digitalRead(MODULE_SWITCH_PIN) && (current_time - last_module_switch_time > 200)) {
+    use_bluetooth_module = !use_bluetooth_module;
     update_running_state();
-    delay(100);
+    last_module_switch_time = current_time;
+    debug_log(DEBUG_INFO, use_bluetooth_module ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
   }
 
+  // Read all sensors
   read_compass();
-  read_IR_sensor();
-  read_line_sensor();
-  update_all_data();
+  read_ir_sensor();
+  read_line_sensors();
+  update_sensor_data_struct();
 
-#if DEBUG
-  print_debug_data(0);
-#endif
+  // Send sensor data to Raspberry Pi
+  build_sensor_message();
+  transmit_sensor_data();
 
-  create_raspberry_message();
-  send_raspberry_message();
-
+  // Receive motor commands from Raspberry Pi
   if (RASPBERRY_SERIAL.available() > 0) {
-    recieve_data();
+    parse_motor_command();
   }
-  // Printout states and turn on LEDs
-  (switch_value) ? digitalWrite(SWITCH_LED_PIN, HIGH) : digitalWrite(SWITCH_LED_PIN, LOW);
-  (module_value) ? digitalWrite(MODULE_LED_PIN, HIGH) : digitalWrite(MODULE_LED_PIN, LOW);
-  (use_bluetooht_module) ? digitalWrite(MODULE_SWITCH_LED_PIN, LOW) : digitalWrite(MODULE_SWITCH_LED_PIN, HIGH);
   
+  // Update control state LEDs
+  digitalWrite(SWITCH_LED_PIN, switch_value);
+  digitalWrite(MODULE_LED_PIN, module_value);
+  digitalWrite(MODULE_SWITCH_LED_PIN, !use_bluetooth_module);
+  
+  // Control motors based on run state
   run = (switch_value && module_value);
-  
-  (run) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
-
-  debug_print("SWITCH: ");
-  debug_print(switch_value);
-  debug_print("     MODULE_SWITCH: ");
-  debug_print(use_bluetooht_module);
-  debug_print("    MODULE: ");
-  debug_print(module_value);
-  debug_print("    RUN: ");
-  debug_print(run);
+  digitalWrite(LED_BUILTIN, run);
 
   if (run) {
     set_all_motors_speed(motors_data.motor_speed);
     set_kicker_position(motors_data.kicker_position);
-    debug_print("        MOVE!");
-  }
-  else {
+    debug_print(">>> RUNNING");
+  } else {
     stop_motors();
-    debug_print("        STOP!");
+    debug_print(">>> STOPPED");
   }
-  debug_println("");
+  
+#if DEBUG_ENABLED
+  // Debug status output
+  debug_print(" | SW=");
+  debug_print(switch_value);
+  debug_print(" BT_SW=");
+  debug_print(use_bluetooth_module);
+  debug_print(" BT=");
+  debug_print(module_value);
+  debug_println();
+  
+  print_sensor_debug_info();
+#endif
   
   delay(10);
 }
