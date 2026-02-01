@@ -29,6 +29,7 @@ shared_data: dict = {
     'logs_buffer': manager.dict(),
     'next_log_id': multiprocessing.Value('i', 1),
     'manual_control': multiprocessing.Array('d', [0.0, 0.0, 0.0]),
+    'compass_reset': multiprocessing.Value('b', False),
     'locks': {
         'frame': multiprocessing.Lock(),
         'hardware_data': multiprocessing.Lock(),
@@ -198,6 +199,16 @@ def set_manual_control(control: RobotManualControl) -> None:
     shared_data['manual_control'][1] = control.move_speed
     shared_data['manual_control'][2] = control.rotate
 
+def request_compass_reset() -> None:
+    shared_data['compass_reset'].value = True
+
+def check_and_clear_compass_reset() -> bool:
+    if shared_data['compass_reset'].value:
+        shared_data['compass_reset'].value = False
+        return True
+    return False
+
+
 def camera_process(stop_event):
     try:
         if LOGGING_LEVEL == logging.DEBUG:
@@ -274,13 +285,30 @@ def hardware_communication_process(stop_event):
         messages = 0
         time_start = time.time()
 
+        compass_offset: dict[str, int] = {
+            "heading": 0,
+            "pitch": 0,
+            "roll": 0
+        }
+
         with teensy_communication.TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
             while not stop_event.is_set():
                 communicator.set_motors(get_motor_speeds(), get_kicker_state())
                 data = communicator.read_data(timeout=0.1)
                 if data:
+                    data.compass.heading -= compass_offset["heading"]
+                    data.compass.pitch -= compass_offset["pitch"]
+                    data.compass.roll -= compass_offset["roll"]
                     messages += 1
                     set_hardware_data(data)
+                if check_and_clear_compass_reset():
+                    if not data:
+                        data = get_hardware_data()
+                    if data:
+                        hardware_logger.info("Resetting compass position")
+                        compass_offset["heading"] += data.compass.heading
+                        compass_offset["pitch"] += data.compass.pitch
+                        compass_offset["roll"] += data.compass.roll
                 if time.time() > time_start + 1:
                     hardware_logger.debug(f"Messages per second: {messages}")
                     messages = 0
@@ -315,6 +343,7 @@ def main():
     api.robot_mode_setter = set_robot_mode
     api.manual_control_getter = get_manual_control
     api.manual_control_setter = set_manual_control
+    api.compass_reset_requester = request_compass_reset
     api.logs_getter = get_logs
     
     

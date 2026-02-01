@@ -79,7 +79,7 @@
       .sensors-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
+        gap: 5px;
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
@@ -396,7 +396,7 @@
           <div class="sensors-grid">
             
             <!-- Compass (BNO055) -->
-            <div class="sensor-card" style="grid-column: span 2;">
+            <div class="sensor-card" style="grid-column: span 2; position: relative;">
               <div class="sensor-label">Compass (BNO055)</div>
               <div class="compass" id="compass">
                 <div class="compass-needle" id="compass-needle"></div>
@@ -410,6 +410,7 @@
                 <div><span style="color: #888;">Pitch:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-pitch">0°</span></div>
                 <div><span style="color: #888;">Roll:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-roll">0°</span></div>
               </div>
+              <div class="btn" style="position: absolute; top: 3px; right: 3px; padding: 2px 8px; border-radius: 7px;" id="reset-compass">Reset Compass Position</div>
             </div>
 
             <!-- IR Ball Detection -->
@@ -530,7 +531,7 @@
                 </div>
               </div>
             </div>
-
+            
           </div>
         </div>
       </div>
@@ -678,6 +679,22 @@
           await fetch(`/api/set_mode?mode=${btn.id.split('-', 2)[1]}`, { method: 'POST' });
         });
       });
+
+      const resetCompassBtn = document.getElementById('reset-compass');
+      if (resetCompassBtn) {
+        resetCompassBtn.addEventListener('click', async () => {
+          try {
+            const response = await fetch('/api/reset_compass', { method: 'POST' });
+            if (response.ok) {
+              console.log('Compass reset successful');
+            } else {
+              console.error('Compass reset failed:', response.status);
+            }
+          } catch (e) {
+            console.error('Error resetting compass:', e);
+          }
+        });
+      }
 
       function computeCommandFromKeys(keys) {
         let dy = 0, dx = 0;

@@ -22,6 +22,7 @@ robot_mode_getter = None
 robot_mode_setter = None
 manual_control_getter = None
 manual_control_setter = None
+compass_reset_requester = None
 
 logs_getter = None
 
@@ -158,6 +159,15 @@ def set_manual_control():
         rotate=data['rotate']
     )
     manual_control_setter(control)
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/reset_compass', methods=['POST'])
+def reset_compass():
+    if compass_reset_requester is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    compass_reset_requester()
     return jsonify({"status": "ok"})
 
 
