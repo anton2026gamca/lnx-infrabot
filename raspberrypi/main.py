@@ -1,66 +1,15 @@
 import logging
-import sys
 import multiprocessing
 import time
 
 import camera.camera as camera
 import teensy_communication.teensy_communication as teensy_communication
 import web_server.api.api as api
-from helpers.helpers import LogFormatter, RobotMode, Suppress200Filter
+from helpers.helpers import RobotMode, Suppress200Filter, setup_logger, BufferedLogHandler, RobotManualControl, calculate_motors_speeds
 
 
 
 LOGGING_LEVEL = logging.DEBUG
-
-
-class BufferedLogHandler(logging.Handler):
-    def __init__(self, logs_dict, logs_lock, next_log_id, formatter=None):
-        super().__init__()
-        self.logs_dict = logs_dict
-        self.logs_lock = logs_lock
-        self.next_log_id = next_log_id
-        if formatter:
-            self.setFormatter(formatter)
-        elif LogFormatter is not None:
-            self.setFormatter(LogFormatter(f"[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s", datefmt="%H:%M:%S"))
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            formatted = self.format(record)
-            entry = {
-                "message": formatted,
-                "level": record.levelname,
-                "logger": record.name,
-                "time": getattr(record, "created", None),
-            }
-            with self.logs_lock:
-                lid = self.next_log_id.value
-                self.logs_dict[lid] = entry
-                self.next_log_id.value += 1
-        except Exception:
-            self.handleError(record)
-
-def setup_logger(name: str | None = None, level=LOGGING_LEVEL, logs_dict=None, logs_lock=None, next_log_id=None) -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-    logger.propagate = False
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(level)
-
-    formatter = LogFormatter(
-        f"[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s",
-        datefmt="%H:%M:%S"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    
-    if logs_dict is not None and logs_lock is not None and next_log_id is not None:
-        buffer_handler = BufferedLogHandler(logs_dict, logs_lock, next_log_id)
-        buffer_handler.setLevel(level)
-        logger.addHandler(buffer_handler)
-    
-    return logger
 
 
 manager = multiprocessing.Manager()
