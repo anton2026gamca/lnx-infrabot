@@ -1,19 +1,28 @@
 import argparse
-from dataclasses import dataclass
 import json
 import logging
 import re
+import serial
 import sys
 import time
-import serial
+from dataclasses import dataclass
 from serial.tools import list_ports
 
 
-LOG = logging.getLogger("teensy_communication")
+logger = logging.getLogger("teensy_communication")
 
-TEENSY_BAUD = 38400
-EXPECTED_FIELDS = 34
-MOTOR_COUNT = 4
+DEFAULT_TEENSY_PORT = "/dev/ttyAMA0"
+DEFAULT_TEENSY_BAUD = 38400
+DEFAULT_TEENSY_TIMEOUT = 1
+
+try:
+    from config import MOTOR_COUNT, LINE_SENSOR_COUNT
+    EXPECTED_FIELDS = 14 + LINE_SENSOR_COUNT + MOTOR_COUNT
+except ImportError:
+    MOTOR_COUNT = 4
+    EXPECTED_FIELDS = 30
+
+LINE_PATTERN = re.compile(r'^\{\s*"a"\s*=\s*"(?P<data>.*)"\s*\}\s*$')
 
 
 @dataclass
@@ -40,7 +49,7 @@ class ParsedTeensyData:
 
 def parse_teensy_line(line: str) -> ParsedTeensyData:
     line = line.strip()
-    m = re.match(r'^\{\s*"a"\s*=\s*"(?P<data>.*)"\s*\}\s*$', line)
+    m = LINE_PATTERN.match(line)
     if not m:
         raise ValueError("Line does not match wrapper {\"a\"=\"...\"}")
 
@@ -50,23 +59,25 @@ def parse_teensy_line(line: str) -> ParsedTeensyData:
         raise ValueError(f"Wrong number of fields: expected {EXPECTED_FIELDS}, got {len(parts)}")
 
     try:
+        int_parts = [int(p) for p in parts]
+        
         parsed = ParsedTeensyData(
             CompassData(
-                int(parts[0]),
-                int(parts[1]),
-                int(parts[2]),
+                int_parts[0],
+                int_parts[1],
+                int_parts[2],
             ),
             IRData(
-                int(parts[3]),
-                int(parts[4]),
-                [int(x) for x in parts[5:17]],
-                int(parts[17]),
+                int_parts[3],
+                int_parts[4],
+                int_parts[5:17],
+                int_parts[17],
             ),
-            [int(x) for x in parts[18:]],
+            int_parts[18:],
             line,
             time.time(),
         )
-    except Exception as e:
+    except (ValueError, IndexError) as e:
         raise ValueError(f"Failed to parse numeric fields: {e}")
 
     return parsed
@@ -76,7 +87,7 @@ def list_serial_ports() -> list[str]:
     return [p.device for p in list_ports.comports()]
 
 
-def open_serial(port: str, baud: int = TEENSY_BAUD, timeout: float = 1.0) -> serial.Serial:
+def open_serial(port: str, baud: int = DEFAULT_TEENSY_BAUD, timeout: float = DEFAULT_TEENSY_TIMEOUT) -> serial.Serial:
     try:
         return serial.Serial(port, baudrate=baud, timeout=timeout)
     except serial.SerialException as e:
@@ -91,30 +102,27 @@ def format_message(motor_speeds: list[int], kicker_state: bool) -> str:
     if len(motor_speeds) != MOTOR_COUNT:
         raise ValueError(f"Expected {MOTOR_COUNT} motor speeds, got {len(motor_speeds)}")
     
-    clamped_values: list[int] = []
+    formatted_values = []
     for i, speed in enumerate(motor_speeds):
         if not isinstance(speed, (int, float)):
             raise ValueError(f"Motor {i} speed must be numeric, got {type(speed)}")
         clamped = max(-9999, min(9999, int(speed)))
-        clamped_values.append(clamped)
-    clamped_values.append(1 if kicker_state else 0)
+        sign = '+' if clamped >= 0 else '-'
+        formatted_values.append(f"{sign}{abs(clamped):04d}")
     
-    formatted_values: list[str] = []
-    for speed in clamped_values:
-        sign = '+' if speed >= 0 else '-'
-        formatted_values.append(f"{sign}{abs(speed):04d}")
-    
+    formatted_values.append('1' if kicker_state else '0')
     data = ",".join(formatted_values)
-    return '{"a"="' + data + '"}'
+    return f'{{"a"="{data}"}}'
 
 
 class TeensyCommunicator:
-    def __init__(self, port: str = "/dev/serial0", baud: int = TEENSY_BAUD, timeout: float = 1.0, auto_connect: bool = True) -> None:
+    def __init__(self, port: str = DEFAULT_TEENSY_PORT, baud: int = DEFAULT_TEENSY_BAUD, timeout: float = DEFAULT_TEENSY_TIMEOUT, auto_connect: bool = True) -> None:
         self.port = port
         self.baud = baud
         self.timeout = timeout
         self.ser = None
         self._log = logging.getLogger(f"teensy_communication.{port}")
+        self.buffer: bytearray | None = None
         if auto_connect:
             self.connect()
 
@@ -141,13 +149,31 @@ class TeensyCommunicator:
     def read_line(self) -> str:
         if self.ser is None:
             raise RuntimeError("Serial port not open. Call connect() first.")
-        raw = self.ser.readline()
-        if not raw:
-            return ""
-        try:
-            return raw.decode("utf-8", errors="replace").strip()
-        except Exception:
-            return raw.decode(errors="replace").strip()
+        
+        if self.buffer is None:
+            self.buffer = bytearray()
+
+        newline_idx = self.buffer.find(b'\n')
+        if newline_idx >= 0:
+            raw = bytes(self.buffer[:newline_idx + 1])
+            self.buffer = self.buffer[newline_idx + 1:]
+            try:
+                return raw.decode("utf-8", errors="replace").strip()
+            except Exception:
+                return ""
+        
+        read_bytes = self.ser.read_all()
+        if read_bytes:
+            self.buffer.extend(read_bytes)
+            newline_idx = self.buffer.find(b'\n')
+            if newline_idx >= 0:
+                raw = bytes(self.buffer[:newline_idx + 1])
+                self.buffer = self.buffer[newline_idx + 1:]
+                try:
+                    return raw.decode("utf-8", errors="replace").strip()
+                except Exception:
+                    return ""
+        return ""
     
     def read_data(self, timeout: float | None = None) -> ParsedTeensyData | None:
         if self.ser is None:
@@ -175,17 +201,13 @@ class TeensyCommunicator:
     def send_message(self, message: str) -> None:
         if self.ser is None:
             raise RuntimeError("Serial port not open. Call connect() first.")
-        
         if not message.endswith('\n'):
             message = message + '\n'
-        
         self.ser.write(message.encode('utf-8'))
-        self._log.debug("Sent: %s", message.strip())
     
     def set_motors(self, motor_speeds: list, kicker_state: bool) -> None:
         message = format_message(motor_speeds, kicker_state)
         self.send_message(message)
-        self._log.info("Set motors: %s, Kicker state: %s", motor_speeds, kicker_state)
     
     def stop_motors(self) -> None:
         self.set_motors([0, 0, 0, 0], False)
@@ -193,7 +215,7 @@ class TeensyCommunicator:
 
 def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) -> None:
     teensy = TeensyCommunicator(port=port, auto_connect=True)
-    LOG.info("Listening. Press Ctrl-C to quit.")
+    logger.info("Listening. Press Ctrl-C to quit.")
     fh = None
     if out_file is not None:
         fh = open(out_file, "a", encoding="utf-8")
@@ -204,7 +226,7 @@ def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) ->
                 data = teensy.read_line()
             else:
                 parsed = teensy.read_data()
-                if parsed is not None:
+                if parsed:
                     data = json.dumps(parsed, ensure_ascii=False)
             
             if data is None:
@@ -216,14 +238,14 @@ def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) ->
             else:
                 print(data)
     except KeyboardInterrupt:
-        LOG.info("Interrupted by user, closing serial.")
+        logger.info("Interrupted by user, closing serial.")
     finally:
         teensy.close()
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Teensy serial receiver and parser")
-    ap.add_argument("--port", "-p", default="/dev/serial0", help="Serial port (default /dev/serial0 - Pi UART TX/RX pins)")
+    ap.add_argument("--port", "-p", default=DEFAULT_TEENSY_PORT, help=f"Serial port (default {DEFAULT_TEENSY_PORT} - Pi UART TX/RX pins)")
     ap.add_argument("--out", "-o", help="Output file (jsonl)")
     ap.add_argument("--raw", action="store_true", help="Print raw incoming lines before parsing (debug)")
     ap.add_argument("--log", default="info", help="Logging level")
@@ -234,9 +256,8 @@ def main() -> int:
     try:
         run_shell(args.port, out_file=args.out, raw_mode=args.raw)
     except Exception as e:
-        LOG.exception("Fatal error: %s", e)
+        logger.exception("Fatal error: %s", e)
         return 2
-
     return 0
 
 

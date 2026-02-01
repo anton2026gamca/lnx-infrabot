@@ -2,16 +2,1093 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <title>Raspberry Pi Camera</title>
+    <title>Robot Control Interface</title>
     <style>
-      body { text-align: center; background: #222; color: white; }
-      img { max-width: 100%; height: auto; margin-top: 20px; border: 2px solid #fff; }
+      * { box-sizing: border-box; }
+      
+      body { 
+        background: #1a1a1a; 
+        color: white; 
+        margin: 0; 
+        font-family: Arial, sans-serif; 
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      .container {
+        display: flex;
+        gap: 7px;
+        padding: 7px;
+        height: 100vh;
+      }
+
+      .side {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        max-width: 65%;
+        gap: 7px;
+      }
+
+      .panel {
+        background: #111;
+        border-radius: 7px;
+        padding: 7px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .panel.expand {
+        flex: 1;
+      }
+      
+      .panel.shrink {
+        flex: 0 0 auto;
+      }
+
+      .panel-header {
+        font-size: 1.3em;
+        font-weight: bold;
+        margin-bottom: 5px;
+        padding-bottom: 7px;
+        border-bottom: 2px solid #333;
+        flex-shrink: 0;
+      }
+
+      /* Camera Panel */
+      .img-container { 
+        width: 100%; 
+        flex: 1;
+        display: flex; 
+        justify-content: center; 
+        align-items: center; 
+        background: black; 
+        border-radius: 5px; 
+        overflow: hidden; 
+        aspect-ratio: 16 / 9;
+      }
+
+      .img-container img { 
+        width: 100%; 
+        height: auto; 
+        object-fit: cover; 
+      }
+
+      /* Sensors Panel */
+      .sensors-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 5px;
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+
+      .sensor-card {
+        background: #222;
+        border-radius: 2px;
+        padding: 5px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        border: 2px solid #333;
+        min-height: 0;
+      }
+
+      .sensor-label {
+        font-size: 0.8em;
+        color: #aaa;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        flex-shrink: 0;
+      }
+
+      .sensor-value {
+        font-size: 1.5em;
+        font-weight: bold;
+        color: #4CAF50;
+        margin-bottom: 5px;
+        flex-shrink: 0;
+      }
+
+      .sensor-visual {
+        width: 100%;
+        height: 50px;
+        background: #1a1a1a;
+        border-radius: 8px;
+        position: relative;
+        overflow: hidden;
+        margin-top: 5px;
+        flex-shrink: 0;
+      }
+
+      /* Compass visualization */
+      .compass {
+        width: 70px;
+        height: 70px;
+        border-radius: 50%;
+        border: 3px solid #4CAF50;
+        position: relative;
+        margin: 8px auto;
+        flex-shrink: 0;
+      }
+
+      .compass-needle {
+        position: absolute;
+        width: 3px;
+        height: 30px;
+        background: linear-gradient(to bottom, #f44336 0%, #f44336 50%, #2196F3 50%, #2196F3 100%);
+        left: 50%;
+        top: 50%;
+        transform-origin: center bottom;
+        transform: translate(-50%, -100%) rotate(0deg);
+      }
+
+      .compass-direction {
+        position: absolute;
+        font-size: 0.65em;
+        color: #888;
+      }
+
+      .compass-direction.n { top: 2px; left: 50%; transform: translateX(-50%); }
+      .compass-direction.e { right: 5px; top: 50%; transform: translateY(-50%); }
+      .compass-direction.s { bottom: 2px; left: 50%; transform: translateX(-50%); }
+      .compass-direction.w { left: 5px; top: 50%; transform: translateY(-50%); }
+
+      /* Line sensors visualization */
+      .line-sensors {
+        display: flex;
+        gap: 5px;
+        justify-content: center;
+        padding: 8px;
+      }
+
+      .line-sensor {
+        width: 20px;
+        height: 35px;
+        background: #333;
+        border-radius: 5px;
+        position: relative;
+        border: 2px solid #555;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+
+      .line-sensor.detected {
+        border-color: #ffd700;
+        box-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
+      }
+
+      /* IR sensor bar */
+      .ir-bar {
+        width: 100%;
+        height: 100%;
+        background: #1a1a1a;
+        border-radius: 5px;
+        position: relative;
+      }
+
+      .ir-bar-fill {
+        height: 100%;
+        background: linear-gradient(to right, #4CAF50, #FFC107, #f44336);
+        border-radius: 5px;
+        width: 0%;
+        transition: width 0.3s;
+      }
+
+      /* Controls Panel */
+      .controls-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        overflow-y: auto;
+        min-height: 0;
+      }
+
+      .control-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      .control-group-label {
+        font-size: 0.85em;
+        color: #aaa;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .mode-buttons {
+        display: flex;
+        gap: 5px;
+      }
+
+      .btn {
+        background: #333; 
+        color: white; 
+        border: none; 
+        padding: 3px 10px; 
+        border-radius: 7px; 
+        cursor: pointer; 
+        font-size: 0.95em; 
+        user-select: none; 
+        text-align: center;
+        flex: 1;
+      }
+      .btn:hover { 
+        background: #555; 
+      }
+
+      .btn.selected { 
+        background: #ffd700; 
+        color: black;
+        cursor: default;
+      }
+
+      .btn.selected:hover {
+        transform: none;
+      }
+
+      .toggle-btn {
+        background: #333;
+        color: white; 
+        border: none; 
+        padding: 10px 16px; 
+        border-radius: 10px; 
+        cursor: pointer; 
+        font-size: 0.95em; 
+        user-select: none; 
+        text-align: center;
+        flex: 1;
+      }
+      .toggle-btn:hover { 
+        background: #555; 
+      }
+
+      .toggle-btn.selected {
+        background: #ffd700; 
+        color: black;
+      }
+      .toggle-btn.selected:hover {
+        background: #daa520;
+      }
+
+      .action-buttons {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+
+      .btn-action {
+        background: #2196F3;
+      }
+
+      .btn-action:hover {
+        background: #1976D2;
+      }
+
+      .btn-danger {
+        background: #f44336;
+      }
+
+      .btn-danger:hover {
+        background: #d32f2f;
+      }
+
+      .corner-btn {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: #222;
+        color: white;
+        border: 2px solid #444;
+        padding: 2px 8px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 0.85em;
+        user-select: none;
+      }
+      .corner-btn:hover {
+        background: #444;
+        border: 2px solid #ffd700;
+      }
+      .corner-btn.active {
+        color: black;
+        background: #daa520;
+        border: 2px solid #ffd700;
+      }
+      .corner-btn.active:hover {
+        background: #c28f0f;
+        border: 2px solid #daa520;
+      }
+
+      /* Logs Panel */
+      .logs-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        flex-shrink: 0;
+      }
+
+      .message-type-toggle { 
+        margin-left: 4px;
+        padding: 3px 6px;
+        border-radius: 5px;
+        font-size: 0.8em;
+      }
+
+      .logs-content {
+        flex: 1;
+        background: #0a0a0a;
+        padding: 10px;
+        border-radius: 8px;
+        display: flex;
+        max-height: 100%;
+      }
+
+      .logs-content .logs {
+        font-family: 'Courier New', monospace; 
+        font-size: 12px;
+        white-space: pre-wrap;
+        overflow-y: auto;
+        width: 100%;
+      }
+
+      /* Scrollbar styling */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #1a1a1a;
+        border-radius: 3px;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #444;
+        border-radius: 3px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #666;
+      }
+
+      /* Manual Control Box */
+      .manual-control-box {
+        background: #222;
+        border-radius: 10px;
+        padding: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: text;
+        margin: 2px;
+      }
+
+      .manual-control-box:focus {
+        box-shadow: 0 0 0 2px #ffd700;
+        outline: none;
+      }
     </style>
   </head>
   <body>
-    <h1>Live Camera Feed</h1>
-    <label for="quality" style="display:block; margin-top:10px;">Quality (divide resolution by):</label>
-    <br>
-    <img id="camera" src="/api/video_feed" alt="Camera Feed">
+    <div class="container">
+      <div class="side" style="flex: 2;">
+        <!-- Camera Panel -->
+        <div class="panel shrink">
+          <!-- <div class="panel-header">Camera Feed</div> -->
+          <div class="img-container">
+            <img id="camera" src="/api/video_feed" alt="Camera Feed">
+          </div>
+        </div>
+
+        <!-- Logs Panel -->
+        <div class="panel expand">
+          <!-- <div class="logs-header">
+            <span class="panel-header" style="margin: 0; padding: 0; border: none;">Logs</span>
+          </div> -->
+          <div class="logs-content" style="position: relative;">
+            <span style="position: absolute; top: 10px; right: 10px; display: flex;">
+              <span class="toggle-btn message-type-toggle" id="logs-debug-toggle">DEBUG</span>
+              <span class="toggle-btn message-type-toggle selected" id="logs-info-toggle">INFO</span>
+              <span class="toggle-btn message-type-toggle selected" id="logs-warn-toggle">WARN</span>
+              <span class="toggle-btn message-type-toggle btn-danger" id="logs-clear-toggle">CLEAR</span>
+            </span>
+            <div class="logs" id="logs">
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="side">
+        <!-- Sensors Panel -->
+        <div class="panel shrink">
+          <!-- <div class="panel-header">Sensors</div> -->
+          <div class="sensors-grid">
+            
+            <!-- Compass (BNO055) -->
+            <div class="sensor-card" style="grid-column: span 2; position: relative;">
+              <div class="sensor-label">Compass (BNO055)</div>
+              <div class="compass" id="compass">
+                <div class="compass-needle" id="compass-needle"></div>
+                <div class="compass-direction n">N</div>
+                <div class="compass-direction e">E</div>
+                <div class="compass-direction s">S</div>
+                <div class="compass-direction w">W</div>
+              </div>
+              <div style="display: flex; gap: 15px; font-size: 0.9em;">
+                <div><span style="color: #888;">Heading:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-heading">0°</span></div>
+                <div><span style="color: #888;">Pitch:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-pitch">0°</span></div>
+                <div><span style="color: #888;">Roll:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-roll">0°</span></div>
+              </div>
+              <div class="corner-btn" style="top: 3px; right: 3px;" id="reset-compass">Reset Compass Position</div>
+            </div>
+
+            <!-- IR Ball Detection -->
+            <div class="sensor-card">
+              <div class="sensor-label">Ball Angle</div>
+              <div class="sensor-value" id="ir-angle">---</div>
+              <div class="sensor-visual" style="background: #1a1a1a; display: flex; align-items: center; justify-content: center; position: relative;">
+                <div style="width: 50px; height: 50px; border-radius: 50%; background: #333; position: relative;" id="ball-direction">
+                  <div style="position: absolute; width: 4px; height: 25px; background: #4CAF50; top: 50%; left: 50%; transform-origin: center bottom; transform: translate(-50%, -100%) rotate(0deg);" id="ball-arrow"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- IR Ball Distance -->
+            <div class="sensor-card">
+              <div class="sensor-label">Ball Distance</div>
+              <div class="sensor-value" id="ir-distance">--- cm</div>
+              <div class="sensor-visual">
+                <div class="ir-bar">
+                  <div class="ir-bar-fill" id="ir-bar"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- IR Sensors -->
+            <div class="sensor-card" style="grid-column: span 2;">
+              <div class="sensor-label">IR Sensors (12)</div>
+              <div style="display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; margin-top: 5px;">
+                <div class="line-sensor" id="ir-sensor-0" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-1" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-2" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-3" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-4" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-5" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-6" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-7" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-8" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-9" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-10" style="height: 30px;"></div>
+                <div class="line-sensor" id="ir-sensor-11" style="height: 30px;"></div>
+              </div>
+              <div style="margin-top: 5px; font-size: 0.85em; color: #888;">Status: <span id="ir-status">0</span></div>
+            </div>
+
+            <!-- Line Sensors -->
+            <div class="sensor-card" style="grid-column: span 2; position: relative;">
+              <div class="sensor-label">Line Sensors (12)</div>
+              <div style="display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; margin-top: 5px;">
+                <div class="line-sensor" id="line-0" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-1" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-2" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-3" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-4" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-5" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-6" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-7" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-8" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-9" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-10" style="height: 35px;"></div>
+                <div class="line-sensor" id="line-11" style="height: 35px;"></div>
+              </div>
+              <div class="corner-btn" style="top: 3px; right: 3px;" id="calibrate-line">Calibrate</div>
+            </div>
+
+            <!-- Motors -->
+            <div class="sensor-card">
+              <div class="sensor-label">Motor 1</div>
+              <div class="sensor-value" id="motor-0">0</div>
+            </div>
+
+            <div class="sensor-card">
+              <div class="sensor-label">Motor 2</div>
+              <div class="sensor-value" id="motor-1">0</div>
+            </div>
+
+            <div class="sensor-card">
+              <div class="sensor-label">Motor 3</div>
+              <div class="sensor-value" id="motor-2">0</div>
+            </div>
+
+            <div class="sensor-card">
+              <div class="sensor-label">Motor 4</div>
+              <div class="sensor-value" id="motor-3">0</div>
+            </div>
+
+            <!-- Kicker -->
+            <!-- <div class="sensor-card" style="grid-column: span 2;">
+              <div class="sensor-label">Kicker</div>
+              <div class="sensor-value" id="kicker-state">OUT</div>
+              <div class="sensor-visual" style="background: #1a1a1a; display: flex; align-items: center; justify-content: center;">
+                <div style="width: 60px; height: 30px; background: #333; border-radius: 5px; position: relative; overflow: hidden;">
+                  <div style="position: absolute; width: 20px; height: 26px; background: #4CAF50; border-radius: 3px; top: 2px; left: 2px; transition: transform 0.3s;" id="kicker-indicator"></div>
+                </div>
+              </div>
+            </div> -->
+          </div>
+        </div>
+
+        <!-- Controls Panel -->
+        <div class="panel expand">
+          <!-- <div class="panel-header">Controls</div> -->
+          <div class="controls-content">
+            
+            <div class="control-group">
+              <div class="control-group-label">Mode Selection</div>
+              <div class="mode-buttons">
+                <div class="btn" id="mode-idle">Idle</div>
+                <div class="btn" id="mode-autonomous">Autonomous</div>
+                <div class="btn" id="mode-manual">Manual</div>
+              </div>
+            </div>
+
+            <div class="control-group" id="manual-control-group" style="display: none;">
+              <div class="control-group-label">Manual Control (focus here)</div>
+              <div tabindex="0" id="manual-control-box" class="manual-control-box">
+                <div style="text-align: center; color: #ccc;">
+                  <div>Use <strong style="color: gold;">W/A/S/D</strong> to move, <strong style="color: gold;">← →</strong> to rotate</div>
+                  <div style="font-size: 0.9em; color: #888; margin-top: 6px;">Click to focus, press keys to control</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-group" id="line-calibration-group" style="display: none;">
+              <div class="control-group-label">Line Sensor Calibration</div>
+              <div style="background: #222; border-radius: 8px; padding: 10px; font-size: 0.9em;">
+                <div style="color: #ccc; margin-bottom: 8px;" id="calibration-status">Ready to calibrate</div>
+                <div class="mode-buttons">
+                  <div class="btn btn-action" id="start-calibration">Start</div>
+                  <div class="btn btn-danger" id="stop-calibration" style="display: none;">Stop</div>
+                  <div class="btn btn-action" id="cancel-calibration" style="display: none;">Cancel</div>
+                </div>
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ========== Logs ==========
+      const logsElement = document.getElementById('logs');
+      const logToggles = {
+        debug: document.getElementById('logs-debug-toggle'),
+        info: document.getElementById('logs-info-toggle'),
+        warn: document.getElementById('logs-warn-toggle'),
+      };
+      const logsClearBtn = document.getElementById('logs-clear-toggle');
+      
+      let lastLogId = 0;
+      const logsCache = [];
+
+      Object.values(logToggles).forEach(toggle => {
+        toggle.addEventListener('click', () => {
+          toggle.classList.toggle('selected');
+          renderLogsFromCache();
+        });
+      });
+
+      if (logsClearBtn) {
+        logsClearBtn.addEventListener('click', () => {
+          logsCache.length = 0;
+          renderLogsFromCache();
+        });
+      }
+
+      function escapeHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      function parseAnsiToHtml(text) {
+        const ansiRegex = /\x1b\[([0-9;]+)m/g;
+        const colorMap = {
+          30: '#000000', 31: '#aa0000', 32: '#00aa00', 33: '#aa5500',
+          34: '#0000aa', 35: '#aa00aa', 36: '#00aaaa', 37: '#aaaaaa',
+          90: '#555555', 91: '#ff5555', 92: '#55ff55', 93: '#ffff55',
+          94: '#5555ff', 95: '#ff55ff', 96: '#55ffff', 97: '#ffffff'
+        };
+
+        let out = '';
+        let lastIndex = 0;
+        let openSpan = false;
+        let match;
+
+        while ((match = ansiRegex.exec(text)) !== null) {
+          out += escapeHtml(text.slice(lastIndex, match.index));
+          const codes = match[1].split(';').map(c => parseInt(c, 10) || 0);
+          codes.forEach(code => {
+            if (code === 0) {
+              if (openSpan) { out += '</span>'; openSpan = false; }
+            } else if (code === 1) {
+              if (openSpan) { out += '</span>'; openSpan = false; }
+              out += '<span style="font-weight:700">'; openSpan = true;
+            } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+              const c = colorMap[code] || null;
+              if (openSpan) { out += '</span>'; openSpan = false; }
+              if (c) { out += `<span style="color:${c}">`; openSpan = true; }
+            } else if (code === 39) {
+              if (openSpan) { out += '</span>'; openSpan = false; }
+            }
+          });
+          lastIndex = ansiRegex.lastIndex;
+        }
+
+        out += escapeHtml(text.slice(lastIndex));
+        if (openSpan) out += '</span>';
+        return out.replace(/\n/g, '<br>');
+      }
+
+      function renderLogsFromCache() {
+        const debugEnabled = logToggles.debug.classList.contains('selected');
+        const infoEnabled = logToggles.info.classList.contains('selected');
+        const warnEnabled = logToggles.warn.classList.contains('selected');
+
+        const filtered = logsCache.filter(it => {
+          const lvl = (it.level || '').toUpperCase();
+          if (lvl === 'DEBUG') return debugEnabled;
+          if (lvl === 'INFO') return infoEnabled;
+          if (lvl === 'WARNING' || lvl === 'WARN' || lvl === 'ERROR' || lvl === 'CRITICAL') return warnEnabled;
+          return true;
+        });
+
+        const html = filtered.map(it => {
+          const time = it.time ? new Date(it.time * 1000).toLocaleTimeString() : '';
+          const level = escapeHtml(it.level || '');
+          const logger = escapeHtml(it.logger || '');
+          const msg = parseAnsiToHtml(it.message || '');
+          return `<div style="font-family:monospace;margin-top:4px">${msg}</div>`;
+        }).join('');
+
+        const scrollToBottom = logsElement.scrollTop + logsElement.clientHeight >= logsElement.scrollHeight - 20;
+        logsElement.innerHTML = html || '[No logs]';
+        if (scrollToBottom) {
+          logsElement.scrollTop = logsElement.scrollHeight;
+        }
+      }
+
+      async function updateLogs() {
+        try {
+          const resp = await fetch(`/api/get_logs?since=${lastLogId}`);
+          if (!resp.ok) return;
+          const data = await resp.json();
+          if (!data || !Array.isArray(data.logs)) return;
+          data.logs.forEach(l => {
+            logsCache.push(l);
+            if (l.id && l.id > lastLogId) lastLogId = l.id;
+          });
+          renderLogsFromCache();
+        } catch (e) {
+          console.error('Failed to update logs', e);
+        }
+      }
+      
+
+      // ========== Controls ==========
+      const modeButtons = {
+        idle: document.getElementById('mode-idle'),
+        autonomous: document.getElementById('mode-autonomous'),
+        manual: document.getElementById('mode-manual'),
+      };
+      let selectedMode = modeButtons.idle;
+      const manualControlGroup = document.getElementById('manual-control-group');
+      const manualControlBox = document.getElementById('manual-control-box');
+      const pressedKeys = new Set();
+
+      async function sendManualCommand(payload) {
+        try {
+          const body = Object.assign({}, payload);
+          if (body.move && typeof body.move.angle === 'number' && typeof body.move.speed === 'number') {
+            body.move.angle = ((body.move.angle % 360) + 360) % 360;
+            body.move.speed = Math.max(0, Math.min(1, body.move.speed));
+          } else {
+            body.move = null;
+          }
+          if (typeof body.rotate !== 'number') body.rotate = 0;
+          body.rotate = Math.max(-1, Math.min(1, body.rotate));
+          await fetch('/api/set_manual_control', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+          });
+        } catch (e) {
+          
+        }
+      }
+
+      async function requestModeUpdate(mode) {
+        const response = await fetch(`/api/set_mode?mode=${mode}`, { method: 'POST' });
+        if (response.ok) {
+          changeModeTo(mode);
+        }
+      }
+      
+      Object.values(modeButtons).forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await requestModeUpdate(btn.id.split('-', 2)[1]);
+        });
+      });
+
+      const resetCompassBtn = document.getElementById('reset-compass');
+      if (resetCompassBtn) {
+        resetCompassBtn.addEventListener('click', async () => {
+          try {
+            const response = await fetch('/api/reset_compass', { method: 'POST' });
+            if (response.ok) {
+              console.log('Compass reset successful');
+            } else {
+              console.error('Compass reset failed:', response.status);
+            }
+          } catch (e) {
+            console.error('Error resetting compass:', e);
+          }
+        });
+      }
+
+      function computeCommandFromKeys(keys) {
+        let dy = 0, dx = 0;
+        if (keys.has('w')) dy += 1;
+        if (keys.has('s')) dy -= 1;
+        if (keys.has('d')) dx += 1;
+        if (keys.has('a')) dx -= 1;
+
+        const mag = Math.hypot(dx, dy);
+        if (mag === 0) {
+          const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
+          return { move: { angle: 0, speed: 0 }, rotate: Math.max(-1, Math.min(1, rotate)) };
+        }
+
+        const angleRad = Math.atan2(dx, dy);
+        let angleDeg = angleRad * (180 / Math.PI);
+        angleDeg = ((angleDeg % 360) + 360) % 360;
+
+        const move = { angle: Number(angleDeg.toFixed(1)), speed: 1 };
+
+        const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
+        return { move, rotate: Math.max(-1, Math.min(1, rotate)) };
+      }
+
+      function sendCurrentKeysCommand() {
+        const { move, rotate } = computeCommandFromKeys(pressedKeys);
+        if (!move && (!rotate || rotate === 0)) {
+          sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 });
+        } else {
+          sendManualCommand({ move, rotate });
+        }
+      }
+
+      function handleManualKeyDown(e) {
+        const k = e.key.toLowerCase();
+        const allowed = ["w","a","s","d","arrowleft","arrowright"];
+        if (!allowed.includes(k)) return;
+        if (!pressedKeys.has(k)) {
+          pressedKeys.add(k);
+          sendCurrentKeysCommand();
+        }
+        e.preventDefault();
+      }
+
+      function handleManualKeyUp(e) {
+        const k = e.key.toLowerCase();
+        const allowed = ["w","a","s","d","arrowleft","arrowright"];
+        if (!allowed.includes(k)) return;
+        if (pressedKeys.has(k)) pressedKeys.delete(k);
+        sendCurrentKeysCommand();
+        e.preventDefault();
+      }
+
+      if (manualControlBox) {
+        manualControlBox.addEventListener('keydown', handleManualKeyDown);
+        manualControlBox.addEventListener('keyup', handleManualKeyUp);
+        manualControlBox.addEventListener('blur', () => { pressedKeys.clear(); sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 }); });
+      }
+
+      function changeModeTo(mode) {
+        Object.values(modeButtons).forEach(btn => {
+          if (btn.id === `mode-${mode}`) {
+            btn.classList.add("selected");
+            selectedMode = btn;
+          } else {
+            btn.classList.remove("selected");
+          }
+        });
+        if (manualControlGroup) {
+          if (mode === 'manual') {
+            manualControlGroup.style.display = '';
+            setTimeout(() => manualControlBox && manualControlBox.focus(), 40);
+          } else {
+            manualControlGroup.style.display = 'none';
+            manualControlBox && manualControlBox.blur();
+          }
+        }
+      }
+      
+      async function updateMode() {
+        const response = await fetch('/api/get_mode');
+        if (!response.ok) {
+          console.error('Failed to fetch robot mode:', response.status);
+          return;
+        }
+        
+        const data = await response.json();
+        changeModeTo(data.mode);
+      }
+
+      
+      // ========== Sensors ==========
+      const compasNeedle = document.getElementById('compass-needle');
+      const compasHeading = document.getElementById('compass-heading');
+      const compassPitch = document.getElementById('compass-pitch');
+      const compassRoll = document.getElementById('compass-roll');
+      const ballArrow = document.getElementById('ball-arrow');
+      const irBar = document.getElementById('ir-bar');
+      const irAngle = document.getElementById('ir-angle');
+      const irDistance = document.getElementById('ir-distance');
+      const irStatus = document.getElementById('ir-status');
+      // const kickerState = document.getElementById('kicker-state');
+      // const kickerIndicator = document.getElementById('kicker-indicator');
+      const motorElements = [
+        document.getElementById('motor-0'),
+        document.getElementById('motor-1'),
+        document.getElementById('motor-2'),
+        document.getElementById('motor-3'),
+      ];
+      const lineSensors = [];
+      for (let i = 0; i < 12; i++) {
+        lineSensors.push(document.getElementById(`line-${i}`));
+      }
+      const irSensors = [];
+      for (let i = 0; i < 12; i++) {
+        irSensors.push(document.getElementById(`ir-sensor-${i}`));
+      }
+
+      async function updateSensorData() {
+        const response = await fetch('/api/get_sensor_data');
+        if (!response.ok) {
+          console.error('Failed to fetch sensor data:', response.status);
+          return;
+        }
+        
+        const data = await response.json();
+        
+        // Compass
+        const heading = data.compass.heading;
+        const pitch = data.compass.pitch;
+        const roll = data.compass.roll;
+        compasNeedle.style.transform = `translate(-50%, -100%) rotate(${heading}deg)`;
+        compasHeading.textContent = `${Math.round(heading)}°`;
+        compassPitch.textContent = `${Math.round(pitch)}°`;
+        compassRoll.textContent = `${Math.round(roll)}°`;
+
+        // IR Ball Detection
+        const ballAngle = data.ir.angle;
+        const ballDistance = data.ir.distance;
+        const ballDetected = ballAngle !== 999 && ballDistance !== 999;
+        
+        if (ballDetected) {
+          irAngle.textContent = `${Math.round(ballAngle)}°`;
+          irDistance.textContent = `${Math.round(ballDistance)} cm`;
+          ballArrow.style.transform = `translate(-50%, -100%) rotate(${ballAngle}deg)`;
+          ballArrow.style.background = '#4CAF50';
+          irBar.style.width = `${Math.min((ballDistance / 200) * 100, 100)}%`;
+        } else {
+          irAngle.textContent = '---';
+          irDistance.textContent = '--- cm';
+          ballArrow.style.background = '#555';
+          irBar.style.width = '0%';
+        }
+
+        // IR Sensors
+        const irMax = 256;
+        for (let i = 0; i < 12; i++) {
+          const sensor = irSensors[i];
+          const value = data.ir.sensors[i];
+          sensor.style.background = `color-mix(in srgb, #333 ${100 - value / irMax * 100}%, #4CAF50 ${value / irMax * 100}%)`;
+          sensor.style.borderColor = `color-mix(in srgb, #555 ${100 - value / irMax * 100}%, #4CAF50 ${value / irMax * 100}%)`;
+          sensor.style.color = `color-mix(in srgb, #999 ${100 - value / irMax * 100}%, #fff ${value / irMax * 100}%)`;
+          sensor.textContent = `${Math.round(value / irMax * 100)}`;
+        }
+        irStatus.textContent = data.ir.status;
+
+        // Line sensors
+        const lineMax = 1000;
+        const lineData = data.line || {};
+        const lineRaw = lineData.raw || [];
+        const lineDetected = lineData.detected || [];
+        
+        for (let i = 0; i < 12; i++) {
+          const sensor = lineSensors[i];
+          if (!sensor) continue;
+          
+          const value = lineRaw[i] || 0;
+          const detected = lineDetected[i] || false;
+          
+          sensor.style.background = `color-mix(in srgb, #333 ${100 - value / lineMax * 100}%, #4CAF50 ${value / lineMax * 100}%)`;
+          sensor.style.color = `color-mix(in srgb, #999 ${100 - value / lineMax * 100}%, #fff ${value / lineMax * 100}%)`;
+          sensor.textContent = `${Math.round(value / lineMax * 100)}`;
+          
+          if (detected) {
+            sensor.classList.add('detected');
+          } else {
+            sensor.classList.remove('detected');
+          }
+        }
+
+        // Motors
+        for (let i = 0; i < 4; i++) {
+          const speed = data.motors[i];
+          motorElements[i].textContent = speed.toString();
+        }
+
+        // Kicker
+        // const kickerOut = data.kicker;
+        // kickerState.textContent = kickerOut ? 'OUT' : 'IN';
+        // kickerIndicator.style.transform = kickerOut ? 'translateX(36px)' : 'translateX(0)';
+      }
+
+      
+      // ========== Line Calibration ==========
+      const calibrateLineBtn = document.getElementById('calibrate-line');
+      const lineCalibrationGroup = document.getElementById('line-calibration-group');
+      const startCalibrationBtn = document.getElementById('start-calibration');
+      const stopCalibrationBtn = document.getElementById('stop-calibration');
+      const cancelCalibrationBtn = document.getElementById('cancel-calibration');
+      const calibrationStatus = document.getElementById('calibration-status');
+      let calibrationActive = false;
+
+      calibrateLineBtn.addEventListener('click', () => {
+        if (lineCalibrationGroup) {
+          lineCalibrationGroup.style.display = lineCalibrationGroup.style.display === 'none' ? '' : 'none';
+          calibrateLineBtn.classList.toggle('active');
+        }
+      });
+
+      startCalibrationBtn.addEventListener('click', async () => {
+        try {
+          const response = await fetch('/api/line_calibration/start', { method: 'POST' });
+          if (response.ok) {
+            calibrationActive = true;
+            calibrationStatus.textContent = 'Calibrating... Move robot over lines';
+            calibrationStatus.style.color = '#ffd700';
+            startCalibrationBtn.style.display = 'none';
+            stopCalibrationBtn.style.display = '';
+            cancelCalibrationBtn.style.display = '';
+          }
+        } catch (e) {
+          console.error('Failed to start calibration:', e);
+        }
+      });
+
+      stopCalibrationBtn.addEventListener('click', async () => {
+        try {
+          const response = await fetch('/api/line_calibration/stop', { method: 'POST' });
+          if (response.ok) {
+            const data = await response.json();
+            calibrationActive = false;
+
+            calibrationStatus.textContent = `Calibration complete! Thresholds updated.`;
+            calibrationStatus.style.color = '#4CAF50';
+            startCalibrationBtn.style.display = '';
+            stopCalibrationBtn.style.display = 'none';
+            cancelCalibrationBtn.style.display = 'none';
+
+            setTimeout(() => {
+              calibrationStatus.textContent = 'Ready to calibrate';
+              calibrationStatus.style.color = '#ccc';
+            }, 3000);
+          }
+        } catch (e) {
+          console.error('Failed to stop calibration:', e);
+        }
+      });
+
+      cancelCalibrationBtn.addEventListener('click', async () => {
+        try {
+          const response = await fetch('/api/line_calibration/cancel', { method: 'POST' });
+          if (response.ok) {
+            calibrationActive = false;
+            calibrationStatus.textContent = 'Calibration canceled.';
+            calibrationStatus.style.color = '#f44336';
+            stopCalibrationBtn.style.display = 'none';
+            startCalibrationBtn.style.display = '';
+            cancelCalibrationBtn.style.display = 'none';
+
+            setTimeout(() => {
+              calibrationStatus.textContent = 'Ready to calibrate';
+              calibrationStatus.style.color = '#ccc';
+            }, 2000);
+          }
+        } catch (e) {
+          console.error('Failed to cancel calibration:', e);
+        }
+      });
+
+      async function updateCalibrationStatus() {
+        try {
+          const response = await fetch('/api/line_calibration/status');
+          if (response.ok) {
+            const data = await response.json();
+            calibrationActive = data.active;
+            if (calibrationActive) {
+              calibrationStatus.textContent = 'Calibrating... Move robot over lines';
+              calibrationStatus.style.color = '#ffd700';
+              startCalibrationBtn.style.display = 'none';
+              stopCalibrationBtn.style.display = '';
+              cancelCalibrationBtn.style.display = '';
+            } else {
+              if (calibrationStatus.textContent === 'Calibrating... Move robot over lines') {
+                calibrationStatus.textContent = 'Ready to calibrate';
+                calibrationStatus.style.color = '#ccc';
+              }
+              startCalibrationBtn.style.display = '';
+              stopCalibrationBtn.style.display = 'none';
+              cancelCalibrationBtn.style.display = 'none';
+            }
+          }
+        } catch (e) {
+          
+        }
+      }
+
+
+      // ========== Updates ==========
+      async function fasterUpdate() {
+        updateSensorData();
+        updateLogs();
+      }
+
+      async function slowerUpdate() {
+        updateCalibrationStatus();
+        updateMode();
+      }
+
+      setInterval(fasterUpdate, 200);
+      setInterval(slowerUpdate, 1000);
+      fasterUpdate();
+      slowerUpdate();
+    </script>
   </body>
 </html>

@@ -7,10 +7,16 @@ These instructions assume you have the contents of the `raspberrypi` folder copi
    ```bash
    sudo apt update
    sudo apt upgrade -y
-   sudo apt install -y nginx python3 python3-flask
+   sudo apt install -y nginx python3 python3-picamera2 python3-opencv python3-numpy python3-flask python3-werkzeug python3-serial
    ```
 
-2. Deploy nginx config and site files
+2. Give yourself permission to access the serial port
+   ```bash
+   sudo usermod -a -G dialout $USER
+   reboot
+   ```
+
+3. Deploy nginx config and site files
 
    Move the default nginx site config (it may cause problems):
 
@@ -32,12 +38,12 @@ These instructions assume you have the contents of the `raspberrypi` folder copi
    sudo systemctl restart nginx
    ```
 
-3. Install and enable the API service
+4. Install and enable the service
 
    ```bash
-   cd api
+   cd ..
 
-   sudo ln -s "$(pwd)/api.service" /etc/systemd/system/api.service
+   sudo ln -s "$(pwd)/robot.service" /etc/systemd/system/robot.service
    sudo systemctl daemon-reload
-   sudo systemctl enable api
+   sudo systemctl enable robot
    ```
