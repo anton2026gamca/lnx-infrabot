@@ -407,6 +407,7 @@
               <span class="toggle-btn message-type-toggle" id="logs-debug-toggle">DEBUG</span>
               <span class="toggle-btn message-type-toggle selected" id="logs-info-toggle">INFO</span>
               <span class="toggle-btn message-type-toggle selected" id="logs-warn-toggle">WARN</span>
+              <span class="toggle-btn message-type-toggle btn-danger" id="logs-clear-toggle">CLEAR</span>
             </span>
             <div class="logs" id="logs">
 
@@ -570,6 +571,7 @@
         info: document.getElementById('logs-info-toggle'),
         warn: document.getElementById('logs-warn-toggle'),
       };
+      const logsClearBtn = document.getElementById('logs-clear-toggle');
       
       let lastLogId = 0;
       const logsCache = [];
@@ -580,6 +582,13 @@
           renderLogsFromCache();
         });
       });
+
+      if (logsClearBtn) {
+        logsClearBtn.addEventListener('click', () => {
+          logsCache.length = 0;
+          renderLogsFromCache();
+        });
+      }
 
       function escapeHtml(s) {
         return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
