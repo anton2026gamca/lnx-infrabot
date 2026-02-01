@@ -9,17 +9,18 @@ from dataclasses import dataclass
 from serial.tools import list_ports
 
 
-LOG = logging.getLogger("teensy_communication")
+logger = logging.getLogger("teensy_communication")
 
 DEFAULT_TEENSY_PORT = "/dev/ttyAMA0"
 DEFAULT_TEENSY_BAUD = 38400
 DEFAULT_TEENSY_TIMEOUT = 1
 
-EXPECTED_FIELDS = 30
 try:
-    from config import MOTOR_COUNT
+    from config import MOTOR_COUNT, LINE_SENSOR_COUNT
+    EXPECTED_FIELDS = 14 + LINE_SENSOR_COUNT + MOTOR_COUNT
 except ImportError:
     MOTOR_COUNT = 4
+    EXPECTED_FIELDS = 30
 
 LINE_PATTERN = re.compile(r'^\{\s*"a"\s*=\s*"(?P<data>.*)"\s*\}\s*$')
 
@@ -214,7 +215,7 @@ class TeensyCommunicator:
 
 def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) -> None:
     teensy = TeensyCommunicator(port=port, auto_connect=True)
-    LOG.info("Listening. Press Ctrl-C to quit.")
+    logger.info("Listening. Press Ctrl-C to quit.")
     fh = None
     if out_file is not None:
         fh = open(out_file, "a", encoding="utf-8")
@@ -237,7 +238,7 @@ def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) ->
             else:
                 print(data)
     except KeyboardInterrupt:
-        LOG.info("Interrupted by user, closing serial.")
+        logger.info("Interrupted by user, closing serial.")
     finally:
         teensy.close()
 
@@ -255,7 +256,7 @@ def main() -> int:
     try:
         run_shell(args.port, out_file=args.out, raw_mode=args.raw)
     except Exception as e:
-        LOG.exception("Fatal error: %s", e)
+        logger.exception("Fatal error: %s", e)
         return 2
     return 0
 

@@ -11,7 +11,8 @@ from helpers.helpers import RobotMode, Suppress200Filter, setup_logger, Buffered
 from config import (
     LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
-    TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT
+    TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT,
+    LINE_SENSOR_COUNT, LINE_DETECTION_THRESHOLDS
 )
 
 
@@ -30,11 +31,17 @@ shared_data: dict = {
     'next_log_id': multiprocessing.Value('i', 1),
     'manual_control': multiprocessing.Array('d', [0.0, 0.0, 0.0]),
     'compass_reset': multiprocessing.Value('b', False),
+    'line_detection_thresholds': multiprocessing.Array('i', LINE_DETECTION_THRESHOLDS),
+    'line_detected': multiprocessing.Array('b', [False] * LINE_SENSOR_COUNT),
+    'line_calibration_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
+    'line_calibration_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
+    'line_calibration_active': multiprocessing.Value('b', False),
     'locks': {
         'frame': multiprocessing.Lock(),
         'hardware_data': multiprocessing.Lock(),
         'robot_mode': multiprocessing.Lock(),
         'logs_buffer': multiprocessing.Lock(),
+        'line_calibration': multiprocessing.Lock(),
     }
 }
 
@@ -208,6 +215,56 @@ def check_and_clear_compass_reset() -> bool:
         return True
     return False
 
+def get_line_detection_thresholds() -> list[int]:
+    with shared_data['locks']['line_calibration']:
+        return list(shared_data['line_detection_thresholds'])
+
+def set_line_detection_thresholds(thresholds: list[int]) -> None:
+    with shared_data['locks']['line_calibration']:
+        for i in range(min(LINE_SENSOR_COUNT, len(thresholds))):
+            shared_data['line_detection_thresholds'][i] = thresholds[i]
+
+def get_line_detected() -> list[bool]:
+    with shared_data['locks']['line_calibration']:
+        return list(shared_data['line_detected'])
+
+def start_line_calibration() -> None:
+    with shared_data['locks']['line_calibration']:
+        shared_data['line_calibration_active'].value = True
+        for i in range(LINE_SENSOR_COUNT):
+            shared_data['line_calibration_min'][i] = float('inf')
+            shared_data['line_calibration_max'][i] = float('-inf')
+
+def stop_line_calibration(cancel: bool = False) -> tuple[list[int], list[float], list[float]]:
+    with shared_data['locks']['line_calibration']:
+        shared_data['line_calibration_active'].value = False
+        
+        if cancel:
+            return list(shared_data['line_detection_thresholds']), list(shared_data['line_calibration_min']), list(shared_data['line_calibration_max'])
+
+        thresholds = []
+        min_values = list(shared_data['line_calibration_min'])
+        max_values = list(shared_data['line_calibration_max'])
+        
+        for i in range(LINE_SENSOR_COUNT):
+            if min_values[i] != float('inf') and max_values[i] != float('-inf'):
+                threshold = int((min_values[i] + max_values[i]) / 2)
+                shared_data['line_detection_thresholds'][i] = threshold
+                thresholds.append(threshold)
+            else:
+                thresholds.append(shared_data['line_detection_thresholds'][i])
+        
+        return thresholds, min_values, max_values
+
+def get_line_calibration_status() -> dict:
+    with shared_data['locks']['line_calibration']:
+        return {
+            'active': shared_data['line_calibration_active'].value,
+            'current_thresholds': list(shared_data['line_detection_thresholds']),
+            'calibration_min': list(shared_data['line_calibration_min']) if shared_data['line_calibration_active'].value else None,
+            'calibration_max': list(shared_data['line_calibration_max']) if shared_data['line_calibration_active'].value else None,
+        }
+
 
 def camera_process(stop_event):
     try:
@@ -301,6 +358,16 @@ def hardware_communication_process(stop_event):
                     data.compass.roll -= compass_offset["roll"]
                     messages += 1
                     set_hardware_data(data)
+                    with shared_data['locks']['line_calibration']:
+                        if shared_data['line_calibration_active'].value:
+                            for i, value in enumerate(data.line):
+                                if i < LINE_SENSOR_COUNT:
+                                    shared_data['line_calibration_min'][i] = min(shared_data['line_calibration_min'][i], value)
+                                    shared_data['line_calibration_max'][i] = max(shared_data['line_calibration_max'][i], value)
+                        for i, value in enumerate(data.line):
+                            if i < LINE_SENSOR_COUNT:
+                                detected = value > shared_data['line_detection_thresholds'][i]
+                                shared_data['line_detected'][i] = detected
                 if check_and_clear_compass_reset():
                     if not data:
                         data = get_hardware_data()
@@ -345,6 +412,12 @@ def main():
     api.manual_control_setter = set_manual_control
     api.compass_reset_requester = request_compass_reset
     api.logs_getter = get_logs
+    api.line_detection_thresholds_getter = get_line_detection_thresholds
+    api.line_detection_thresholds_setter = set_line_detection_thresholds
+    api.line_detected_getter = get_line_detected
+    api.line_calibration_starter = start_line_calibration
+    api.line_calibration_stopper = stop_line_calibration
+    api.line_calibration_status_getter = get_line_calibration_status
     
     
     for logger_name in ('werkzeug',):

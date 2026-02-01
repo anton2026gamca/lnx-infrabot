@@ -51,3 +51,8 @@ MOTOR_LOCATIONS = [45, 135, 225, 315]
 # Motor speed limits
 MOTOR_SPEED_MIN = -9999
 MOTOR_SPEED_MAX = 9999
+
+# ==================== LINE SENSOR SETTINGS ====================
+LINE_SENSOR_COUNT = 12
+# Line detection thresholds (default values, can be calibrated)
+LINE_DETECTION_THRESHOLDS = [500] * LINE_SENSOR_COUNT

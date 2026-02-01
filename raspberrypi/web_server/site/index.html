@@ -177,6 +177,12 @@
         align-items: center;
         justify-content: center;
         font-weight: bold;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+
+      .line-sensor.detected {
+        border-color: #ffd700;
+        box-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
       }
 
       /* IR sensor bar */
@@ -313,6 +319,15 @@
       .corner-btn:hover {
         background: #444;
         border: 2px solid #ffd700;
+      }
+      .corner-btn.active {
+        color: black;
+        background: #daa520;
+        border: 2px solid #ffd700;
+      }
+      .corner-btn.active:hover {
+        background: #c28f0f;
+        border: 2px solid #daa520;
       }
 
       /* Logs Panel */
@@ -483,7 +498,7 @@
             </div>
 
             <!-- Line Sensors -->
-            <div class="sensor-card" style="grid-column: span 2;">
+            <div class="sensor-card" style="grid-column: span 2; position: relative;">
               <div class="sensor-label">Line Sensors (12)</div>
               <div style="display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; margin-top: 5px;">
                 <div class="line-sensor" id="line-0" style="height: 35px;"></div>
@@ -499,6 +514,7 @@
                 <div class="line-sensor" id="line-10" style="height: 35px;"></div>
                 <div class="line-sensor" id="line-11" style="height: 35px;"></div>
               </div>
+              <div class="corner-btn" style="top: 3px; right: 3px;" id="calibrate-line">Calibrate</div>
             </div>
 
             <!-- Motors -->
@@ -558,6 +574,18 @@
                 </div>
               </div>
             </div>
+
+            <div class="control-group" id="line-calibration-group" style="display: none;">
+              <div class="control-group-label">Line Sensor Calibration</div>
+              <div style="background: #222; border-radius: 8px; padding: 10px; font-size: 0.9em;">
+                <div style="color: #ccc; margin-bottom: 8px;" id="calibration-status">Ready to calibrate</div>
+                <div class="mode-buttons">
+                  <div class="btn btn-action" id="start-calibration">Start</div>
+                  <div class="btn btn-danger" id="stop-calibration" style="display: none;">Stop</div>
+                  <div class="btn btn-action" id="cancel-calibration" style="display: none;">Cancel</div>
+                </div>
+              </div>
+            </div>
             
           </div>
         </div>
@@ -565,6 +593,7 @@
     </div>
 
     <script>
+      // ========== Logs ==========
       const logsElement = document.getElementById('logs');
       const logToggles = {
         debug: document.getElementById('logs-debug-toggle'),
@@ -678,6 +707,7 @@
       }
       
 
+      // ========== Controls ==========
       const modeButtons = {
         idle: document.getElementById('mode-idle'),
         autonomous: document.getElementById('mode-autonomous'),
@@ -708,10 +738,17 @@
           
         }
       }
+
+      async function requestModeUpdate(mode) {
+        const response = await fetch(`/api/set_mode?mode=${mode}`, { method: 'POST' });
+        if (response.ok) {
+          changeModeTo(mode);
+        }
+      }
       
       Object.values(modeButtons).forEach(btn => {
         btn.addEventListener('click', async () => {
-          await fetch(`/api/set_mode?mode=${btn.id.split('-', 2)[1]}`, { method: 'POST' });
+          await requestModeUpdate(btn.id.split('-', 2)[1]);
         });
       });
 
@@ -821,6 +858,7 @@
       }
 
       
+      // ========== Sensors ==========
       const compasNeedle = document.getElementById('compass-needle');
       const compasHeading = document.getElementById('compass-heading');
       const compassPitch = document.getElementById('compass-pitch');
@@ -897,13 +935,26 @@
 
         // Line sensors
         const lineMax = 1000;
+        const lineData = data.line || {};
+        const lineRaw = lineData.raw || [];
+        const lineDetected = lineData.detected || [];
+        
         for (let i = 0; i < 12; i++) {
           const sensor = lineSensors[i];
-          const value = data.line[i];
+          if (!sensor) continue;
+          
+          const value = lineRaw[i] || 0;
+          const detected = lineDetected[i] || false;
+          
           sensor.style.background = `color-mix(in srgb, #333 ${100 - value / lineMax * 100}%, #4CAF50 ${value / lineMax * 100}%)`;
-          sensor.style.borderColor = `color-mix(in srgb, #555 ${100 - value / lineMax * 100}%, #4CAF50 ${value / lineMax * 100}%)`;
           sensor.style.color = `color-mix(in srgb, #999 ${100 - value / lineMax * 100}%, #fff ${value / lineMax * 100}%)`;
           sensor.textContent = `${Math.round(value / lineMax * 100)}`;
+          
+          if (detected) {
+            sensor.classList.add('detected');
+          } else {
+            sensor.classList.remove('detected');
+          }
         }
 
         // Motors
@@ -919,15 +970,125 @@
       }
 
       
+      // ========== Line Calibration ==========
+      const calibrateLineBtn = document.getElementById('calibrate-line');
+      const lineCalibrationGroup = document.getElementById('line-calibration-group');
+      const startCalibrationBtn = document.getElementById('start-calibration');
+      const stopCalibrationBtn = document.getElementById('stop-calibration');
+      const cancelCalibrationBtn = document.getElementById('cancel-calibration');
+      const calibrationStatus = document.getElementById('calibration-status');
+      let calibrationActive = false;
 
-      async function update() {
+      calibrateLineBtn.addEventListener('click', () => {
+        if (lineCalibrationGroup) {
+          lineCalibrationGroup.style.display = lineCalibrationGroup.style.display === 'none' ? '' : 'none';
+          calibrateLineBtn.classList.toggle('active');
+        }
+      });
+
+      startCalibrationBtn.addEventListener('click', async () => {
+        try {
+          const response = await fetch('/api/line_calibration/start', { method: 'POST' });
+          if (response.ok) {
+            calibrationActive = true;
+            calibrationStatus.textContent = 'Calibrating... Move robot over lines';
+            calibrationStatus.style.color = '#ffd700';
+            startCalibrationBtn.style.display = 'none';
+            stopCalibrationBtn.style.display = '';
+            cancelCalibrationBtn.style.display = '';
+          }
+        } catch (e) {
+          console.error('Failed to start calibration:', e);
+        }
+      });
+
+      stopCalibrationBtn.addEventListener('click', async () => {
+        try {
+          const response = await fetch('/api/line_calibration/stop', { method: 'POST' });
+          if (response.ok) {
+            const data = await response.json();
+            calibrationActive = false;
+
+            calibrationStatus.textContent = `Calibration complete! Thresholds updated.`;
+            calibrationStatus.style.color = '#4CAF50';
+            startCalibrationBtn.style.display = '';
+            stopCalibrationBtn.style.display = 'none';
+            cancelCalibrationBtn.style.display = 'none';
+
+            setTimeout(() => {
+              calibrationStatus.textContent = 'Ready to calibrate';
+              calibrationStatus.style.color = '#ccc';
+            }, 3000);
+          }
+        } catch (e) {
+          console.error('Failed to stop calibration:', e);
+        }
+      });
+
+      cancelCalibrationBtn.addEventListener('click', async () => {
+        try {
+          const response = await fetch('/api/line_calibration/cancel', { method: 'POST' });
+          if (response.ok) {
+            calibrationActive = false;
+            calibrationStatus.textContent = 'Calibration canceled.';
+            calibrationStatus.style.color = '#f44336';
+            stopCalibrationBtn.style.display = 'none';
+            startCalibrationBtn.style.display = '';
+            cancelCalibrationBtn.style.display = 'none';
+
+            setTimeout(() => {
+              calibrationStatus.textContent = 'Ready to calibrate';
+              calibrationStatus.style.color = '#ccc';
+            }, 2000);
+          }
+        } catch (e) {
+          console.error('Failed to cancel calibration:', e);
+        }
+      });
+
+      async function updateCalibrationStatus() {
+        try {
+          const response = await fetch('/api/line_calibration/status');
+          if (response.ok) {
+            const data = await response.json();
+            calibrationActive = data.active;
+            if (calibrationActive) {
+              calibrationStatus.textContent = 'Calibrating... Move robot over lines';
+              calibrationStatus.style.color = '#ffd700';
+              startCalibrationBtn.style.display = 'none';
+              stopCalibrationBtn.style.display = '';
+              cancelCalibrationBtn.style.display = '';
+            } else {
+              if (calibrationStatus.textContent === 'Calibrating... Move robot over lines') {
+                calibrationStatus.textContent = 'Ready to calibrate';
+                calibrationStatus.style.color = '#ccc';
+              }
+              startCalibrationBtn.style.display = '';
+              stopCalibrationBtn.style.display = 'none';
+              cancelCalibrationBtn.style.display = 'none';
+            }
+          }
+        } catch (e) {
+          
+        }
+      }
+
+
+      // ========== Updates ==========
+      async function fasterUpdate() {
         updateSensorData();
-        updateMode();
         updateLogs();
       }
 
-      setInterval(update, 200);
-      update();
+      async function slowerUpdate() {
+        updateCalibrationStatus();
+        updateMode();
+      }
+
+      setInterval(fasterUpdate, 200);
+      setInterval(slowerUpdate, 1000);
+      fasterUpdate();
+      slowerUpdate();
     </script>
   </body>
 </html>
