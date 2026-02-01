@@ -228,7 +228,7 @@ def camera_process(stop_event):
             
             time_elapsed = current_time - last_frame_time
             if time_elapsed < CAMERA_MIN_FRAME_INTERVAL:
-                time.sleep(CAMERA_MIN_FRAME_INTERVAL - time_elapsed - 0.001)
+                time.sleep(max(CAMERA_MIN_FRAME_INTERVAL - time_elapsed - 0.001, 0))
                 continue
             
             frame = camera.get_frame()
