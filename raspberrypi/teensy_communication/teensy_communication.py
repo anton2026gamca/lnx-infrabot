@@ -97,12 +97,12 @@ def format_message(motor_speeds: list[int], kicker_state: bool) -> str:
             raise ValueError(f"Motor {i} speed must be numeric, got {type(speed)}")
         clamped = max(-9999, min(9999, int(speed)))
         clamped_values.append(clamped)
-    clamped_values.append(1 if kicker_state else 0)
     
     formatted_values: list[str] = []
     for speed in clamped_values:
         sign = '+' if speed >= 0 else '-'
         formatted_values.append(f"{sign}{abs(speed):04d}")
+    formatted_values.append('1' if kicker_state else '0')
     
     data = ",".join(formatted_values)
     return '{"a"="' + data + '"}'

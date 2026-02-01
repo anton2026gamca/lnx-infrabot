@@ -28,32 +28,32 @@ volatile bool run = false;
 #define RASPBERRY_SERIAL Serial8
 #define RASPBERRY_SERIAL_SPEED 38400
 
-#define DEBUG true
+#define DEBUG false
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
 void debug_println(const char *msg) {
-  if (DEBUG) {
-    DEBUG_SERIAL.println(msg);
-  }
+#if DEBUG
+  DEBUG_SERIAL.println(msg);
+#endif
 }
 
 void debug_println(const float msg) {
-  if (DEBUG) {
-    DEBUG_SERIAL.println(msg);
-  }
+#if DEBUG
+  DEBUG_SERIAL.println(msg);
+#endif
 }
 
 void debug_print(const char *msg) {
-  if (DEBUG) {
-    DEBUG_SERIAL.print(msg);
-  }
+#if DEBUG
+  DEBUG_SERIAL.print(msg);
+#endif
 }
 
 void debug_print(const float msg) {
-  if (DEBUG) {
-    DEBUG_SERIAL.print(msg);
-  }
+#if DEBUG
+  DEBUG_SERIAL.print(msg);
+#endif
 }
 
 
@@ -349,23 +349,28 @@ void read_line_sensor() {
 
 
 void recieve_data() {
+  // Expected format: {"a"="+xxxx,+xxxx,+xxxx,+xxxx,x"}
+
   // String input = DEBUG_SERIAL.readStringUntil('\n');
   String input = RASPBERRY_SERIAL.readStringUntil('\n');
+
+  debug_print("Received string: ");
+  Serial.println(input.c_str());
   
   if (input.length() != 33 || input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[31] != '"' || input[32] != '}') {
-    debug_println("Invalid string!");
+    debug_println("Invalid string! Expected format: {\"a\"=\"+xxxx,+xxxx,+xxxx,+xxxx,x\"}");
     return;
   }
 
   String data = input.substring(6, 31);
 
-  if (data[5] != ',' || data[11] != ',' || data[17] != ','|| data[30] != ',') {
+  if (data[5] != ',' || data[11] != ',' || data[17] != ','|| data[23] != ',') {
     debug_println("Wrong comma structure!");
     return;
   }
   
-  for (int i = 0; i <= 18; i += 6) {
-    if (data[i] != '+' && data[i] != '-') {
+  for (int i = 0; i < 4; i += 1) {
+    if (data[i * 6] != '+' && data[i * 6] != '-') {
       debug_println("Wrong sign!");
       return;
     }
@@ -380,9 +385,9 @@ void recieve_data() {
       }
     }
   }
-  if (data[31] < '0' || data[31] > '9') {
+  if (data[24] < '0' || data[24] > '9') {
     debug_print("Wrong number at:");
-    debug_println(31);
+    debug_println(24);
     return;
   }
 
@@ -393,9 +398,7 @@ void recieve_data() {
   values[3] = data.substring(18, 23).toInt();
   values[4] = data.substring(24, 25).toInt();
 
-  debug_print("Default string: ");
-  debug_println(input.c_str());
-  debug_println("Extracted values:");
+  // debug_println("Extracted values:");
   // for (int i = 0; i < 4; i++) {
   //   debug_println(values[i]);
   // }
@@ -517,7 +520,10 @@ void loop() {
   read_line_sensor();
   update_all_data();
 
-  if (DEBUG) { print_debug_data(0); }
+#if DEBUG
+  print_debug_data(0);
+#endif
+
   create_raspberry_message();
   send_raspberry_message();
 
@@ -533,23 +539,23 @@ void loop() {
   
   (run) ? digitalWrite(LED_BUILTIN, HIGH) : digitalWrite(LED_BUILTIN, LOW);
 
-  Serial.print("SWITCH: ");
-  Serial.print(switch_value);
-  Serial.print("     MODULE_SWITCH: ");
-  Serial.print(use_bluetooht_module);
-  Serial.print("    MODULE: ");
-  Serial.print(module_value);
-  Serial.print("    RUN: ");
-  Serial.print(run);
+  debug_print("SWITCH: ");
+  debug_print(switch_value);
+  debug_print("     MODULE_SWITCH: ");
+  debug_print(use_bluetooht_module);
+  debug_print("    MODULE: ");
+  debug_print(module_value);
+  debug_print("    RUN: ");
+  debug_print(run);
 
   if (run) {
     set_all_motors_speed(motors_data.motor_speed);
     set_kicker_position(motors_data.kicker_position);
-    Serial.println("        MOVE!");
+    debug_println("        MOVE!");
   }
   else {
     stop_motors();
-    Serial.println("        STOP!");
+    debug_println("        STOP!");
   }
   delay(10);
 }
