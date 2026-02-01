@@ -17,8 +17,8 @@
 
       .container {
         display: flex;
-        gap: 10px;
-        padding: 10px;
+        gap: 7px;
+        padding: 7px;
         height: 100vh;
       }
 
@@ -27,13 +27,13 @@
         display: flex;
         flex-direction: column;
         max-width: 65%;
-        gap: 10px;
+        gap: 7px;
       }
 
       .panel {
         background: #111;
-        border-radius: 15px;
-        padding: 15px;
+        border-radius: 7px;
+        padding: 7px;
         overflow: hidden;
         display: flex;
         flex-direction: column;
@@ -50,8 +50,8 @@
       .panel-header {
         font-size: 1.3em;
         font-weight: bold;
-        margin-bottom: 15px;
-        padding-bottom: 10px;
+        margin-bottom: 5px;
+        padding-bottom: 7px;
         border-bottom: 2px solid #333;
         flex-shrink: 0;
       }
@@ -64,7 +64,7 @@
         justify-content: center; 
         align-items: center; 
         background: black; 
-        border-radius: 10px; 
+        border-radius: 5px; 
         overflow: hidden; 
         aspect-ratio: 16 / 9;
       }
@@ -87,8 +87,8 @@
 
       .sensor-card {
         background: #222;
-        border-radius: 10px;
-        padding: 10px;
+        border-radius: 2px;
+        padding: 5px;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -222,15 +222,15 @@
 
       .mode-buttons {
         display: flex;
-        gap: 10px;
+        gap: 5px;
       }
 
       .btn {
         background: #333; 
         color: white; 
         border: none; 
-        padding: 10px 16px; 
-        border-radius: 10px; 
+        padding: 3px 10px; 
+        border-radius: 7px; 
         cursor: pointer; 
         font-size: 0.95em; 
         user-select: none; 
@@ -297,6 +297,24 @@
         background: #d32f2f;
       }
 
+      .corner-btn {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: #222;
+        color: white;
+        border: 2px solid #444;
+        padding: 2px 8px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 0.85em;
+        user-select: none;
+      }
+      .corner-btn:hover {
+        background: #444;
+        border: 2px solid #ffd700;
+      }
+
       /* Logs Panel */
       .logs-header {
         display: flex;
@@ -313,16 +331,21 @@
         font-size: 0.8em;
       }
 
-      .logs-content { 
-        font-family: 'Courier New', monospace; 
-        font-size: 12px; 
-        white-space: pre-wrap; 
+      .logs-content {
         flex: 1;
-        overflow-y: auto;
         background: #0a0a0a;
         padding: 10px;
         border-radius: 8px;
-        min-height: 0;
+        display: flex;
+        max-height: 100%;
+      }
+
+      .logs-content .logs {
+        font-family: 'Courier New', monospace; 
+        font-size: 12px;
+        white-space: pre-wrap;
+        overflow-y: auto;
+        width: 100%;
       }
 
       /* Scrollbar styling */
@@ -349,8 +372,7 @@
       .manual-control-box {
         background: #222;
         border-radius: 10px;
-        padding: 12px;
-        min-height: 80px;
+        padding: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -369,7 +391,7 @@
       <div class="side" style="flex: 2;">
         <!-- Camera Panel -->
         <div class="panel shrink">
-          <div class="panel-header">Camera Feed</div>
+          <!-- <div class="panel-header">Camera Feed</div> -->
           <div class="img-container">
             <img id="camera" src="/api/video_feed" alt="Camera Feed">
           </div>
@@ -377,22 +399,26 @@
 
         <!-- Logs Panel -->
         <div class="panel expand">
-          <div class="logs-header">
+          <!-- <div class="logs-header">
             <span class="panel-header" style="margin: 0; padding: 0; border: none;">Logs</span>
-            <span>
+          </div> -->
+          <div class="logs-content" style="position: relative;">
+            <span style="position: absolute; top: 10px; right: 10px; display: flex;">
               <span class="toggle-btn message-type-toggle" id="logs-debug-toggle">DEBUG</span>
               <span class="toggle-btn message-type-toggle selected" id="logs-info-toggle">INFO</span>
               <span class="toggle-btn message-type-toggle selected" id="logs-warn-toggle">WARN</span>
             </span>
+            <div class="logs" id="logs">
+
+            </div>
           </div>
-          <div class="logs-content" id="logs">[System initialized]</div>
         </div>
       </div>
 
       <div class="side">
         <!-- Sensors Panel -->
         <div class="panel shrink">
-          <div class="panel-header">Sensors</div>
+          <!-- <div class="panel-header">Sensors</div> -->
           <div class="sensors-grid">
             
             <!-- Compass (BNO055) -->
@@ -410,7 +436,7 @@
                 <div><span style="color: #888;">Pitch:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-pitch">0°</span></div>
                 <div><span style="color: #888;">Roll:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-roll">0°</span></div>
               </div>
-              <div class="btn" style="position: absolute; top: 3px; right: 3px; padding: 2px 8px; border-radius: 7px;" id="reset-compass">Reset Compass Position</div>
+              <div class="corner-btn" style="top: 3px; right: 3px;" id="reset-compass">Reset Compass Position</div>
             </div>
 
             <!-- IR Ball Detection -->
@@ -510,7 +536,7 @@
 
         <!-- Controls Panel -->
         <div class="panel expand">
-          <div class="panel-header">Controls</div>
+          <!-- <div class="panel-header">Controls</div> -->
           <div class="controls-content">
             
             <div class="control-group">
@@ -526,7 +552,7 @@
               <div class="control-group-label">Manual Control (focus here)</div>
               <div tabindex="0" id="manual-control-box" class="manual-control-box">
                 <div style="text-align: center; color: #ccc;">
-                  <div>Use <strong>W/A/S/D</strong> to move — <strong>← →</strong> to rotate</div>
+                  <div>Use <strong style="color: gold;">W/A/S/D</strong> to move, <strong style="color: gold;">← →</strong> to rotate</div>
                   <div style="font-size: 0.9em; color: #888; margin-top: 6px;">Click to focus, press keys to control</div>
                 </div>
               </div>
