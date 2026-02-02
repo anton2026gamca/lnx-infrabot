@@ -259,8 +259,6 @@ def hardware_communication_process(stop_event):
 
         with teensy_communication.TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
             while not stop_event.is_set():
-                communicator.send_motors_message(get_motor_speeds(), get_kicker_state())
-                messages_sent += 1
                 data = communicator.read_data(timeout=0.1)
                 if data:
                     messages_received += 1
@@ -273,6 +271,9 @@ def hardware_communication_process(stop_event):
                     update_line_detected(data)
 
                     set_hardware_data(data)
+
+                    communicator.send_motors_message(get_motor_speeds(), get_kicker_state())
+                    messages_sent += 1
                     
                 if check_and_clear_compass_reset():
                     if not data:

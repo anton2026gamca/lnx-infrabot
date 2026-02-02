@@ -29,7 +29,8 @@ volatile bool run = false;           // Overall run state
 #define RASPBERRY_SERIAL Serial8
 #define RASPBERRY_SERIAL_SPEED 38400
 
-#define DEBUG_ENABLED false
+#define DEBUG_PRINTS_ENABLED true
+#define DEBUG_LOGS_ENABLED false
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
@@ -43,20 +44,20 @@ enum DebugLevel {
 // Enhanced debug system with levels and formatting
 template<typename T>
 inline void debug_print(const T& msg) {
-#if DEBUG_ENABLED
+#if DEBUG_PRINTS_ENABLED
   DEBUG_SERIAL.print(msg);
 #endif
 }
 
 template<typename T>
 inline void debug_println(const T& msg) {
-#if DEBUG_ENABLED
+#if DEBUG_PRINTS_ENABLED
   DEBUG_SERIAL.println(msg);
 #endif
 }
 
 inline void debug_println() {
-#if DEBUG_ENABLED
+#if DEBUG_PRINTS_ENABLED
   DEBUG_SERIAL.println();
 #endif
 }
@@ -64,7 +65,7 @@ inline void debug_println() {
 // Debug with level prefix
 template<typename T>
 void debug_log(DebugLevel level, const T& msg) {
-#if DEBUG_ENABLED
+#if DEBUG_LOGS_ENABLED
   switch(level) {
     case DEBUG_INFO:  DEBUG_SERIAL.print("[INFO]  "); break;
     case DEBUG_WARN:  DEBUG_SERIAL.print("[WARN]  "); break;
@@ -372,7 +373,11 @@ bool parse_motor_command() {
   // Expected format: {"a"="±MMMM,±MMMM,±MMMM,±MMMM,K"}
   // MMMM = motor speed (signed, 0 to 255), K = kicker (0 or 1)
   
-  String input = RASPBERRY_SERIAL.readStringUntil('\n');
+  String input = "";
+  while (RASPBERRY_SERIAL.available() > 0) {
+    input = RASPBERRY_SERIAL.readStringUntil('\n');
+  }
+
   if (input.length() == 0) return false;
 
   debug_print("RX: ");
@@ -380,41 +385,41 @@ bool parse_motor_command() {
   
   const int EXPECTED_LENGTH = 33;
   if (input.length() != EXPECTED_LENGTH) {
-    debug_log(DEBUG_ERROR, "Invalid message length");
+    debug_log(DEBUG_ERROR, "Invalid message length: \"" + input + "\"");
     return false;
   }
   
   if (input[0] != '{' || input[1] != '"' || input[2] != 'a' || 
       input[3] != '"' || input[4] != '=' || input[5] != '"' ||
       input[31] != '"' || input[32] != '}') {
-    debug_log(DEBUG_ERROR, "Invalid JSON structure");
+    debug_log(DEBUG_ERROR, "Invalid JSON structure: \"" + input + "\"");
     return false;
   }
 
   String data = input.substring(6, 31);  // "±MMMM,±MMMM,±MMMM,±MMMM,K"
 
   if (data[5] != ',' || data[11] != ',' || data[17] != ',' || data[23] != ',') {
-    debug_log(DEBUG_ERROR, "Invalid comma positions");
+    debug_log(DEBUG_ERROR, "Invalid comma positions: \"" + input + "\"");
     return false;
   }
   
   for (int i = 0; i < MOTOR_COUNT; i++) {
     char sign = data[i * 6];
     if (sign != '+' && sign != '-') {
-      debug_log(DEBUG_ERROR, "Invalid sign character");
+      debug_log(DEBUG_ERROR, "Invalid sign character: \"" + input + "\"");
       return false;
     }
     
     for (int j = 1; j <= 4; j++) {
       if (!isdigit(data[i * 6 + j])) {
-        debug_log(DEBUG_ERROR, "Invalid motor value digit");
+        debug_log(DEBUG_ERROR, "Invalid motor value digit: \"" + input + "\"");
         return false;
       }
     }
   }
   
   if (!isdigit(data[24])) {
-    debug_log(DEBUG_ERROR, "Invalid kicker value");
+    debug_log(DEBUG_ERROR, "Invalid kicker value: \"" + input + "\"");
     return false;
   }
 
@@ -425,7 +430,6 @@ bool parse_motor_command() {
   motors_data.kicker_position = data.substring(24, 25).toInt();
   motors_data.kicker_position = constrain(motors_data.kicker_position, KICKER_IN, KICKER_OUT);
   
-  debug_log(DEBUG_INFO, "Command parsed successfully");
   return true;
 }
 
@@ -593,7 +597,7 @@ void loop() {
     debug_print(">>> STOPPED");
   }
   
-#if DEBUG_ENABLED
+#if DEBUG_PRINTS_ENABLED
   // Debug status output
   debug_print(" | SW=");
   debug_print(switch_value);
