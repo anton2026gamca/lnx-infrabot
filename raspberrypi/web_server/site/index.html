@@ -304,9 +304,6 @@
       }
 
       .corner-btn {
-        position: absolute;
-        top: 10px;
-        right: 10px;
         background: #222;
         color: white;
         border: 2px solid #444;
@@ -315,6 +312,11 @@
         cursor: pointer;
         font-size: 0.85em;
         user-select: none;
+      }
+      .position-relative .corner-btn {
+        position: absolute;
+        top: 10px;
+        right: 10px;
       }
       .corner-btn:hover {
         background: #444;
@@ -399,6 +401,109 @@
         box-shadow: 0 0 0 2px #ffd700;
         outline: none;
       }
+
+      .manual-control-content {
+        text-align: center;
+        color: #ccc;
+      }
+
+      .manual-control-keys {
+        color: gold;
+        font-weight: bold;
+      }
+
+      .manual-control-hint {
+        font-size: 0.9em;
+        color: #888;
+        margin-top: 6px;
+      }
+
+      /* Ball Direction Indicator */
+      .ball-direction-container {
+        background: #1a1a1a;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+      }
+
+      .ball-direction-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: #333;
+        position: relative;
+      }
+
+      .ball-direction-arrow {
+        position: absolute;
+        width: 4px;
+        height: 25px;
+        background: #4CAF50;
+        top: 50%;
+        left: 50%;
+        transform-origin: center bottom;
+        transform: translate(-50%, -100%) rotate(0deg);
+      }
+
+      /* Line Sensor Grid */
+      .line-sensor-grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 5px;
+        margin-top: 5px;
+      }
+
+      .line-sensor-compact {
+        height: 30px;
+      }
+
+      .line-sensor-full {
+        height: 35px;
+      }
+
+      .line-sensor-status {
+        margin-top: 5px;
+        font-size: 0.85em;
+        color: #888;
+      }
+
+      /* Compass Details */
+      .compass-details {
+        display: flex;
+        gap: 15px;
+        font-size: 0.9em;
+      }
+
+      .compass-detail-label {
+        color: #888;
+      }
+
+      .compass-detail-value {
+        font-size: 1em;
+      }
+
+      /* Calibration Box */
+      .calibration-box {
+        background: #222;
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 0.9em;
+      }
+
+      .calibration-status-text {
+        color: #ccc;
+        margin-bottom: 8px;
+      }
+
+      /* Grid Span Utilities */
+      .grid-span-2 {
+        grid-column: span 2;
+      }
+
+      .position-relative {
+        position: relative;
+      }
     </style>
   </head>
   <body>
@@ -417,7 +522,7 @@
           <!-- <div class="logs-header">
             <span class="panel-header" style="margin: 0; padding: 0; border: none;">Logs</span>
           </div> -->
-          <div class="logs-content" style="position: relative;">
+          <div class="logs-content position-relative">
             <span style="position: absolute; top: 10px; right: 10px; display: flex;">
               <span class="toggle-btn message-type-toggle" id="logs-debug-toggle">DEBUG</span>
               <span class="toggle-btn message-type-toggle selected" id="logs-info-toggle">INFO</span>
@@ -438,7 +543,7 @@
           <div class="sensors-grid">
             
             <!-- Compass (BNO055) -->
-            <div class="sensor-card" style="grid-column: span 2; position: relative;">
+            <div class="sensor-card grid-span-2 position-relative">
               <div class="sensor-label">Compass (BNO055)</div>
               <div class="compass" id="compass">
                 <div class="compass-needle" id="compass-needle"></div>
@@ -447,10 +552,10 @@
                 <div class="compass-direction s">S</div>
                 <div class="compass-direction w">W</div>
               </div>
-              <div style="display: flex; gap: 15px; font-size: 0.9em;">
-                <div><span style="color: #888;">Heading:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-heading">0°</span></div>
-                <div><span style="color: #888;">Pitch:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-pitch">0°</span></div>
-                <div><span style="color: #888;">Roll:</span> <span class="sensor-value" style="font-size: 1em;" id="compass-roll">0°</span></div>
+              <div class="compass-details">
+                <div><span class="compass-detail-label">Heading:</span> <span class="sensor-value compass-detail-value" id="compass-heading">0°</span></div>
+                <div><span class="compass-detail-label">Pitch:</span> <span class="sensor-value compass-detail-value" id="compass-pitch">0°</span></div>
+                <div><span class="compass-detail-label">Roll:</span> <span class="sensor-value compass-detail-value" id="compass-roll">0°</span></div>
               </div>
               <div class="corner-btn" style="top: 3px; right: 3px;" id="reset-compass">Reset Compass Position</div>
             </div>
@@ -459,9 +564,9 @@
             <div class="sensor-card">
               <div class="sensor-label">Ball Angle</div>
               <div class="sensor-value" id="ir-angle">---</div>
-              <div class="sensor-visual" style="background: #1a1a1a; display: flex; align-items: center; justify-content: center; position: relative;">
-                <div style="width: 50px; height: 50px; border-radius: 50%; background: #333; position: relative;" id="ball-direction">
-                  <div style="position: absolute; width: 4px; height: 25px; background: #4CAF50; top: 50%; left: 50%; transform-origin: center bottom; transform: translate(-50%, -100%) rotate(0deg);" id="ball-arrow"></div>
+              <div class="sensor-visual ball-direction-container">
+                <div class="ball-direction-circle" id="ball-direction">
+                  <div class="ball-direction-arrow" id="ball-arrow"></div>
                 </div>
               </div>
             </div>
@@ -478,41 +583,41 @@
             </div>
 
             <!-- IR Sensors -->
-            <div class="sensor-card" style="grid-column: span 2;">
+            <div class="sensor-card grid-span-2">
               <div class="sensor-label">IR Sensors (12)</div>
-              <div style="display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; margin-top: 5px;">
-                <div class="line-sensor" id="ir-sensor-0" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-1" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-2" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-3" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-4" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-5" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-6" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-7" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-8" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-9" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-10" style="height: 30px;"></div>
-                <div class="line-sensor" id="ir-sensor-11" style="height: 30px;"></div>
+              <div class="line-sensor-grid">
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-0"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-1"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-2"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-3"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-4"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-5"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-6"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-7"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-8"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-9"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-10"></div>
+                <div class="line-sensor line-sensor-compact" id="ir-sensor-11"></div>
               </div>
-              <div style="margin-top: 5px; font-size: 0.85em; color: #888;">Status: <span id="ir-status">0</span></div>
+              <div class="line-sensor-status">Status: <span id="ir-status">0</span></div>
             </div>
 
             <!-- Line Sensors -->
-            <div class="sensor-card" style="grid-column: span 2; position: relative;">
+            <div class="sensor-card grid-span-2 position-relative">
               <div class="sensor-label">Line Sensors (12)</div>
-              <div style="display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; margin-top: 5px;">
-                <div class="line-sensor" id="line-0" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-1" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-2" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-3" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-4" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-5" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-6" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-7" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-8" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-9" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-10" style="height: 35px;"></div>
-                <div class="line-sensor" id="line-11" style="height: 35px;"></div>
+              <div class="line-sensor-grid">
+                <div class="line-sensor line-sensor-full" id="line-0"></div>
+                <div class="line-sensor line-sensor-full" id="line-1"></div>
+                <div class="line-sensor line-sensor-full" id="line-2"></div>
+                <div class="line-sensor line-sensor-full" id="line-3"></div>
+                <div class="line-sensor line-sensor-full" id="line-4"></div>
+                <div class="line-sensor line-sensor-full" id="line-5"></div>
+                <div class="line-sensor line-sensor-full" id="line-6"></div>
+                <div class="line-sensor line-sensor-full" id="line-7"></div>
+                <div class="line-sensor line-sensor-full" id="line-8"></div>
+                <div class="line-sensor line-sensor-full" id="line-9"></div>
+                <div class="line-sensor line-sensor-full" id="line-10"></div>
+                <div class="line-sensor line-sensor-full" id="line-11"></div>
               </div>
               <div class="corner-btn" style="top: 3px; right: 3px;" id="calibrate-line">Calibrate</div>
             </div>
@@ -568,17 +673,17 @@
             <div class="control-group" id="manual-control-group" style="display: none;">
               <div class="control-group-label">Manual Control (focus here)</div>
               <div tabindex="0" id="manual-control-box" class="manual-control-box">
-                <div style="text-align: center; color: #ccc;">
-                  <div>Use <strong style="color: gold;">W/A/S/D</strong> to move, <strong style="color: gold;">← →</strong> to rotate</div>
-                  <div style="font-size: 0.9em; color: #888; margin-top: 6px;">Click to focus, press keys to control</div>
+                <div class="manual-control-content">
+                  <div>Use <strong class="manual-control-keys">W/A/S/D</strong> to move, <strong class="manual-control-keys">← →</strong> to rotate</div>
+                  <div class="manual-control-hint">Click to focus, press keys to control</div>
                 </div>
               </div>
             </div>
 
             <div class="control-group" id="line-calibration-group" style="display: none;">
               <div class="control-group-label">Line Sensor Calibration</div>
-              <div style="background: #222; border-radius: 8px; padding: 10px; font-size: 0.9em;">
-                <div style="color: #ccc; margin-bottom: 8px;" id="calibration-status">Ready to calibrate</div>
+              <div class="calibration-box">
+                <div class="calibration-status-text" id="calibration-status">Ready to calibrate</div>
                 <div class="mode-buttons">
                   <div class="btn btn-action" id="start-calibration">Start</div>
                   <div class="btn btn-danger" id="stop-calibration" style="display: none;">Stop</div>
