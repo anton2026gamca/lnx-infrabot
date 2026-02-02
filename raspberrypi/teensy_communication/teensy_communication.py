@@ -5,7 +5,7 @@ import re
 import serial
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from serial.tools import list_ports
 
 
@@ -227,7 +227,7 @@ def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) ->
             else:
                 parsed = teensy.read_data()
                 if parsed:
-                    data = json.dumps(parsed, ensure_ascii=False)
+                    data = json.dumps(asdict(parsed), ensure_ascii=False)
             
             if data is None:
                 continue
