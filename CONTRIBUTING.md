@@ -27,6 +27,7 @@
 | Classes                | PascalCase (CapWords)            | `class DataProcessor:`                |
 | Constants              | UPPER_SNAKE_CASE                 | `MAX_RETRIES = 5`                     |
 | Function size & naming | Keep functions small (single responsibility); descriptive names | Break complex logic into helpers; use clear names |
+| Formatting             | Indentation - 4 spaces (no tabs) | Consistent style across files         |
 
 ### C
 
@@ -42,3 +43,23 @@
 | Header include guards      | UPPER_SNAKE_CASE              | `PROJECT_NETWORK_CONFIG_H`                                        |
 | Formatting                 | 4 spaces for indentation (no tabs); keep functions short | Consistent style across files          |
 | Pointer placement          | Prefer `type *ptr`            | `char *name;`                                                     |
+
+### HTML & CSS
+
+| Item               | Convention               | Example / Notes                 |
+|--------------------|--------------------------|---------------------------------|
+| File names         | kebab-case.html          | `index-page.html`               |
+| Tags               | lowercase                | `<div>`, `<span>`, `<a>`        |
+| Attributes         | kebab-case               | `data-user-id`, `aria-label`    |
+| IDs & Classes      | kebab-case               | `class="main-header"`           |
+| Formatting         | 2 spaces for indentation | Consistent style across files   |
+
+### JavaScript
+
+| Item               | Convention               | Example / Notes                 |
+|--------------------|--------------------------|---------------------------------|
+| File names         | kebab-case.js            | `app-controller.js`             |
+| Variables & functions | camelCase               | `let userName; function fetchData() {}` |
+| Classes            | PascalCase               | `class UserProfile {}`          |
+| Constants          | UPPER_SNAKE_CASE         | `const API_URL = 'https://api.example.com';` |
+| Formatting         | 2 spaces for indentation | Consistent style across files   |
