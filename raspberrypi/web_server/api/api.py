@@ -121,7 +121,7 @@ def get_logs():
         since_id = 0
 
     try:
-        items, last_id = logs_getter(since_id)
+        items, last_id = logs_getter(since_id) # pyright: ignore[reportGeneralTypeIssues]
         return jsonify({"logs": items, "last_id": last_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -203,7 +203,7 @@ def stop_line_calibration():
     if not status['active']:
         return jsonify({"error": "Calibration is not active"}), 400
     
-    thresholds, min_values, max_values = line_calibration_stopper()
+    thresholds, min_values, max_values = line_calibration_stopper() # pyright: ignore[reportGeneralTypeIssues]
     
     for i in range(LINE_SENSOR_COUNT):
         if min_values[i] == float('inf') or max_values[i] == float('-inf'):

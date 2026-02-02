@@ -1,9 +1,8 @@
 from dataclasses import dataclass
-from picamera2 import Picamera2
+from picamera2 import Picamera2 # pyright: ignore[reportMissingImports]
 import time
 import numpy as np
 from config import FRAME_WIDTH, FRAME_HEIGHT, CAMERA_BUFFER_COUNT
-
 
 
 @dataclass
