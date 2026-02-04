@@ -29,8 +29,8 @@ volatile bool run = false;           // Overall run state
 #define RASPBERRY_SERIAL Serial8
 #define RASPBERRY_SERIAL_SPEED 38400
 
-#define DEBUG_PRINTS_ENABLED true
-#define DEBUG_LOGS_ENABLED false
+#define DEBUG_PRINTS_ENABLED false
+#define DEBUG_LOGS_ENABLED true
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
@@ -183,8 +183,8 @@ char tx_message_buffer[DATA_STRING_LENGTH];
 
 // ========== Control State Management ==========
 void update_running_state() {
-  // If using Bluetooth module, read its state; otherwise, always enabled
   module_value = use_bluetooth_module ? (digitalRead(MODULE_PIN) == HIGH) : true;
+  run = (switch_value && module_value);
 }
 
 // ========== Debug Functions ==========
@@ -484,6 +484,18 @@ void transmit_sensor_data() {
 }
 
 
+void transmit_running_state() {
+  String switch_message = "{\"b\"=\"";
+  switch_message += (run ? 'R' : 'S');
+  switch_message += (use_bluetooth_module ? 'B' : 'N');
+  switch_message += (switch_value ? 'S' : 's');
+  switch_message += (module_value ? 'M' : 'm');
+  switch_message += "\"}";
+  
+  RASPBERRY_SERIAL.println(switch_message);
+}
+
+
 
 // ========== Setup & Main Loop ==========
 void setup() {
@@ -549,10 +561,14 @@ void loop() {
   // Handle manual switch debouncing (active LOW)
   static unsigned long last_switch_time = 0;
   static unsigned long last_module_switch_time = 0;
+  static unsigned long last_running_state_transmit_time = 0;
   unsigned long current_time = millis();
   
   if (!digitalRead(SWITCH_PIN) && (current_time - last_switch_time > 200)) {
     switch_value = !switch_value;
+    update_running_state();
+    transmit_running_state();
+
     last_switch_time = current_time;
     debug_log(DEBUG_INFO, switch_value ? "Manual switch: ON" : "Manual switch: OFF");
   }
@@ -560,8 +576,17 @@ void loop() {
   if (!digitalRead(MODULE_SWITCH_PIN) && (current_time - last_module_switch_time > 200)) {
     use_bluetooth_module = !use_bluetooth_module;
     update_running_state();
+    transmit_running_state();
+
     last_module_switch_time = current_time;
     debug_log(DEBUG_INFO, use_bluetooth_module ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
+  }
+
+  if (last_module_switch_time + 1000 < current_time &&
+      last_switch_time + 1000 < current_time &&
+      last_running_state_transmit_time + 1000 < current_time) {
+    transmit_running_state();
+    last_running_state_transmit_time = current_time;
   }
 
   // Read all sensors

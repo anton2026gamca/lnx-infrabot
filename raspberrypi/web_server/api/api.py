@@ -32,6 +32,7 @@ line_detected_getter = None
 line_calibration_starter = None
 line_calibration_stopper = None
 line_calibration_status_getter = None
+running_state_getter = None
 
 logger = logging.getLogger("API Process")
 
@@ -85,6 +86,8 @@ def get_sensor_data():
     if data is None:
         return jsonify({"error": "No data available yet"}), 503
     
+    running_state = running_state_getter() if running_state_getter else None
+    
     response = {
         "compass": {
             "heading": data.compass.heading,
@@ -104,6 +107,12 @@ def get_sensor_data():
         },
         "motors": motor_speeds_getter() if motor_speeds_getter else [0, 0, 0, 0],
         "kicker": kicker_state_getter() if kicker_state_getter else False,
+        "running_state": {
+            "running": running_state.running if running_state else False,
+            "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
+            "bt_module_state": running_state.bt_module_state if running_state else False,
+            "switch_state": running_state.switch_state if running_state else False
+        } if running_state else None,
         "timestamp": data.timestamp
     }
     return jsonify(response)

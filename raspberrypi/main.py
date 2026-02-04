@@ -36,12 +36,14 @@ shared_data: dict = {
     'line_calibration_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
     'line_calibration_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
     'line_calibration_active': multiprocessing.Value('b', False),
+    'running_state': manager.dict(),
     'locks': {
         'frame': multiprocessing.Lock(),
         'hardware_data': multiprocessing.Lock(),
         'robot_mode': multiprocessing.Lock(),
         'logs_buffer': multiprocessing.Lock(),
         'line_calibration': multiprocessing.Lock(),
+        'running_state': multiprocessing.Lock(),
     }
 }
 
@@ -259,10 +261,23 @@ def hardware_communication_process(stop_event):
 
         with teensy_communication.TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
             while not stop_event.is_set():
-                data = communicator.read_data(timeout=0.1)
-                if data:
+                line = communicator.read_line()
+                data = None
+                if line:
                     messages_received += 1
 
+                    line_type = teensy_communication.get_line_type(line)
+
+                    if line_type == teensy_communication.LineType.SENSOR_DATA:
+                        data = teensy_communication.parse_sensor_data_line(line)
+                    elif line_type == teensy_communication.LineType.RUNNING_STATE:
+                        state = teensy_communication.parse_running_state_line(line)
+                        set_running_state(state)
+                    
+                    communicator.send_motors_message(get_motor_speeds(), get_kicker_state())
+                    messages_sent += 1
+                
+                if data:
                     data.compass.heading -= compass_offset["heading"]
                     data.compass.pitch -= compass_offset["pitch"]
                     data.compass.roll -= compass_offset["roll"]
@@ -271,10 +286,7 @@ def hardware_communication_process(stop_event):
                     update_line_detected(data)
 
                     set_hardware_data(data)
-
-                    communicator.send_motors_message(get_motor_speeds(), get_kicker_state())
-                    messages_sent += 1
-                    
+                
                 if check_and_clear_compass_reset():
                     if not data:
                         data = get_hardware_data()
@@ -283,6 +295,7 @@ def hardware_communication_process(stop_event):
                         compass_offset["heading"] += data.compass.heading
                         compass_offset["pitch"] += data.compass.pitch
                         compass_offset["roll"] += data.compass.roll
+                
                 if time.time() > time_start + 1:
                     hardware_logger.debug(f"Messages received per second: {messages_received}")
                     hardware_logger.debug(f"Messages sent per second: {messages_sent}")
@@ -386,6 +399,26 @@ def update_line_calibration(data: teensy_communication.ParsedTeensyData):
                     shared_data['line_calibration_min'][i] = min(shared_data['line_calibration_min'][i], value)
                     shared_data['line_calibration_max'][i] = max(shared_data['line_calibration_max'][i], value)
 
+def set_running_state(state: teensy_communication.RunningStateData | None):
+    with shared_data['locks']['running_state']:
+        shared_data['running_state'].clear()
+        if state:
+            shared_data['running_state']['running'] = state.running
+            shared_data['running_state']['bt_module_enabled'] = state.bt_module_enabled
+            shared_data['running_state']['bt_module_state'] = state.bt_module_state
+            shared_data['running_state']['switch_state'] = state.switch_state
+
+def get_running_state() -> teensy_communication.RunningStateData | None:
+    with shared_data['locks']['running_state']:
+        if not shared_data['running_state']:
+            return None
+        return teensy_communication.RunningStateData(
+            running=shared_data['running_state'].get('running', False),
+            bt_module_enabled=shared_data['running_state'].get('bt_module_enabled', False),
+            bt_module_state=shared_data['running_state'].get('bt_module_state', False),
+            switch_state=shared_data['running_state'].get('switch_state', False),
+        )
+
 #endregion
 #region API
 
@@ -424,6 +457,7 @@ def init_api():
     api.line_calibration_starter = start_line_calibration
     api.line_calibration_stopper = stop_line_calibration
     api.line_calibration_status_getter = get_line_calibration_status
+    api.running_state_getter = get_running_state
 
 def api_get_camera_frame():
     data = get_camera_frame()

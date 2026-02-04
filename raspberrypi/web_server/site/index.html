@@ -109,7 +109,6 @@
         font-size: 1.5em;
         font-weight: bold;
         color: #4CAF50;
-        margin-bottom: 5px;
         flex-shrink: 0;
       }
 
@@ -643,6 +642,36 @@
               <div class="sensor-value" id="motor-3">0</div>
             </div>
 
+            <!-- Running State -->
+            <div class="sensor-card grid-span-2">
+              <div class="sensor-label">Running State</div>
+              <div style="display: flex; gap: 7px; align-items: center; justify-content: center;">
+                <div style="border-radius: 5px; text-align: center; min-width: 50px; min-height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                  <div style="font-size: 0.75em; color: #888;">Switch</div>
+                  <div class="sensor-value" id="switch-status" style="font-size: 1.2em;">---</div>
+                </div>
+
+                <div style="color: #999; font-size: 0.75em; font-weight: bold;">&&</div>
+                
+                <div style="border-radius: 5px; display: flex; align-items: center; justify-content: space-around; min-width: 160px;">
+                  <div style="text-align: center;">
+                    <div style="font-size: 0.75em; color: #888;">BT Module</div>
+                    <div class="sensor-value" id="bt-module-status" style="font-size: 1.2em;">---</div>
+                  </div>
+                  <div style="text-align: center;">
+                    <div style="font-size: 0.75em; color: #888;">BT State</div>
+                    <div class="sensor-value" id="bt-state-status" style="font-size: 1.2em;">---</div>
+                  </div>
+                </div>
+
+                <div style="color: #999; font-size: 0.75em; font-weight: bold;">=></div>
+                
+                <div style="border-radius: 5px; text-align: center; min-width: 100px; min-height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                  <div class="sensor-value" id="running-status" style="font-size: 1.2em;">---</div>
+                </div>
+              </div>
+            </div>
+
             <!-- Kicker -->
             <!-- <div class="sensor-card" style="grid-column: span 2;">
               <div class="sensor-label">Kicker</div>
@@ -989,6 +1018,10 @@
       for (let i = 0; i < 12; i++) {
         irSensors.push(document.getElementById(`ir-sensor-${i}`));
       }
+      const runningStatus = document.getElementById('running-status');
+      const switchStatus = document.getElementById('switch-status');
+      const btModuleStatus = document.getElementById('bt-module-status');
+      const btStateStatus = document.getElementById('bt-state-status');
 
       async function updateSensorData() {
         const response = await fetch('/api/get_sensor_data');
@@ -1066,6 +1099,52 @@
         for (let i = 0; i < 4; i++) {
           const speed = data.motors[i];
           motorElements[i].textContent = speed.toString();
+        }
+
+        // Running State
+        if (data.running_state) {
+          const rs = data.running_state;
+          
+          if (rs.running) {
+            runningStatus.textContent = 'RUNNING';
+            runningStatus.style.color = '#4CAF50';
+            motorElements.forEach(me => {
+              me.style.color = '';
+            });
+          } else {
+            runningStatus.textContent = 'STOPPED';
+            runningStatus.style.color = '#f44336';
+            motorElements.forEach(me => {
+              me.style.color = '#999';
+            });
+          }
+          
+          switchStatus.textContent = rs.switch_state ? 'ON' : 'OFF';
+          switchStatus.style.color = rs.switch_state ? '#4CAF50' : '#f44336';
+          
+          if (rs.bt_module_enabled) {
+            btModuleStatus.textContent = 'ENABLED';
+            btModuleStatus.style.color = '#fff';
+
+            btStateStatus.textContent = rs.bt_module_state ? 'ON' : 'OFF';
+            btStateStatus.style.color = rs.bt_module_state ? '#4CAF50' : '#f44336';
+            btStateStatus.parentElement.style.display = '';
+          } else {
+            btModuleStatus.textContent = 'DISABLED';
+            btModuleStatus.style.color = '#4CAF50';
+
+            btStateStatus.parentElement.style.display = 'none';
+          }
+          
+        } else {
+          runningStatus.textContent = '---';
+          runningStatus.style.color = '#888';
+          switchStatus.textContent = '---';
+          switchStatus.style.color = '#888';
+          btModuleStatus.textContent = '---';
+          btModuleStatus.style.color = '#888';
+          btStateStatus.textContent = '---';
+          btStateStatus.style.color = '#888';
         }
 
         // Kicker

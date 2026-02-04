@@ -22,7 +22,19 @@ except ImportError:
     MOTOR_COUNT = 4
     EXPECTED_FIELDS = 30
 
-LINE_PATTERN = re.compile(r'^\{\s*"a"\s*=\s*"(?P<data>.*)"\s*\}\s*$')
+
+class LineType:
+    UNKNOWN = "unknown"
+    SENSOR_DATA = "sensor_data"
+    RUNNING_STATE = "running_state"
+
+
+def get_line_type(line: str) -> str:
+    line = line.strip()
+    for line_type, pattern in LINE_TYPES_PATTERNS.items():
+        if pattern.match(line):
+            return line_type
+    return LineType.UNKNOWN
 
 
 @dataclass
@@ -46,10 +58,9 @@ class ParsedTeensyData:
     raw: str
     timestamp: float
 
-
-def parse_teensy_line(line: str) -> ParsedTeensyData:
+def parse_sensor_data_line(line: str) -> ParsedTeensyData:
     line = line.strip()
-    m = LINE_PATTERN.match(line)
+    m = LINE_TYPES_PATTERNS[LineType.SENSOR_DATA].match(line)
     if not m:
         raise ValueError("Line does not match wrapper {\"a\"=\"...\"}")
 
@@ -81,6 +92,41 @@ def parse_teensy_line(line: str) -> ParsedTeensyData:
         raise ValueError(f"Failed to parse numeric fields: {e}")
 
     return parsed
+
+
+@dataclass
+class RunningStateData:
+    running: bool
+    bt_module_enabled: bool
+    bt_module_state: bool
+    switch_state: bool
+
+def parse_running_state_line(line: str) -> RunningStateData:
+    line = line.strip()
+    m = LINE_TYPES_PATTERNS[LineType.RUNNING_STATE].match(line)
+    if not m:
+        raise ValueError("Line does not match wrapper {\"b\"=\"...\"}")
+
+    data = m.group("data")
+    if len(data) != 4:
+        raise ValueError(f"Running state data length invalid: expected 4, got {len(data)}")
+
+    return RunningStateData(
+        running=data[0] == '1' or data[0] == 'R',
+        bt_module_enabled=data[1] == '1' or data[1] == 'B',
+        switch_state=data[2] == '1' or data[2] == 'S',
+        bt_module_state=data[3] == '1' or data[3] == 'M',
+    )
+
+LINE_TYPES_PATTERNS: dict[str, re.Pattern] = {
+    LineType.SENSOR_DATA: re.compile(r'^\{\s*"a"\s*=\s*"(?P<data>.*)"\s*\}\s*$'),
+    LineType.RUNNING_STATE: re.compile(r'^\{\s*"b"\s*=\s*"(?P<data>.*)"\s*\}\s*$'),
+}
+
+LINE_TYPES_PARSE_FUNCTIONS: dict = {
+    LineType.SENSOR_DATA: parse_sensor_data_line,
+    LineType.RUNNING_STATE: parse_running_state_line,
+}
 
 
 def list_serial_ports() -> list[str]:
@@ -189,7 +235,7 @@ class TeensyCommunicator:
             if not line:
                 return None
             try:
-                parsed = parse_teensy_line(line)
+                parsed = parse_sensor_data_line(line)
                 return parsed
             except ValueError as e:
                 self._log.warning("Failed to parse line: %s (%s)", line, e)
