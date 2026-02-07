@@ -1,4 +1,5 @@
 import logging
+import math
 import multiprocessing
 import multiprocessing.shared_memory
 import numpy as np
@@ -158,22 +159,50 @@ logic_logger = setup_logger(
 
 def logic_process(stop_event):
     try:
-        last_log_time = 0
+        move_x = 0.0
+        move_y = 0.0
+        rotate = 0.0
+        acceleration = 1.0 / 0.15
         
+        target_heading = None
+        rotation_correction_gain = 1.3
+        rotation_deadzone = 15 # degrees
+
         while not stop_event.is_set():
             start_time = time.time()
 
             mode = get_robot_mode()
             if mode == RobotMode.IDLE:
+                set_motor_speeds([0, 0, 0, 0])
                 time.sleep(IDLE_SLEEP_DURATION)
+                target_heading = None
                 continue
             elif mode == RobotMode.MANUAL:
                 control = get_manual_control()
-                motors = calculate_motors_speeds(control.move_angle, control.move_speed * 255, control.rotate)
+                hardware_data = get_hardware_data()
                 
-                if start_time - last_log_time > 0.5:
-                    logic_logger.info(f"Manual control: move_angle={control.move_angle:.2f}, move_speed={control.move_speed:.2f}, rotate={control.rotate:.2f} => motors={motors}")
-                    last_log_time = start_time
+                move_x += (control.move_speed * math.cos(math.radians(control.move_angle)) - move_x) * acceleration * LOGIC_LOOP_PERIOD
+                move_y += (control.move_speed * math.sin(math.radians(control.move_angle)) - move_y) * acceleration * LOGIC_LOOP_PERIOD
+                rotate += (control.rotate - rotate) * acceleration * LOGIC_LOOP_PERIOD
+                
+                if abs(rotate) > 0.01:
+                    target_heading = None
+                elif target_heading is None and hardware_data:
+                    target_heading = hardware_data.compass.heading
+                
+                rotation_correction = 0.0
+                if hardware_data and target_heading is not None:
+                    current_heading = hardware_data.compass.heading
+                    heading_error = (target_heading - current_heading + 180) % 360 - 180
+                    if abs(heading_error) > rotation_deadzone:
+                        rotation_correction = (heading_error / 180.0) * rotation_correction_gain
+                
+                total_rotation = rotate * 0.4 + rotation_correction
+                total_rotation = max(-1.0, min(1.0, total_rotation))
+
+                angle = math.atan2(move_y, move_x)
+                speed = math.sqrt(move_x**2 + move_y**2)
+                motors = calculate_motors_speeds(angle, speed * 255, total_rotation * 255)
                 
                 set_motor_speeds(motors)
             elif mode == RobotMode.AUTONOMOUS:
