@@ -15,7 +15,7 @@ from config import (
     LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT,
-    LINE_SENSOR_COUNT, LINE_DETECTION_THRESHOLDS, LINE_DETECTION_DARK_LINE,
+    LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, LINE_DETECTION_THRESHOLDS, LINE_DETECTION_DARK_LINE,
     CALIBRATION_FILE_PATH
 )
 
@@ -164,52 +164,19 @@ logic_logger = setup_logger(
 
 def logic_process(stop_event):
     try:
-        move_x = 0.0
-        move_y = 0.0
-        rotate = 0.0
-        acceleration = 1.0 / 0.15
-        
-        target_heading = None
-        rotation_correction_gain = 1.3
-        rotation_deadzone = 15 # degrees
+        motors_controller = SmartMotorsController()
 
         while not stop_event.is_set():
             start_time = time.time()
 
             mode = get_robot_mode()
             if mode == RobotMode.IDLE:
-                set_motor_speeds([0, 0, 0, 0])
+                motors_controller.reset()
                 time.sleep(IDLE_SLEEP_DURATION)
-                target_heading = None
                 continue
             elif mode == RobotMode.MANUAL:
                 control = get_manual_control()
-                hardware_data = get_hardware_data()
-                
-                move_x += (control.move_speed * math.cos(math.radians(control.move_angle)) - move_x) * acceleration * LOGIC_LOOP_PERIOD
-                move_y += (control.move_speed * math.sin(math.radians(control.move_angle)) - move_y) * acceleration * LOGIC_LOOP_PERIOD
-                rotate += (control.rotate - rotate) * acceleration * LOGIC_LOOP_PERIOD
-                
-                if abs(rotate) > 0.01:
-                    target_heading = None
-                elif target_heading is None and hardware_data:
-                    target_heading = hardware_data.compass.heading
-                
-                rotation_correction = 0.0
-                if hardware_data and target_heading is not None:
-                    current_heading = hardware_data.compass.heading
-                    heading_error = (target_heading - current_heading + 180) % 360 - 180
-                    if abs(heading_error) > rotation_deadzone:
-                        rotation_correction = (heading_error / 180.0) * rotation_correction_gain
-                
-                total_rotation = rotate * 0.4 + rotation_correction
-                total_rotation = max(-1.0, min(1.0, total_rotation))
-
-                angle = math.atan2(move_y, move_x)
-                speed = math.sqrt(move_x**2 + move_y**2)
-                motors = calculate_motors_speeds(angle, speed * 255, total_rotation * 255)
-                
-                set_motor_speeds(motors)
+                motors_controller.set_motors(control.move_angle, control.move_speed, control.rotate)
             elif mode == RobotMode.AUTONOMOUS:
                 pass
 
@@ -221,6 +188,60 @@ def logic_process(stop_event):
         pass
     except Exception as e:
         logic_logger.error(f"{e}")
+    
+class MotorsController:
+    def __init__(self):
+        self.move_x = 0.0
+        self.move_y = 0.0
+        self.rotate = 0.0
+        self.acceleration = 1.0 / 0.15
+
+    def set_motors(self, angle: float, speed: float, rotate: float):
+        self.move_x += (speed * math.cos(math.radians(angle)) - self.move_x) * self.acceleration * LOGIC_LOOP_PERIOD
+        self.move_y += (speed * math.sin(math.radians(angle)) - self.move_y) * self.acceleration * LOGIC_LOOP_PERIOD
+        self.rotate += (rotate - self.rotate) * self.acceleration * LOGIC_LOOP_PERIOD
+
+        new_angle = math.atan2(self.move_y, self.move_x)
+        speed = math.sqrt(self.move_x**2 + self.move_y**2)
+
+        motors = calculate_motors_speeds(new_angle, speed * 255, self.rotate * 255)
+        set_motor_speeds(motors)
+    
+    def reset(self):
+        self.move_x = 0.0
+        self.move_y = 0.0
+        self.rotate = 0.0
+        set_motor_speeds([0, 0, 0, 0])
+
+class SmartMotorsController(MotorsController):
+    def __init__(self):
+        super().__init__()
+        self.target_heading = None
+        self.rotation_deadzone = 15.0
+        self.rotation_correction_gain = 1
+
+    def set_motors(self, angle: float, speed: float, rotate: float):
+        hardware_data = get_hardware_data()
+        if abs(rotate) > 0.01:
+            self.target_heading = None
+        elif self.target_heading is None and hardware_data:
+            self.target_heading = hardware_data.compass.heading
+        rotation_correction = 0.0
+        if hardware_data and self.target_heading is not None:
+            current_heading = hardware_data.compass.heading
+            heading_error = (self.target_heading - current_heading + 180) % 360 - 180
+            if abs(heading_error) > self.rotation_deadzone:
+                rotation_correction = (heading_error / 180.0) * self.rotation_correction_gain
+
+        total_rotation = rotate * 0.4 + rotation_correction
+        total_rotation = max(-1.0, min(1.0, total_rotation))
+
+        super().set_motors(angle, speed, total_rotation)
+    
+    def reset(self):
+        super().reset()
+        self.target_heading = None
+
 
 def set_motor_speeds(speeds: list[int]):
     for i in range(min(4, len(speeds))):
