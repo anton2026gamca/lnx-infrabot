@@ -14,7 +14,7 @@ from helpers.helpers import RobotMode, Suppress200Filter, setup_logger, Buffered
 from config import (
     LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
-    TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT,
+    TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT, COMMUNICATION_LOOP_PERIOD,
     LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, LINE_DETECTION_THRESHOLDS, LINE_DETECTION_DARK_LINE,
     CALIBRATION_FILE_PATH
 )
@@ -306,7 +306,7 @@ def hardware_communication_process(stop_event):
     try:
         messages_received = 0
         messages_sent = 0
-        time_start = time.time()
+        last_log_time = time.time()
 
         compass_offset: dict[str, int] = {
             "heading": 0,
@@ -316,6 +316,8 @@ def hardware_communication_process(stop_event):
 
         with teensy_communication.TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
             while not stop_event.is_set():
+                start_time = time.time()
+
                 line = communicator.read_line()
                 data = None
                 if line:
@@ -351,12 +353,16 @@ def hardware_communication_process(stop_event):
                         compass_offset["pitch"] += data.compass.pitch
                         compass_offset["roll"] += data.compass.roll
                 
-                if time.time() > time_start + 1:
+                if time.time() > last_log_time + 1:
                     hardware_logger.debug(f"Messages received per second: {messages_received}")
                     hardware_logger.debug(f"Messages sent per second: {messages_sent}")
                     messages_received = 0
                     messages_sent = 0
-                    time_start = time.time()
+                    last_log_time = time.time()
+                
+                time_elapsed = time.time() - start_time
+                if time_elapsed < COMMUNICATION_LOOP_PERIOD:
+                    time.sleep(max(0.0, COMMUNICATION_LOOP_PERIOD - time_elapsed - 0.001))
     except KeyboardInterrupt:
         pass
     except Exception as e:
