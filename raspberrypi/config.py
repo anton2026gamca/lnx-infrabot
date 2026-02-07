@@ -54,5 +54,8 @@ MOTOR_SPEED_MAX = 9999
 
 # ==================== LINE SENSOR SETTINGS ====================
 LINE_SENSOR_COUNT = 12
-# Line detection thresholds (default values, can be calibrated)
+LINE_SENSOR_LOCATIONS = [i * (360 / LINE_SENSOR_COUNT) for i in range(LINE_SENSOR_COUNT)]
+
+# Default values, can be calibrated/changed via api
 LINE_DETECTION_THRESHOLDS = [500] * LINE_SENSOR_COUNT
+LINE_DETECTION_DARK_LINE = False

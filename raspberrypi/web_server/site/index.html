@@ -558,7 +558,7 @@
               </div>
               <div class="corner-btn" style="top: 3px; right: 3px;" id="reset-compass">Reset Compass Position</div>
             </div>
-
+            
             <!-- IR Ball Detection -->
             <div class="sensor-card">
               <div class="sensor-label">Ball Angle</div>
@@ -569,7 +569,7 @@
                 </div>
               </div>
             </div>
-
+            
             <!-- IR Ball Distance -->
             <div class="sensor-card">
               <div class="sensor-label">Ball Distance</div>
@@ -580,7 +580,7 @@
                 </div>
               </div>
             </div>
-
+            
             <!-- IR Sensors -->
             <div class="sensor-card grid-span-2">
               <div class="sensor-label">IR Sensors (12)</div>
@@ -600,7 +600,7 @@
               </div>
               <div class="line-sensor-status">Status: <span id="ir-status">0</span></div>
             </div>
-
+            
             <!-- Line Sensors -->
             <div class="sensor-card grid-span-2 position-relative">
               <div class="sensor-label">Line Sensors (12)</div>
@@ -618,6 +618,7 @@
                 <div class="line-sensor line-sensor-full" id="line-10"></div>
                 <div class="line-sensor line-sensor-full" id="line-11"></div>
               </div>
+              <div class="corner-btn" style="top: 3px; left: 3px; right: auto;" id="line-polarity-toggle">Line: Light</div>
               <div class="corner-btn" style="top: 3px; right: 3px;" id="calibrate-line">Calibrate</div>
             </div>
 
@@ -1004,18 +1005,19 @@
       const irStatus = document.getElementById('ir-status');
       // const kickerState = document.getElementById('kicker-state');
       // const kickerIndicator = document.getElementById('kicker-indicator');
-      const motorElements = [
-        document.getElementById('motor-0'),
-        document.getElementById('motor-1'),
-        document.getElementById('motor-2'),
-        document.getElementById('motor-3'),
-      ];
+      const motorsCount = 4;
+      const motorElements = [];
+      for (let i = 0; i < motorsCount; i++) {
+        motorElements.push(document.getElementById(`motor-${i}`));
+      }
+      const lineSensorsCount = 12;
       const lineSensors = [];
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < lineSensorsCount; i++) {
         lineSensors.push(document.getElementById(`line-${i}`));
       }
+      const irSensorsCount = 12;
       const irSensors = [];
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < irSensorsCount; i++) {
         irSensors.push(document.getElementById(`ir-sensor-${i}`));
       }
       const runningStatus = document.getElementById('running-status');
@@ -1061,7 +1063,7 @@
 
         // IR Sensors
         const irMax = 256;
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < irSensorsCount; i++) {
           const sensor = irSensors[i];
           const value = data.ir.sensors[i];
           sensor.style.background = `color-mix(in srgb, #333 ${100 - value / irMax * 100}%, #4CAF50 ${value / irMax * 100}%)`;
@@ -1077,7 +1079,7 @@
         const lineRaw = lineData.raw || [];
         const lineDetected = lineData.detected || [];
         
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < lineSensorsCount; i++) {
           const sensor = lineSensors[i];
           if (!sensor) continue;
           
@@ -1096,7 +1098,7 @@
         }
 
         // Motors
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < motorsCount; i++) {
           const speed = data.motors[i];
           motorElements[i].textContent = speed.toString();
         }
@@ -1156,12 +1158,14 @@
       
       // ========== Line Calibration ==========
       const calibrateLineBtn = document.getElementById('calibrate-line');
+      const linePolarityToggle = document.getElementById('line-polarity-toggle');
       const lineCalibrationGroup = document.getElementById('line-calibration-group');
       const startCalibrationBtn = document.getElementById('start-calibration');
       const stopCalibrationBtn = document.getElementById('stop-calibration');
       const cancelCalibrationBtn = document.getElementById('cancel-calibration');
       const calibrationStatus = document.getElementById('calibration-status');
       let calibrationActive = false;
+      let darkLineMode = false;
 
       calibrateLineBtn.addEventListener('click', () => {
         if (lineCalibrationGroup) {
@@ -1169,6 +1173,47 @@
           calibrateLineBtn.classList.toggle('active');
         }
       });
+
+      function updateLinePolarityUI(isDark) {
+        darkLineMode = !!isDark;
+        if (linePolarityToggle) {
+          linePolarityToggle.textContent = darkLineMode ? 'Line: Dark' : 'Line: Light';
+        }
+      }
+
+      async function setLinePolarity(isDark) {
+        try {
+          const response = await fetch('/api/line_detection/set_polarity', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: isDark ? 'dark' : 'light' })
+          });
+          if (response.ok) {
+            updateLinePolarityUI(isDark);
+          }
+        } catch (e) {
+          console.error('Failed to set line polarity:', e);
+        }
+      }
+
+      async function updateLinePolarityStatus() {
+        if (!linePolarityToggle) return;
+        try {
+          const response = await fetch('/api/line_detection/polarity');
+          if (response.ok) {
+            const data = await response.json();
+            updateLinePolarityUI(data.mode === 'dark');
+          }
+        } catch (e) {
+          
+        }
+      }
+
+      if (linePolarityToggle) {
+        linePolarityToggle.addEventListener('click', () => {
+          setLinePolarity(!darkLineMode);
+        });
+      }
 
       startCalibrationBtn.addEventListener('click', async () => {
         try {
@@ -1267,6 +1312,7 @@
       async function slowerUpdate() {
         updateCalibrationStatus();
         updateMode();
+        updateLinePolarityStatus();
       }
 
       setInterval(fasterUpdate, 200);

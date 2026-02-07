@@ -32,6 +32,9 @@ line_detected_getter = None
 line_calibration_starter = None
 line_calibration_stopper = None
 line_calibration_status_getter = None
+line_detection_dark_getter = None
+line_detection_dark_setter = None
+
 running_state_getter = None
 
 logger = logging.getLogger("API Process")
@@ -103,7 +106,8 @@ def get_sensor_data():
         "line": {
             "raw": data.line,
             "detected": line_detected_getter() if line_detected_getter else [False] * LINE_SENSOR_COUNT,
-            "thresholds": line_detection_thresholds_getter() if line_detection_thresholds_getter else [500] * LINE_SENSOR_COUNT
+            "thresholds": line_detection_thresholds_getter() if line_detection_thresholds_getter else [500] * LINE_SENSOR_COUNT,
+            "polarity": "dark" if (line_detection_dark_getter and line_detection_dark_getter()) else "light"
         },
         "motors": motor_speeds_getter() if motor_speeds_getter else [0, 0, 0, 0],
         "kicker": kicker_state_getter() if kicker_state_getter else False,
@@ -254,6 +258,44 @@ def get_line_calibration_status():
     
     status = line_calibration_status_getter()
     return jsonify(status)
+
+
+@app.route('/api/line_detection/polarity')
+def get_line_detection_polarity():
+    if line_detection_dark_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+
+    return jsonify({
+        "mode": "dark" if line_detection_dark_getter() else "light"
+    })
+
+@app.route('/api/line_detection/set_polarity', methods=['POST'])
+def set_line_detection_polarity():
+    if line_detection_dark_setter is None:
+        return jsonify({"error": "Internal server error"}), 503
+
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode', None)
+    dark = data.get('dark', None)
+
+    if isinstance(mode, str):
+        mode_lower = mode.lower()
+        if mode_lower in ('dark', 'darker'):
+            line_detection_dark_setter(True)
+            logger.info("Line detection polarity set to dark")
+            return jsonify({"status": "ok", "mode": "dark"})
+        if mode_lower in ('light', 'lighter'):
+            line_detection_dark_setter(False)
+            logger.info("Line detection polarity set to light")
+            return jsonify({"status": "ok", "mode": "light"})
+        return jsonify({"error": "Invalid mode. Use 'dark' or 'light'."}), 400
+
+    if isinstance(dark, bool):
+        line_detection_dark_setter(dark)
+        logger.info(f"Line detection polarity set to {'dark' if dark else 'light'}")
+        return jsonify({"status": "ok", "mode": "dark" if dark else "light"})
+
+    return jsonify({"error": "Missing or invalid 'mode' or 'dark' in request body"}), 400
 
 
 @app.route('/api/line_calibration/set_thresholds', methods=['POST'])

@@ -13,7 +13,7 @@ from config import (
     LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT,
-    LINE_SENSOR_COUNT, LINE_DETECTION_THRESHOLDS
+    LINE_SENSOR_COUNT, LINE_DETECTION_THRESHOLDS, LINE_DETECTION_DARK_LINE
 )
 
 
@@ -37,6 +37,7 @@ shared_data: dict = {
     'line_calibration_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
     'line_calibration_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
     'line_calibration_active': multiprocessing.Value('b', False),
+    'line_detection_dark': multiprocessing.Value('b', LINE_DETECTION_DARK_LINE),
     'running_state': manager.dict(),
     'locks': {
         'frame': multiprocessing.Lock(),
@@ -376,11 +377,21 @@ def get_line_detected() -> list[bool]:
     with shared_data['locks']['line_calibration']:
         return list(shared_data['line_detected'])
 
+def get_line_detection_dark() -> bool:
+    with shared_data['locks']['line_calibration']:
+        return bool(shared_data['line_detection_dark'].value)
+
+def set_line_detection_dark(is_dark_line: bool) -> None:
+    with shared_data['locks']['line_calibration']:
+        shared_data['line_detection_dark'].value = bool(is_dark_line)
+
 def update_line_detected(data: teensy_communication.ParsedTeensyData):
     with shared_data['locks']['line_calibration']:
+        detect_dark = bool(shared_data['line_detection_dark'].value)
         for i, value in enumerate(data.line):
             if i < LINE_SENSOR_COUNT:
-                detected = value > shared_data['line_detection_thresholds'][i]
+                threshold = shared_data['line_detection_thresholds'][i]
+                detected = value < threshold if detect_dark else value > threshold
                 shared_data['line_detected'][i] = detected
 
 def start_line_calibration() -> None:
@@ -416,6 +427,7 @@ def get_line_calibration_status() -> dict:
         return {
             'active': shared_data['line_calibration_active'].value,
             'current_thresholds': list(shared_data['line_detection_thresholds']),
+            'dark_line': bool(shared_data['line_detection_dark'].value),
             'calibration_min': list(shared_data['line_calibration_min']) if shared_data['line_calibration_active'].value else None,
             'calibration_max': list(shared_data['line_calibration_max']) if shared_data['line_calibration_active'].value else None,
         }
@@ -486,6 +498,8 @@ def init_api():
     api.line_calibration_starter = start_line_calibration
     api.line_calibration_stopper = stop_line_calibration
     api.line_calibration_status_getter = get_line_calibration_status
+    api.line_detection_dark_getter = get_line_detection_dark
+    api.line_detection_dark_setter = set_line_detection_dark
     api.running_state_getter = get_running_state
 
 def api_get_camera_frame():
