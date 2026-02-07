@@ -59,3 +59,6 @@ LINE_SENSOR_LOCATIONS = [i * (360 / LINE_SENSOR_COUNT) for i in range(LINE_SENSO
 # Default values, can be calibrated/changed via api
 LINE_DETECTION_THRESHOLDS = [500] * LINE_SENSOR_COUNT
 LINE_DETECTION_DARK_LINE = False
+
+# ==================== CALIBRATION STORAGE ====================
+CALIBRATION_FILE_PATH = "calibration_data.json"

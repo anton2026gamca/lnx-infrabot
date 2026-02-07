@@ -1,8 +1,10 @@
+import json
 import logging
 import math
 import multiprocessing
 import multiprocessing.shared_memory
 import numpy as np
+import os
 import time
 
 import helpers.camera as camera
@@ -13,7 +15,8 @@ from config import (
     LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT,
-    LINE_SENSOR_COUNT, LINE_DETECTION_THRESHOLDS, LINE_DETECTION_DARK_LINE
+    LINE_SENSOR_COUNT, LINE_DETECTION_THRESHOLDS, LINE_DETECTION_DARK_LINE,
+    CALIBRATION_FILE_PATH
 )
 
 
@@ -46,6 +49,7 @@ shared_data: dict = {
         'logs_buffer': multiprocessing.Lock(),
         'line_calibration': multiprocessing.Lock(),
         'running_state': multiprocessing.Lock(),
+        'calibration_storage': multiprocessing.Lock(),
     }
 }
 
@@ -368,10 +372,12 @@ def get_line_detection_thresholds() -> list[int]:
     with shared_data['locks']['line_calibration']:
         return list(shared_data['line_detection_thresholds'])
 
-def set_line_detection_thresholds(thresholds: list[int]) -> None:
+def set_line_detection_thresholds(thresholds: list[int], save: bool = True) -> None:
     with shared_data['locks']['line_calibration']:
         for i in range(min(LINE_SENSOR_COUNT, len(thresholds))):
             shared_data['line_detection_thresholds'][i] = thresholds[i]
+    if save:
+        save_calibration_data()
 
 def get_line_detected() -> list[bool]:
     with shared_data['locks']['line_calibration']:
@@ -381,9 +387,11 @@ def get_line_detection_dark() -> bool:
     with shared_data['locks']['line_calibration']:
         return bool(shared_data['line_detection_dark'].value)
 
-def set_line_detection_dark(is_dark_line: bool) -> None:
+def set_line_detection_dark(is_dark_line: bool, save: bool = True) -> None:
     with shared_data['locks']['line_calibration']:
         shared_data['line_detection_dark'].value = bool(is_dark_line)
+    if save:
+        save_calibration_data()
 
 def update_line_detected(data: teensy_communication.ParsedTeensyData):
     with shared_data['locks']['line_calibration']:
@@ -419,8 +427,9 @@ def stop_line_calibration(cancel: bool = False) -> tuple[list[int], list[float],
                 thresholds.append(threshold)
             else:
                 thresholds.append(shared_data['line_detection_thresholds'][i])
-        
-        return thresholds, min_values, max_values
+
+    save_calibration_data()
+    return thresholds, min_values, max_values
 
 def get_line_calibration_status() -> dict:
     with shared_data['locks']['line_calibration']:
@@ -439,6 +448,68 @@ def update_line_calibration(data: teensy_communication.ParsedTeensyData):
                 if i < LINE_SENSOR_COUNT:
                     shared_data['line_calibration_min'][i] = min(shared_data['line_calibration_min'][i], value)
                     shared_data['line_calibration_max'][i] = max(shared_data['line_calibration_max'][i], value)
+
+CALIBRATION_SCHEMA_VERSION = 1
+
+def _get_calibration_storage_path() -> str:
+    if os.path.isabs(CALIBRATION_FILE_PATH):
+        return CALIBRATION_FILE_PATH
+    return os.path.join(os.path.dirname(__file__), CALIBRATION_FILE_PATH)
+
+def _create_calibration_data() -> dict:
+    with shared_data['locks']['line_calibration']:
+        return {
+            "version": CALIBRATION_SCHEMA_VERSION,
+            "calibrations": {
+                "line_detection": {
+                    "thresholds": list(shared_data['line_detection_thresholds']),
+                    "dark_line": bool(shared_data['line_detection_dark'].value),
+                }
+            }
+        }
+
+def save_calibration_data() -> None:
+    path = _get_calibration_storage_path()
+    data = _create_calibration_data()
+
+    with shared_data['locks']['calibration_storage']:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            temp_path = f"{path}.tmp"
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(temp_path, path)
+        except Exception as e:
+            hardware_logger.error(f"Failed to save calibration data: {e}")
+
+def load_calibration_data() -> None:
+    path = _get_calibration_storage_path()
+    if not os.path.exists(path):
+        hardware_logger.info("No calibration data file found, using defaults")
+        return
+
+    with shared_data['locks']['calibration_storage']:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            hardware_logger.warning(f"Failed to read calibration data: {e}")
+            return
+
+    try:
+        calibrations = data.get("calibrations", {}) if isinstance(data, dict) else {}
+        line_data = calibrations.get("line_detection", {}) if isinstance(calibrations, dict) else {}
+        thresholds = line_data.get("thresholds", None)
+        dark_line = line_data.get("dark_line", None)
+
+        if isinstance(thresholds, list) and len(thresholds) == LINE_SENSOR_COUNT:
+            set_line_detection_thresholds([int(t) for t in thresholds], save=False)
+        if isinstance(dark_line, bool):
+            set_line_detection_dark(dark_line, save=False)
+
+        hardware_logger.info("Calibration data loaded")
+    except Exception as e:
+        hardware_logger.warning(f"Invalid calibration data format: {e}")
 
 def set_running_state(state: teensy_communication.RunningStateData | None):
     with shared_data['locks']['running_state']:
@@ -512,6 +583,8 @@ def api_get_camera_frame():
 
 
 def main():
+    load_calibration_data()
+
     for logger_name in ('werkzeug',):
         l = logging.getLogger(logger_name)
         l.setLevel(logging.INFO)
