@@ -33,6 +33,13 @@ line_calibration_starter = None
 line_calibration_stopper = None
 line_calibration_status_getter = None
 
+running_state_getter = None
+
+rotation_correction_enabled_getter = None
+rotation_correction_enabled_setter = None
+line_avoiding_enabled_getter = None
+line_avoiding_enabled_setter = None
+
 logger = logging.getLogger("API Process")
 
 
@@ -85,6 +92,8 @@ def get_sensor_data():
     if data is None:
         return jsonify({"error": "No data available yet"}), 503
     
+    running_state = running_state_getter() if running_state_getter else None
+    
     response = {
         "compass": {
             "heading": data.compass.heading,
@@ -100,10 +109,16 @@ def get_sensor_data():
         "line": {
             "raw": data.line,
             "detected": line_detected_getter() if line_detected_getter else [False] * LINE_SENSOR_COUNT,
-            "thresholds": line_detection_thresholds_getter() if line_detection_thresholds_getter else [500] * LINE_SENSOR_COUNT
+            "thresholds": line_detection_thresholds_getter() if line_detection_thresholds_getter else [],
         },
         "motors": motor_speeds_getter() if motor_speeds_getter else [0, 0, 0, 0],
         "kicker": kicker_state_getter() if kicker_state_getter else False,
+        "running_state": {
+            "running": running_state.running if running_state else False,
+            "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
+            "bt_module_state": running_state.bt_module_state if running_state else False,
+            "switch_state": running_state.switch_state if running_state else False
+        } if running_state else None,
         "timestamp": data.timestamp
     }
     return jsonify(response)
@@ -186,11 +201,18 @@ def start_line_calibration():
     if line_calibration_starter is None:
         return jsonify({"error": "Internal server error"}), 503
     
-    line_calibration_starter()
-    logger.info("Line sensor calibration started")
+    data = request.get_json(silent=True) or {}
+    phase = data.get('phase', 1)
+    
+    if phase not in [1, 2]:
+        return jsonify({"error": "Bad request (phase)"}), 400
+    
+    line_calibration_starter(phase)
+    logger.info(f"Line sensor calibration phase {phase} started")
     return jsonify({
         "status": "ok",
-        "message": "Calibration started. Move robot over white and black surfaces."
+        "phase": phase,
+        "message": f"Phase {phase} started"
     })
 
 
@@ -200,22 +222,21 @@ def stop_line_calibration():
         return jsonify({"error": "Internal server error"}), 503
     
     status = line_calibration_status_getter()
-    if not status['active']:
+    if not status['phase'] > 0:
         return jsonify({"error": "Calibration is not active"}), 400
     
-    thresholds, min_values, max_values = line_calibration_stopper() # pyright: ignore[reportGeneralTypeIssues]
+    thresholds, min_values, max_values, phase = line_calibration_stopper() # pyright: ignore[reportGeneralTypeIssues]
+    logger.info(f"Line sensor calibration phase {phase} completed and applied. Thresholds: {thresholds}")
     
-    for i in range(LINE_SENSOR_COUNT):
-        if min_values[i] == float('inf') or max_values[i] == float('-inf'):
-            logger.warning(f"Sensor {i} has no calibration data, keeping default threshold")
-    
-    logger.info(f"Line sensor calibration completed. Thresholds: {thresholds}")
+    can_start_phase2 = (phase == 1 and any(min_values[i] != float('inf') for i in range(len(min_values))))
     
     return jsonify({
         "status": "ok",
+        "phase": phase,
         "thresholds": thresholds,
         "min_values": min_values,
-        "max_values": max_values
+        "max_values": max_values,
+        "can_start_phase2": can_start_phase2
     })
 
 
@@ -225,15 +246,17 @@ def cancel_line_calibration():
         return jsonify({"error": "Internal server error"}), 503
     
     status = line_calibration_status_getter()
-    if not status['active']:
+    if not status['phase'] > 0:
         return jsonify({"error": "Calibration is not active"}), 400
     
+    phase = status.get('phase', 0)
     line_calibration_stopper(cancel=True)
     
-    logger.info("Line sensor calibration cancelled")
+    logger.info(f"Line sensor calibration phase {phase} cancelled")
     
     return jsonify({
         "status": "ok",
+        "phase": phase,
         "message": "Calibration cancelled."
     })
 
@@ -258,15 +281,56 @@ def set_line_thresholds():
     
     thresholds = data['thresholds']
     if not isinstance(thresholds, list) or len(thresholds) != LINE_SENSOR_COUNT:
-        return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} values"}), 400
+        return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs"}), 400
     
     try:
-        thresholds_int = [int(t) for t in thresholds]
-        line_detection_thresholds_setter(thresholds_int)
-        logger.info(f"Line detection thresholds manually set to: {thresholds_int}")
-        return jsonify({"status": "ok", "thresholds": thresholds_int})
+        thresholds_ranges = []
+        for t in thresholds:
+            if isinstance(t, list) and len(t) == 2:
+                thresholds_ranges.append([int(t[0]), int(t[1])])
+            else:
+                return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs"}), 400
+        
+        line_detection_thresholds_setter(thresholds_ranges)  # pyright: ignore[reportGeneralTypeIssues]
+        logger.info(f"Line detection thresholds manually set to: {thresholds_ranges}")
+        return jsonify({"status": "ok", "thresholds": thresholds_ranges})
     except (ValueError, TypeError) as e:
-        return jsonify({"error": f"Invalid threshold values: {e}"}), 400
+        return jsonify({"error": f"Invalid threshold values: {e}"}) , 400
+
+
+@app.route('/api/get_motor_settings')
+def get_motor_settings():
+    if rotation_correction_enabled_getter is None or line_avoiding_enabled_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    return jsonify({
+        "rotation_correction_enabled": rotation_correction_enabled_getter(),
+        "line_avoiding_enabled": line_avoiding_enabled_getter()
+    })
+
+
+@app.route('/api/set_motor_settings', methods=['POST'])
+def set_motor_settings():
+    if rotation_correction_enabled_setter is None or line_avoiding_enabled_setter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing request body"}), 400
+    
+    if 'rotation_correction_enabled' in data:
+        if not isinstance(data['rotation_correction_enabled'], bool):
+            return jsonify({"error": "rotation_correction_enabled must be a boolean"}), 400
+        rotation_correction_enabled_setter(data['rotation_correction_enabled'])
+        logger.info(f"Rotation correction {'enabled' if data['rotation_correction_enabled'] else 'disabled'}")
+    
+    if 'line_avoiding_enabled' in data:
+        if not isinstance(data['line_avoiding_enabled'], bool):
+            return jsonify({"error": "line_avoiding_enabled must be a boolean"}), 400
+        line_avoiding_enabled_setter(data['line_avoiding_enabled'])
+        logger.info(f"Line avoiding {'enabled' if data['line_avoiding_enabled'] else 'disabled'}")
+    
+    return jsonify({"status": "ok"})
 
 
 def start(host: str = API_HOST, port: int = API_PORT):

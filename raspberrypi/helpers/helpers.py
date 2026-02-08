@@ -120,11 +120,10 @@ class RobotManualControl:
     move_speed: float = 0.0
     rotate: float = 0.0
 
-def calculate_motors_speeds(move_angle: float, move_speed: float, rotate: float) -> list[int]:
-    rad = math.radians(move_angle)
+def calculate_motors_speeds(move_angle_rad: float, move_speed: float, rotate: float) -> list[int]:
     speeds = []
     for motor_angle in MOTOR_LOCATIONS:
         motor_rad = math.radians(motor_angle)
-        motor_speed = move_speed * math.cos(rad - motor_rad) + rotate
+        motor_speed = move_speed * math.cos(move_angle_rad - motor_rad) + rotate
         speeds.append(int(motor_speed))
     return speeds
