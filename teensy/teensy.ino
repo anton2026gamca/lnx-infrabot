@@ -26,11 +26,13 @@ volatile bool module_value = true;   // Bluetooth module state
 volatile bool run = false;           // Overall run state
 
 // ========== Serial Communication ==========
+#define TARGET_MESSAGES_PER_SECOND 120
+
 #define RASPBERRY_SERIAL Serial8
-#define RASPBERRY_SERIAL_SPEED 38400
+#define RASPBERRY_SERIAL_SPEED DATA_STRING_LENGTH * 10 * TARGET_MESSAGES_PER_SECOND // = 84000
 
 #define DEBUG_PRINTS_ENABLED false
-#define DEBUG_LOGS_ENABLED true
+#define DEBUG_LOGS_ENABLED false
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
@@ -154,16 +156,7 @@ LineData line_data = {{0}};
 
 // ========== Data Collection & Message Format ==========
 // Message format: {"a"="HHH,±PPP,±RRR,AAA,DDDD,V1,V2,...V12,S,L1,L2,...L12"}
-// HHH = Heading (3 digits), PPP = Pitch (signed, 3 digits), RRR = Roll (signed, 3 digits)
-// AAA = IR Angle (3 digits), DDDD = IR Distance (4 digits)
-// V1-V12 = IR sensor raw values (3 digits each)
-// S = IR status (1 digit), L1-L12 = Line sensor values (4 digits each)
-
-#define BNO_DATA_STRING_LENGTH ((4 + 1) * 3)  // HHH,±PPP,±RRR,
-#define IR_SENSOR_DATA_STRING_LENGTH ((3 + 1) + (4 + 1) + (3 + 1) * IR_SENSOR_COUNT + (1 + 1) - 1)
-#define LINE_SENSOR_DATA_STRING_LENGTH ((4 + 1) * LINE_SENSOR_COUNT)
-#define ALL_DATA_LENGTH (BNO_DATA_STRING_LENGTH + IR_SENSOR_DATA_STRING_LENGTH + LINE_SENSOR_DATA_STRING_LENGTH - 1)
-#define DATA_STRING_LENGTH (1 + 5 + ALL_DATA_LENGTH + 1 + 1 + 1)  // {"a"="..."}\0
+#define DATA_STRING_LENGTH 141
 
 struct SensorData {
   MotorsData motors_data;
@@ -242,8 +235,6 @@ void format_number_with_sign(float input_number, char final_string[], int width)
     final_string[i] = (value % 10) + '0';
     value /= 10;
   }
-  final_string[width + 1] = ',';
-  final_string[width + 2] = '\0';
 }
 
 void format_number(float input_number, char final_string[], int width) {
@@ -254,20 +245,18 @@ void format_number(float input_number, char final_string[], int width) {
     final_string[i] = (value % 10) + '0';
     value /= 10;
   }
-  final_string[width] = ',';
-  final_string[width + 1] = '\0';
 }
 
 inline int append_number_to_string(float number, char *target_string, int position, int number_string_length, bool with_sign) {
-  char num_str[number_string_length + 3];
   if (with_sign) {
-    format_number_with_sign(number, num_str, number_string_length);
+    format_number_with_sign(number, target_string + position, number_string_length);
+    position += number_string_length + 1;
   } else {
-    format_number(number, num_str, number_string_length);
+    format_number(number, target_string + position, number_string_length);
+    position += number_string_length;
   }
-  int len = strlen(num_str);
-  memcpy(target_string + position, num_str, len);
-  return position + len;
+  target_string[position++] = ',';
+  return position;
 }
 
 inline int append_char_to_string(char c, char *target_string, int position) {
@@ -465,7 +454,7 @@ void build_sensor_message() {
   }
   pos = append_number_to_string(sensor_data.ir_data.status, tx_message_buffer, pos, 1, false);
   
-  // Line sensor data: L1,...L12,
+  // Line sensor data: L1,...L12
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     pos = append_number_to_string(sensor_data.line_data.sensor_line[i], tx_message_buffer, pos, 4, false);
   }
@@ -558,11 +547,11 @@ void setup() {
 
 
 void loop() {
-  // Handle manual switch debouncing (active LOW)
+  unsigned long current_time = millis();
+
   static unsigned long last_switch_time = 0;
   static unsigned long last_module_switch_time = 0;
   static unsigned long last_running_state_transmit_time = 0;
-  unsigned long current_time = millis();
   
   if (!digitalRead(SWITCH_PIN) && (current_time - last_switch_time > 200)) {
     switch_value = !switch_value;
@@ -589,27 +578,35 @@ void loop() {
     last_running_state_transmit_time = current_time;
   }
 
-  // Read all sensors
-  read_compass();
   read_ir_sensor();
+  read_compass();
   read_line_sensors();
   update_sensor_data_struct();
 
-  // Send sensor data to Raspberry Pi
   build_sensor_message();
   transmit_sensor_data();
 
-  // Receive motor commands from Raspberry Pi
+#if DEBUG_LOGS_ENABLED
+  static int messages_sent = 0;
+  static unsigned long last_sent_message_time = 0;
+
+  messages_sent++;
+  
+  if (current_time - last_sent_message_time >= 1000) {
+    debug_log(DEBUG_INFO, messages_sent);
+    last_sent_message_time = current_time;
+    messages_sent = 0;
+  }
+#endif
+
   if (RASPBERRY_SERIAL.available() > 0) {
     parse_motor_command();
   }
   
-  // Update control state LEDs
   digitalWrite(SWITCH_LED_PIN, switch_value);
   digitalWrite(MODULE_LED_PIN, module_value);
   digitalWrite(MODULE_SWITCH_LED_PIN, !use_bluetooth_module);
   
-  // Control motors based on run state
   run = (switch_value && module_value);
   digitalWrite(LED_BUILTIN, run);
 
@@ -623,7 +620,6 @@ void loop() {
   }
   
 #if DEBUG_PRINTS_ENABLED
-  // Debug status output
   debug_print(" | SW=");
   debug_print(switch_value);
   debug_print(" BT_SW=");
@@ -635,5 +631,5 @@ void loop() {
   print_sensor_debug_info();
 #endif
   
-  delay(10);
+  delay(1);
 }
