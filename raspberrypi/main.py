@@ -47,6 +47,10 @@ shared_data: dict = {
     'running_state': manager.dict(),
     'rotation_correction_enabled': multiprocessing.Value('b', True),
     'line_avoiding_enabled': multiprocessing.Value('b', True),
+    'goal_color': multiprocessing.Array('c', b'yellow'.ljust(10)),
+    'goal_calibration_yellow': multiprocessing.Array('i', [20, 100, 100, 30, 255, 255]),
+    'goal_calibration_blue': multiprocessing.Array('i', [100, 100, 100, 130, 255, 255]),
+    'goal_detection_result': manager.dict(),
     'locks': {
         'frame': multiprocessing.Lock(),
         'hardware_data': multiprocessing.Lock(),
@@ -55,6 +59,7 @@ shared_data: dict = {
         'line_calibration': multiprocessing.Lock(),
         'running_state': multiprocessing.Lock(),
         'calibration_storage': multiprocessing.Lock(),
+        'goal_detection': multiprocessing.Lock(),
     }
 }
 
@@ -174,6 +179,20 @@ def logic_process(stop_event):
         while not stop_event.is_set():
             start_time = time.time()
 
+            frame_data = get_camera_frame()
+
+            if frame_data:
+                goal_color = get_goal_color()
+                lower, upper = get_goal_calibration(goal_color)
+                calibration = camera.GoalColorCalibration(
+                    yellow_lower=np.array(lower) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_lower,
+                    yellow_upper=np.array(upper) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_upper,
+                    blue_lower=np.array(lower) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_lower,
+                    blue_upper=np.array(upper) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_upper
+                )
+                result = camera.detect_goal_alignment(frame_data.frame, goal_color, calibration)
+                set_goal_detection_result(result)
+
             mode = get_robot_mode()
             if mode == RobotMode.IDLE:
                 motors_controller.reset()
@@ -253,15 +272,19 @@ class SmartMotorsController(MotorsController):
         line_avoiding_enabled = get_line_avoiding_enabled()
         if line_avoiding_enabled:
             lines_detected = get_line_detected()
-            sum = 0
-            count = 0
-            for i, line in enumerate(lines_detected):
-                if line:
-                    sum += LINE_SENSOR_LOCATIONS[i]
-                    count += 1
-            if count > 0:
-                avg = sum / count
-                move_angle = min(max(move_angle - avg, 135), 225) + avg
+            avg_angle = 0.0
+            detected_angles = []
+            for i, detected in enumerate(lines_detected):
+                if detected and i < len(LINE_SENSOR_LOCATIONS):
+                    detected_angles.append(math.radians(LINE_SENSOR_LOCATIONS[i]))
+            if detected_angles:
+                x = sum(math.cos(a) for a in detected_angles)
+                y = sum(math.sin(a) for a in detected_angles)
+                avg_angle = (math.degrees(math.atan2(y, x)) + 360) % 360
+                move_angle = math.radians(avg_angle + 180)
+                move_speed = 1.0
+                self.move_x = move_speed * math.cos(move_angle)
+                self.move_y = move_speed * math.sin(move_angle)
 
         motors = calculate_motors_speeds(move_angle, move_speed * 255, total_rotation * 255)
         set_motor_speeds(motors)
@@ -331,6 +354,59 @@ def set_line_avoiding_enabled(enabled: bool) -> None:
 
 def get_line_avoiding_enabled() -> bool:
     return shared_data['line_avoiding_enabled'].value
+
+def set_goal_color(color: str) -> None:
+    with shared_data['locks']['goal_detection']:
+        color_bytes = color.encode()[:10].ljust(10)
+        for i in range(10):
+            shared_data['goal_color'][i] = color_bytes[i:i+1]
+    save_calibration_data()
+
+def get_goal_color() -> str:
+    with shared_data['locks']['goal_detection']:
+        return bytes(shared_data['goal_color'][:]).decode().strip()
+
+def set_goal_calibration(color: str, lower: list[int], upper: list[int]) -> None:
+    with shared_data['locks']['goal_detection']:
+        if color.lower() == 'yellow':
+            for i in range(3):
+                shared_data['goal_calibration_yellow'][i] = lower[i]
+                shared_data['goal_calibration_yellow'][i + 3] = upper[i]
+        elif color.lower() == 'blue':
+            for i in range(3):
+                shared_data['goal_calibration_blue'][i] = lower[i]
+                shared_data['goal_calibration_blue'][i + 3] = upper[i]
+    save_calibration_data()
+
+def get_goal_calibration(color: str) -> tuple[list[int], list[int]]:
+    with shared_data['locks']['goal_detection']:
+        if color.lower() == 'yellow':
+            arr = list(shared_data['goal_calibration_yellow'])
+            return arr[:3], arr[3:]
+        elif color.lower() == 'blue':
+            arr = list(shared_data['goal_calibration_blue'])
+            return arr[:3], arr[3:]
+        return [0, 0, 0], [0, 0, 0]
+
+def set_goal_detection_result(result: camera.GoalDetectionResult | None) -> None:
+    with shared_data['locks']['goal_detection']:
+        shared_data['goal_detection_result'].clear()
+        if result:
+            shared_data['goal_detection_result']['alignment'] = result.alignment
+            shared_data['goal_detection_result']['goal_detected'] = result.goal_detected
+            shared_data['goal_detection_result']['goal_center_x'] = result.goal_center_x
+            shared_data['goal_detection_result']['goal_area'] = result.goal_area
+
+def get_goal_detection_result() -> camera.GoalDetectionResult | None:
+    with shared_data['locks']['goal_detection']:
+        if not shared_data['goal_detection_result']:
+            return None
+        return camera.GoalDetectionResult(
+            alignment=shared_data['goal_detection_result'].get('alignment', 0.0),
+            goal_detected=shared_data['goal_detection_result'].get('goal_detected', False),
+            goal_center_x=shared_data['goal_detection_result'].get('goal_center_x', None),
+            goal_area=shared_data['goal_detection_result'].get('goal_area', 0.0)
+        )
 
 #endregion
 #region Hardware
@@ -588,11 +664,24 @@ def _create_calibration_data() -> dict:
     with shared_data['locks']['line_calibration']:
         flat = list(shared_data['line_detection_thresholds'])
         thresholds = [[flat[i*2], flat[i*2+1]] for i in range(LINE_SENSOR_COUNT)]
+    
+    with shared_data['locks']['goal_detection']:
+        goal_color = bytes(shared_data['goal_color'][:]).decode().strip()
+        yellow_cal = list(shared_data['goal_calibration_yellow'])
+        blue_cal = list(shared_data['goal_calibration_blue'])
+        
         return {
             "version": CALIBRATION_SCHEMA_VERSION,
             "calibrations": {
                 "line_detection": {
                     "thresholds": thresholds,
+                },
+                "goal_detection": {
+                    "goal_color": goal_color,
+                    "yellow_lower": yellow_cal[:3],
+                    "yellow_upper": yellow_cal[3:],
+                    "blue_lower": blue_cal[:3],
+                    "blue_upper": blue_cal[3:],
                 }
             }
         }
@@ -635,6 +724,31 @@ def load_calibration_data() -> None:
                 set_line_detection_thresholds([[int(t[0]), int(t[1])] for t in thresholds], save=False)
             else:
                 set_line_detection_thresholds([[int(t), int(t)] for t in thresholds], save=False)
+        
+        goal_data = calibrations.get("goal_detection", {}) if isinstance(calibrations, dict) else {}
+        if goal_data:
+            goal_color = goal_data.get("goal_color")
+            if goal_color in ['yellow', 'blue']:
+                with shared_data['locks']['goal_detection']:
+                    color_bytes = goal_color.encode()[:10].ljust(10)
+                    for i in range(10):
+                        shared_data['goal_color'][i] = color_bytes[i:i+1]
+            
+            yellow_lower = goal_data.get("yellow_lower")
+            yellow_upper = goal_data.get("yellow_upper")
+            if yellow_lower and yellow_upper and len(yellow_lower) == 3 and len(yellow_upper) == 3:
+                with shared_data['locks']['goal_detection']:
+                    for i in range(3):
+                        shared_data['goal_calibration_yellow'][i] = int(yellow_lower[i])
+                        shared_data['goal_calibration_yellow'][i + 3] = int(yellow_upper[i])
+            
+            blue_lower = goal_data.get("blue_lower")
+            blue_upper = goal_data.get("blue_upper")
+            if blue_lower and blue_upper and len(blue_lower) == 3 and len(blue_upper) == 3:
+                with shared_data['locks']['goal_detection']:
+                    for i in range(3):
+                        shared_data['goal_calibration_blue'][i] = int(blue_lower[i])
+                        shared_data['goal_calibration_blue'][i + 3] = int(blue_upper[i])
 
         hardware_logger.info("Calibration data loaded")
     except Exception as e:
@@ -703,6 +817,11 @@ def init_api():
     api.rotation_correction_enabled_setter = set_rotation_correction_enabled
     api.line_avoiding_enabled_getter = get_line_avoiding_enabled
     api.line_avoiding_enabled_setter = set_line_avoiding_enabled
+    api.goal_color_getter = get_goal_color
+    api.goal_color_setter = set_goal_color
+    api.goal_calibration_getter = get_goal_calibration
+    api.goal_calibration_setter = set_goal_calibration
+    api.goal_detection_result_getter = get_goal_detection_result
 
 def api_get_camera_frame():
     data = get_camera_frame()

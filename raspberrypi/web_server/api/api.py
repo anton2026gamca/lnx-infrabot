@@ -40,6 +40,12 @@ rotation_correction_enabled_setter = None
 line_avoiding_enabled_getter = None
 line_avoiding_enabled_setter = None
 
+goal_color_getter = None
+goal_color_setter = None
+goal_calibration_getter = None
+goal_calibration_setter = None
+goal_detection_result_getter = None
+
 logger = logging.getLogger("API Process")
 
 
@@ -331,6 +337,148 @@ def set_motor_settings():
         logger.info(f"Line avoiding {'enabled' if data['line_avoiding_enabled'] else 'disabled'}")
     
     return jsonify({"status": "ok"})
+
+
+@app.route('/api/get_goal_settings')
+def get_goal_settings():
+    if goal_color_getter is None or goal_calibration_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    goal_color = goal_color_getter()
+    yellow_lower, yellow_upper = goal_calibration_getter('yellow') # pyright: ignore[reportGeneralTypeIssues]
+    blue_lower, blue_upper = goal_calibration_getter('blue') # pyright: ignore[reportGeneralTypeIssues]
+    
+    return jsonify({
+        "goal_color": goal_color,
+        "calibration": {
+            "yellow": {
+                "lower": yellow_lower,
+                "upper": yellow_upper
+            },
+            "blue": {
+                "lower": blue_lower,
+                "upper": blue_upper
+            }
+        }
+    })
+
+
+@app.route('/api/set_goal_settings', methods=['POST'])
+def set_goal_settings():
+    if goal_color_setter is None or goal_calibration_setter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing request body"}), 400
+    
+    if 'goal_color' in data:
+        if data['goal_color'] not in ['yellow', 'blue']:
+            return jsonify({"error": "goal_color must be 'yellow' or 'blue'"}), 400
+        goal_color_setter(data['goal_color'])
+        logger.info(f"Goal color set to {data['goal_color']}")
+    
+    if 'calibration' in data:
+        cal = data['calibration']
+        if 'yellow' in cal:
+            yellow = cal['yellow']
+            if 'lower' in yellow and 'upper' in yellow:
+                if len(yellow['lower']) == 3 and len(yellow['upper']) == 3:
+                    goal_calibration_setter('yellow', yellow['lower'], yellow['upper'])
+                    logger.info(f"Yellow goal calibration set: {yellow['lower']} - {yellow['upper']}")
+        if 'blue' in cal:
+            blue = cal['blue']
+            if 'lower' in blue and 'upper' in blue:
+                if len(blue['lower']) == 3 and len(blue['upper']) == 3:
+                    goal_calibration_setter('blue', blue['lower'], blue['upper'])
+                    logger.info(f"Blue goal calibration set: {blue['lower']} - {blue['upper']}")
+    
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/get_goal_detection')
+def get_goal_detection():
+    if goal_detection_result_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    result = goal_detection_result_getter()
+    if result is None:
+        return jsonify({
+            "goal_detected": False,
+            "alignment": 0.0,
+            "goal_center_x": None,
+            "goal_area": 0.0
+        })
+    
+    return jsonify({
+        "goal_detected": result.goal_detected,
+        "alignment": result.alignment,
+        "goal_center_x": result.goal_center_x,
+        "goal_area": result.goal_area
+    })
+
+
+@app.route('/api/compute_hsv_from_region', methods=['POST'])
+def compute_hsv_from_region():
+    if camera_frame_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing request body"}), 400
+    
+    x = data.get('x', 0)
+    y = data.get('y', 0)
+    width = data.get('width', 0)
+    height = data.get('height', 0)
+    
+    if width <= 0 or height <= 0:
+        return jsonify({"error": "Invalid region dimensions"}), 400
+    
+    frame = camera_frame_getter()
+    if frame is None:
+        return jsonify({"error": "No camera frame available"}), 503
+    
+    frame_height, frame_width = frame.shape[:2]
+    
+    x = max(0, min(x, frame_width - 1))
+    y = max(0, min(y, frame_height - 1))
+    x2 = max(0, min(x + width, frame_width))
+    y2 = max(0, min(y + height, frame_height))
+    
+    region = frame[y:y2, x:x2]
+    
+    if region.size == 0:
+        return jsonify({"error": "Empty region"}), 400
+    
+    import cv2
+    import numpy as np
+    hsv_region = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
+    
+    h_values = hsv_region[:, :, 0].flatten()
+    s_values = hsv_region[:, :, 1].flatten()
+    v_values = hsv_region[:, :, 2].flatten()
+    
+    h_min = int(np.percentile(h_values, 5))
+    h_max = int(np.percentile(h_values, 95))
+    s_min = int(np.percentile(s_values, 5))
+    s_max = int(np.percentile(s_values, 95))
+    v_min = int(np.percentile(v_values, 5))
+    v_max = int(np.percentile(v_values, 95))
+    
+    h_min = max(0, h_min - 5)
+    h_max = min(179, h_max + 5)
+    s_min = max(0, s_min - 20)
+    s_max = min(255, s_max + 20)
+    v_min = max(0, v_min - 20)
+    v_max = min(255, v_max + 20)
+    
+    logger.info(f"Computed HSV from region ({x},{y})-({x2},{y2}): H[{h_min}-{h_max}] S[{s_min}-{s_max}] V[{v_min}-{v_max}]")
+    
+    return jsonify({
+        "lower": [h_min, s_min, v_min],
+        "upper": [h_max, s_max, v_max]
+    })
 
 
 def start(host: str = API_HOST, port: int = API_PORT):

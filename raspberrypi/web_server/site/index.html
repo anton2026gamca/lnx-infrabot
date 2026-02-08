@@ -817,6 +817,31 @@
               </div>
             </div>
 
+            <!-- Goal Detection -->
+            <div class="sensor-card grid-span-2">
+              <div class="sensor-label">Goal Detection</div>
+              <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between;">
+                <div style="flex: 1;">
+                  <div style="font-size: 0.75em; color: #888; margin-bottom: 3px;">Status:</div>
+                  <div class="sensor-value" id="goal-status-display" style="font-size: 1em;">---</div>
+                </div>
+                <div style="flex: 1;">
+                  <div style="font-size: 0.75em; color: #888; margin-bottom: 3px;">Alignment:</div>
+                  <div class="sensor-value" id="goal-alignment-display" style="font-size: 1em;">---</div>
+                </div>
+                <div style="width: 60px; height: 60px; border-radius: 50%; background: #222; position: relative; flex-shrink: 0; border: 2px solid #333;">
+                  <div id="goal-alignment-arrow-sensor" style="position: absolute; width: 3px; height: 25px; background: #4CAF50; top: 50%; left: 50%; transform-origin: center bottom; transform: translate(-50%, -100%) rotate(0deg);"></div>
+                  <div style="position: absolute; font-size: 0.65em; color: #888; top: 2px; left: 50%; transform: translateX(-50%);">N</div>
+                </div>
+                <div style="flex: 1; text-align: right;">
+                  <div style="font-size: 0.75em; color: #888; margin-bottom: 3px;">Center X:</div>
+                  <div class="sensor-value" id="goal-center-display" style="font-size: 1em;">---</div>
+                  <div style="font-size: 0.75em; color: #888; margin-top: 3px; margin-bottom: 3px;">Area:</div>
+                  <div class="sensor-value" id="goal-area-display" style="font-size: 0.85em;">---</div>
+                </div>
+              </div>
+            </div>
+
             <!-- Kicker -->
             <!-- <div class="sensor-card" style="grid-column: span 2;">
               <div class="sensor-label">Kicker</div>
@@ -855,6 +880,22 @@
               <div style="display: flex; gap: 8px;">
                 <button class="toggle-btn rotation-correction-toggle">Rotation Correction</button>
                 <button class="toggle-btn line-avoiding-toggle">Line Avoiding</button>
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-group-label">Goal Detection</div>
+              <div style="background: #222; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <span style="color: #aaa; font-size: 0.85em; min-width: 80px;">Target Goal:</span>
+                  <div style="display: flex; gap: 5px; flex: 1;">
+                    <button class="btn goal-color-btn" data-color="yellow" style="flex: 1;">Yellow</button>
+                    <button class="btn goal-color-btn" data-color="blue" style="flex: 1;">Blue</button>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn btn-action" id="calibrate-goal-btn" style="flex: 1;">Calibrate Colors</button>
+                </div>
               </div>
             </div>
             
@@ -936,6 +977,94 @@
             <div class="modal-buttons" style="margin-top: 16px;">
               <button class="btn btn-action" id="apply-thresholds">Apply & Close</button>
               <button class="btn btn-danger" id="reset-thresholds">Cancel</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Goal Calibration Modal -->
+    <div class="modal-overlay" id="goal-calibration-modal">
+      <div class="modal-dialog" style="position: relative; max-width: 900px;">
+        <button class="modal-close-btn" id="close-goal-calibration-modal">&times;</button>
+        <div class="modal-header">Goal Color Calibration</div>
+        <div class="modal-content">
+
+          <!-- Interactive Calibration Section -->
+          <div class="modal-section active">
+            <div class="modal-section-title">Interactive Calibration</div>
+            <div class="modal-section-description">
+              Draw a rectangle around the goal in the camera feed to automatically compute HSV color ranges. Click "Use Selection" to apply the computed values.
+            </div>
+            
+            <div style="background: #0a0a0a; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+              <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+                <button class="btn btn-action" id="calibrate-from-yellow-btn">Calibrate Yellow Goal</button>
+                <button class="btn btn-action" id="calibrate-from-blue-btn">Calibrate Blue Goal</button>
+                <span id="calibration-instructions" style="font-size: 0.85em; color: #aaa; flex: 1;"></span>
+              </div>
+              
+              <div style="position: relative; width: 100%; background: black; border-radius: 5px; overflow: hidden; display: none;" id="goal-calibration-canvas-container">
+                <img id="goal-calibration-image" src="/api/video_feed" style="width: 100%; height: auto; display: block;">
+                <canvas id="goal-calibration-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair;"></canvas>
+                <div style="position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 8px; border-radius: 5px; font-size: 0.85em; color: white;">
+                  Click and drag to select the goal area
+                </div>
+                <div style="position: absolute; bottom: 10px; right: 10px; display: flex; gap: 5px;">
+                  <button class="btn btn-action" id="use-selection-btn" style="font-size: 0.85em; padding: 5px 10px;">Use Selection</button>
+                  <button class="btn" id="cancel-selection-btn" style="font-size: 0.85em; padding: 5px 10px;">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Manual Calibration Section -->
+          <div class="modal-section active">
+            <div class="modal-section-title">Manual HSV Adjustment</div>
+            <div class="modal-section-description">
+              Or manually adjust the HSV (Hue, Saturation, Value) ranges. Lower values define the minimum threshold, upper values define the maximum.
+            </div>
+            
+            <!-- Yellow Goal Calibration -->
+            <div style="background: #0a0a0a; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+              <div style="font-weight: bold; margin-bottom: 10px; color: #ffd700;">Yellow Goal</div>
+              <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: center;">
+                <span style="font-size: 0.85em; color: #888;">Hue (0-179):</span>
+                <input type="number" id="yellow-h-min" class="threshold-input" min="0" max="179" placeholder="Lower">
+                <input type="number" id="yellow-h-max" class="threshold-input" min="0" max="179" placeholder="Upper">
+                
+                <span style="font-size: 0.85em; color: #888;">Saturation (0-255):</span>
+                <input type="number" id="yellow-s-min" class="threshold-input" min="0" max="255" placeholder="Lower">
+                <input type="number" id="yellow-s-max" class="threshold-input" min="0" max="255" placeholder="Upper">
+                
+                <span style="font-size: 0.85em; color: #888;">Value (0-255):</span>
+                <input type="number" id="yellow-v-min" class="threshold-input" min="0" max="255" placeholder="Lower">
+                <input type="number" id="yellow-v-max" class="threshold-input" min="0" max="255" placeholder="Upper">
+              </div>
+            </div>
+
+            <!-- Blue Goal Calibration -->
+            <div style="background: #0a0a0a; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+              <div style="font-weight: bold; margin-bottom: 10px; color: #2196F3;">Blue Goal</div>
+              <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: center;">
+                <span style="font-size: 0.85em; color: #888;">Hue (0-179):</span>
+                <input type="number" id="blue-h-min" class="threshold-input" min="0" max="179" placeholder="Lower">
+                <input type="number" id="blue-h-max" class="threshold-input" min="0" max="179" placeholder="Upper">
+                
+                <span style="font-size: 0.85em; color: #888;">Saturation (0-255):</span>
+                <input type="number" id="blue-s-min" class="threshold-input" min="0" max="255" placeholder="Lower">
+                <input type="number" id="blue-s-max" class="threshold-input" min="0" max="255" placeholder="Upper">
+                
+                <span style="font-size: 0.85em; color: #888;">Value (0-255):</span>
+                <input type="number" id="blue-v-min" class="threshold-input" min="0" max="255" placeholder="Lower">
+                <input type="number" id="blue-v-max" class="threshold-input" min="0" max="255" placeholder="Upper">
+              </div>
+            </div>
+
+            <div class="modal-buttons">
+              <button class="btn btn-action" id="apply-goal-calibration">Apply & Close</button>
+              <button class="btn" id="reset-goal-calibration">Reset to Defaults</button>
             </div>
           </div>
 
@@ -1310,6 +1439,11 @@
       const switchStatus = document.getElementById('switch-status');
       const btModuleStatus = document.getElementById('bt-module-status');
       const btStateStatus = document.getElementById('bt-state-status');
+      const goalStatusDisplay = document.getElementById('goal-status-display');
+      const goalAlignmentDisplay = document.getElementById('goal-alignment-display');
+      const goalCenterDisplay = document.getElementById('goal-center-display');
+      const goalAreaDisplay = document.getElementById('goal-area-display');
+      const goalAlignmentArrowSensor = document.getElementById('goal-alignment-arrow-sensor');
 
       async function updateSensorData() {
         const response = await fetch('/api/get_sensor_data');
@@ -1764,15 +1898,408 @@
       }, 500);
 
 
+      // ========== Goal Detection ==========
+      const goalColorBtns = document.querySelectorAll('.goal-color-btn');
+      const calibrateGoalBtn = document.getElementById('calibrate-goal-btn');
+      const goalCalibrationModal = document.getElementById('goal-calibration-modal');
+      const closeGoalCalibrationModalBtn = document.getElementById('close-goal-calibration-modal');
+      const applyGoalCalibrationBtn = document.getElementById('apply-goal-calibration');
+      const resetGoalCalibrationBtn = document.getElementById('reset-goal-calibration');
+
+      let currentGoalColor = 'yellow';
+      let goalCalibration = {
+        yellow: { lower: [20, 100, 100], upper: [30, 255, 255] },
+        blue: { lower: [100, 100, 100], upper: [130, 255, 255] }
+      };
+
+      goalColorBtns.forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const color = btn.getAttribute('data-color');
+          await setGoalColor(color);
+        });
+      });
+
+      async function setGoalColor(color) {
+        try {
+          const response = await fetch('/api/set_goal_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ goal_color: color })
+          });
+          if (response.ok) {
+            currentGoalColor = color;
+            updateGoalColorUI();
+          }
+        } catch (e) {
+          console.error('Error setting goal color:', e);
+        }
+      }
+
+      function updateGoalColorUI() {
+        goalColorBtns.forEach(btn => {
+          if (btn.getAttribute('data-color') === currentGoalColor) {
+            btn.classList.add('selected');
+          } else {
+            btn.classList.remove('selected');
+          }
+        });
+      }
+
+      async function updateGoalDetection() {
+        try {
+          const response = await fetch('/api/get_goal_detection');
+          if (!response.ok) return;
+          
+          const data = await response.json();
+          
+          if (data.goal_detected) {
+            goalStatusDisplay.textContent = 'Detected';
+            goalStatusDisplay.style.color = '#4CAF50';
+            
+            const alignmentText = data.alignment.toFixed(2);
+            if (data.alignment > 0.1) {
+              goalAlignmentDisplay.textContent = `→ ${alignmentText} (Right)`;
+              goalAlignmentDisplay.style.color = '#FFC107';
+            } else if (data.alignment < -0.1) {
+              goalAlignmentDisplay.textContent = `← ${alignmentText} (Left)`;
+              goalAlignmentDisplay.style.color = '#FFC107';
+            } else {
+              goalAlignmentDisplay.textContent = `${alignmentText} (Centered)`;
+              goalAlignmentDisplay.style.color = '#4CAF50';
+            }
+            
+            goalCenterDisplay.textContent = data.goal_center_x !== null ? `${data.goal_center_x} px` : '---';
+            goalCenterDisplay.style.color = '#4CAF50';
+            
+            goalAreaDisplay.textContent = `${Math.round(data.goal_area)} px²`;
+            goalAreaDisplay.style.color = '#4CAF50';
+            
+            const angle = data.alignment * 45;
+            goalAlignmentArrowSensor.style.transform = `translate(-50%, -100%) rotate(${angle}deg)`;
+            goalAlignmentArrowSensor.style.background = Math.abs(data.alignment) < 0.1 ? '#4CAF50' : '#FFC107';
+          } else {
+            goalStatusDisplay.textContent = 'Not Detected';
+            goalStatusDisplay.style.color = '#888';
+            goalAlignmentDisplay.textContent = '---';
+            goalAlignmentDisplay.style.color = '#888';
+            goalCenterDisplay.textContent = '---';
+            goalCenterDisplay.style.color = '#888';
+            goalAreaDisplay.textContent = '---';
+            goalAreaDisplay.style.color = '#888';
+            goalAlignmentArrowSensor.style.transform = 'translate(-50%, -100%) rotate(0deg)';
+            goalAlignmentArrowSensor.style.background = '#333';
+          }
+        } catch (e) {
+          console.error('Error updating goal detection:', e);
+        }
+      }
+
+      // ========== Goal Colors Calibration ==========
+      async function fetchGoalSettings() {
+        try {
+          const response = await fetch('/api/get_goal_settings');
+          if (!response.ok) return;
+          
+          const data = await response.json();
+          currentGoalColor = data.goal_color;
+          goalCalibration = data.calibration;
+          updateGoalColorUI();
+        } catch (e) {
+          console.error('Error fetching goal settings:', e);
+        }
+      }
+
+      
+      const goalCalibrationCanvasContainer = document.getElementById('goal-calibration-canvas-container');
+      const goalCalibrationCanvas = document.getElementById('goal-calibration-canvas');
+      const goalCalibrationImage = document.getElementById('goal-calibration-image');
+      const calibrateFromYellowBtn = document.getElementById('calibrate-from-yellow-btn');
+      const calibrateFromBlueBtn = document.getElementById('calibrate-from-blue-btn');
+      const useSelectionBtn = document.getElementById('use-selection-btn');
+      const cancelSelectionBtn = document.getElementById('cancel-selection-btn');
+      const calibrationInstructions = document.getElementById('calibration-instructions');
+      
+      let isDrawing = false;
+      let startX = 0;
+      let startY = 0;
+      let currentX = 0;
+      let currentY = 0;
+      let currentTargetColor = null;
+      let selectionRect = null;
+      let canvasRedrawInterval = null;
+      
+      function drawCurrentRectangle() {
+        if (!goalCalibrationCanvasContainer || goalCalibrationCanvasContainer.style.display === 'none') {
+          return;
+        }
+        
+        const ctx = goalCalibrationCanvas.getContext('2d');
+        ctx.clearRect(0, 0, goalCalibrationCanvas.width, goalCalibrationCanvas.height);
+        
+        if (isDrawing || (startX !== 0 && startY !== 0 && currentX !== 0 && currentY !== 0)) {
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+          
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+          ctx.fillRect(startX, startY, currentX - startX, currentY - startY);
+        }
+      }
+      
+      if (calibrateGoalBtn) {
+        calibrateGoalBtn.addEventListener('click', () => {
+          populateGoalCalibrationInputs();
+          goalCalibrationModal.classList.add('active');
+          resetCanvasSelection();
+        });
+      }
+
+      if (closeGoalCalibrationModalBtn) {
+        closeGoalCalibrationModalBtn.addEventListener('click', () => {
+          goalCalibrationModal.classList.remove('active');
+          resetCanvasSelection();
+        });
+      }
+      
+      if (calibrateFromYellowBtn) {
+        calibrateFromYellowBtn.addEventListener('click', () => {
+          currentTargetColor = 'yellow';
+          goalCalibrationCanvasContainer.style.display = 'block';
+          calibrationInstructions.textContent = 'Calibrating Yellow Goal';
+          setupCanvas();
+        });
+      }
+      
+      if (calibrateFromBlueBtn) {
+        calibrateFromBlueBtn.addEventListener('click', () => {
+          currentTargetColor = 'blue';
+          goalCalibrationCanvasContainer.style.display = 'block';
+          calibrationInstructions.textContent = 'Calibrating Blue Goal';
+          setupCanvas();
+        });
+      }
+      
+      if (cancelSelectionBtn) {
+        cancelSelectionBtn.addEventListener('click', () => {
+          resetCanvasSelection();
+        });
+      }
+      
+      if (useSelectionBtn) {
+        useSelectionBtn.addEventListener('click', async () => {
+          if (selectionRect && currentTargetColor) {
+            await computeAndApplyHSV(selectionRect, currentTargetColor);
+          }
+        });
+      }
+      
+      function setupCanvas() {
+        const canvas = goalCalibrationCanvas;
+        const img = goalCalibrationImage;
+        
+        img.onload = () => {
+          if (canvas.width === img.clientWidth && canvas.height === img.clientHeight) {
+            return;
+          }
+          canvas.width = img.clientWidth;
+          canvas.height = img.clientHeight;
+        };
+      }
+      
+      function resetCanvasSelection() {
+        goalCalibrationCanvasContainer.style.display = 'none';
+        calibrationInstructions.textContent = '';
+        currentTargetColor = null;
+        isDrawing = false;
+        selectionRect = null;
+        const ctx = goalCalibrationCanvas.getContext('2d');
+        ctx.clearRect(0, 0, goalCalibrationCanvas.width, goalCalibrationCanvas.height);
+      }
+      
+      if (goalCalibrationCanvas) {
+        goalCalibrationCanvas.addEventListener('mousedown', (e) => {
+          const rect = goalCalibrationCanvas.getBoundingClientRect();
+          startX = e.clientX - rect.left;
+          startY = e.clientY - rect.top;
+          isDrawing = true;
+        });
+        
+        goalCalibrationCanvas.addEventListener('mousemove', (e) => {
+          if (!isDrawing) return;
+          
+          const rect = goalCalibrationCanvas.getBoundingClientRect();
+          currentX = e.clientX - rect.left;
+          currentY = e.clientY - rect.top;
+
+          drawCurrentRectangle();
+        });
+        
+        goalCalibrationCanvas.addEventListener('mouseup', (e) => {
+          if (!isDrawing) return;
+          isDrawing = false;
+          
+          const rect = goalCalibrationCanvas.getBoundingClientRect();
+          const endX = e.clientX - rect.left;
+          const endY = e.clientY - rect.top;
+          
+          currentX = endX;
+          currentY = endY;
+          
+          const scaleX = goalCalibrationImage.naturalWidth / goalCalibrationImage.clientWidth;
+          const scaleY = goalCalibrationImage.naturalHeight / goalCalibrationImage.clientHeight;
+          
+          selectionRect = {
+            x: Math.round(Math.min(startX, endX) * scaleX),
+            y: Math.round(Math.min(startY, endY) * scaleY),
+            width: Math.round(Math.abs(endX - startX) * scaleX),
+            height: Math.round(Math.abs(endY - startY) * scaleY)
+          };
+        });
+        
+        goalCalibrationCanvas.addEventListener('mouseleave', () => {
+          isDrawing = false;
+        });
+      }
+      
+      async function computeAndApplyHSV(rect, color) {
+        try {
+          const response = await fetch('/api/compute_hsv_from_region', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(rect)
+          });
+          
+          if (!response.ok) {
+            console.error('Failed to compute HSV from region');
+            return;
+          }
+          
+          const data = await response.json();
+          const [h_min, s_min, v_min] = data.lower;
+          const [h_max, s_max, v_max] = data.upper;
+          
+          if (color === 'yellow') {
+            document.getElementById('yellow-h-min').value = h_min;
+            document.getElementById('yellow-s-min').value = s_min;
+            document.getElementById('yellow-v-min').value = v_min;
+            document.getElementById('yellow-h-max').value = h_max;
+            document.getElementById('yellow-s-max').value = s_max;
+            document.getElementById('yellow-v-max').value = v_max;
+          } else if (color === 'blue') {
+            document.getElementById('blue-h-min').value = h_min;
+            document.getElementById('blue-s-min').value = s_min;
+            document.getElementById('blue-v-min').value = v_min;
+            document.getElementById('blue-h-max').value = h_max;
+            document.getElementById('blue-s-max').value = s_max;
+            document.getElementById('blue-v-max').value = v_max;
+          }
+          
+          calibrationInstructions.textContent = `✓ Computed HSV ranges for ${color} goal`;
+          calibrationInstructions.style.color = '#4CAF50';
+          
+          resetCanvasSelection();
+        } catch (e) {
+          console.error('Error computing HSV:', e);
+          calibrationInstructions.textContent = '✗ Failed to compute HSV ranges';
+          calibrationInstructions.style.color = '#f44336';
+        }
+      }
+
+      if (applyGoalCalibrationBtn) {
+        applyGoalCalibrationBtn.addEventListener('click', async () => {
+          const yellowLower = [
+            parseInt(document.getElementById('yellow-h-min').value) || 0,
+            parseInt(document.getElementById('yellow-s-min').value) || 0,
+            parseInt(document.getElementById('yellow-v-min').value) || 0
+          ];
+          const yellowUpper = [
+            parseInt(document.getElementById('yellow-h-max').value) || 179,
+            parseInt(document.getElementById('yellow-s-max').value) || 255,
+            parseInt(document.getElementById('yellow-v-max').value) || 255
+          ];
+          const blueLower = [
+            parseInt(document.getElementById('blue-h-min').value) || 0,
+            parseInt(document.getElementById('blue-s-min').value) || 0,
+            parseInt(document.getElementById('blue-v-min').value) || 0
+          ];
+          const blueUpper = [
+            parseInt(document.getElementById('blue-h-max').value) || 179,
+            parseInt(document.getElementById('blue-s-max').value) || 255,
+            parseInt(document.getElementById('blue-v-max').value) || 255
+          ];
+
+          try {
+            const response = await fetch('/api/set_goal_settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                calibration: {
+                  yellow: { lower: yellowLower, upper: yellowUpper },
+                  blue: { lower: blueLower, upper: blueUpper }
+                }
+              })
+            });
+            if (response.ok) {
+              await fetchGoalSettings();
+              goalCalibrationModal.classList.remove('active');
+            }
+          } catch (e) {
+            console.error('Error applying goal calibration:', e);
+          }
+        });
+      }
+
+      if (resetGoalCalibrationBtn) {
+        resetGoalCalibrationBtn.addEventListener('click', async () => {
+          const defaults = {
+            yellow: { lower: [20, 100, 100], upper: [30, 255, 255] },
+            blue: { lower: [100, 100, 100], upper: [130, 255, 255] }
+          };
+          
+          try {
+            const response = await fetch('/api/set_goal_settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ calibration: defaults })
+            });
+            if (response.ok) {
+              await fetchGoalSettings();
+              populateGoalCalibrationInputs();
+            }
+          } catch (e) {
+            console.error('Error resetting goal calibration:', e);
+          }
+        });
+      }
+
+      function populateGoalCalibrationInputs() {
+        document.getElementById('yellow-h-min').value = goalCalibration.yellow.lower[0];
+        document.getElementById('yellow-s-min').value = goalCalibration.yellow.lower[1];
+        document.getElementById('yellow-v-min').value = goalCalibration.yellow.lower[2];
+        document.getElementById('yellow-h-max').value = goalCalibration.yellow.upper[0];
+        document.getElementById('yellow-s-max').value = goalCalibration.yellow.upper[1];
+        document.getElementById('yellow-v-max').value = goalCalibration.yellow.upper[2];
+        
+        document.getElementById('blue-h-min').value = goalCalibration.blue.lower[0];
+        document.getElementById('blue-s-min').value = goalCalibration.blue.lower[1];
+        document.getElementById('blue-v-min').value = goalCalibration.blue.lower[2];
+        document.getElementById('blue-h-max').value = goalCalibration.blue.upper[0];
+        document.getElementById('blue-s-max').value = goalCalibration.blue.upper[1];
+        document.getElementById('blue-v-max').value = goalCalibration.blue.upper[2];
+      }
+
+
       // ========== Updates ==========
       async function fasterUpdate() {
         updateSensorData();
         updateLogs();
+        updateGoalDetection();
       }
 
       async function slowerUpdate() {
         updateMode();
         fetchMotorSettings();
+        fetchGoalSettings();
       }
 
       setInterval(fasterUpdate, 500);
