@@ -32,8 +32,6 @@ line_detected_getter = None
 line_calibration_starter = None
 line_calibration_stopper = None
 line_calibration_status_getter = None
-line_detection_dark_getter = None
-line_detection_dark_setter = None
 
 running_state_getter = None
 
@@ -106,8 +104,7 @@ def get_sensor_data():
         "line": {
             "raw": data.line,
             "detected": line_detected_getter() if line_detected_getter else [False] * LINE_SENSOR_COUNT,
-            "thresholds": line_detection_thresholds_getter() if line_detection_thresholds_getter else [500] * LINE_SENSOR_COUNT,
-            "polarity": "dark" if (line_detection_dark_getter and line_detection_dark_getter()) else "light"
+            "thresholds": line_detection_thresholds_getter() if line_detection_thresholds_getter else [],
         },
         "motors": motor_speeds_getter() if motor_speeds_getter else [0, 0, 0, 0],
         "kicker": kicker_state_getter() if kicker_state_getter else False,
@@ -199,11 +196,18 @@ def start_line_calibration():
     if line_calibration_starter is None:
         return jsonify({"error": "Internal server error"}), 503
     
-    line_calibration_starter()
-    logger.info("Line sensor calibration started")
+    data = request.get_json(silent=True) or {}
+    phase = data.get('phase', 1)
+    
+    if phase not in [1, 2]:
+        return jsonify({"error": "Bad request (phase)"}), 400
+    
+    line_calibration_starter(phase)
+    logger.info(f"Line sensor calibration phase {phase} started")
     return jsonify({
         "status": "ok",
-        "message": "Calibration started. Move robot over white and black surfaces."
+        "phase": phase,
+        "message": f"Phase {phase} started"
     })
 
 
@@ -213,22 +217,21 @@ def stop_line_calibration():
         return jsonify({"error": "Internal server error"}), 503
     
     status = line_calibration_status_getter()
-    if not status['active']:
+    if not status['phase'] > 0:
         return jsonify({"error": "Calibration is not active"}), 400
     
-    thresholds, min_values, max_values = line_calibration_stopper() # pyright: ignore[reportGeneralTypeIssues]
+    thresholds, min_values, max_values, phase = line_calibration_stopper() # pyright: ignore[reportGeneralTypeIssues]
+    logger.info(f"Line sensor calibration phase {phase} completed and applied. Thresholds: {thresholds}")
     
-    for i in range(LINE_SENSOR_COUNT):
-        if min_values[i] == float('inf') or max_values[i] == float('-inf'):
-            logger.warning(f"Sensor {i} has no calibration data, keeping default threshold")
-    
-    logger.info(f"Line sensor calibration completed. Thresholds: {thresholds}")
+    can_start_phase2 = (phase == 1 and any(min_values[i] != float('inf') for i in range(len(min_values))))
     
     return jsonify({
         "status": "ok",
+        "phase": phase,
         "thresholds": thresholds,
         "min_values": min_values,
-        "max_values": max_values
+        "max_values": max_values,
+        "can_start_phase2": can_start_phase2
     })
 
 
@@ -238,15 +241,17 @@ def cancel_line_calibration():
         return jsonify({"error": "Internal server error"}), 503
     
     status = line_calibration_status_getter()
-    if not status['active']:
+    if not status['phase'] > 0:
         return jsonify({"error": "Calibration is not active"}), 400
     
+    phase = status.get('phase', 0)
     line_calibration_stopper(cancel=True)
     
-    logger.info("Line sensor calibration cancelled")
+    logger.info(f"Line sensor calibration phase {phase} cancelled")
     
     return jsonify({
         "status": "ok",
+        "phase": phase,
         "message": "Calibration cancelled."
     })
 
@@ -260,44 +265,6 @@ def get_line_calibration_status():
     return jsonify(status)
 
 
-@app.route('/api/line_detection/polarity')
-def get_line_detection_polarity():
-    if line_detection_dark_getter is None:
-        return jsonify({"error": "Internal server error"}), 503
-
-    return jsonify({
-        "mode": "dark" if line_detection_dark_getter() else "light"
-    })
-
-@app.route('/api/line_detection/set_polarity', methods=['POST'])
-def set_line_detection_polarity():
-    if line_detection_dark_setter is None:
-        return jsonify({"error": "Internal server error"}), 503
-
-    data = request.get_json(silent=True) or {}
-    mode = data.get('mode', None)
-    dark = data.get('dark', None)
-
-    if isinstance(mode, str):
-        mode_lower = mode.lower()
-        if mode_lower in ('dark', 'darker'):
-            line_detection_dark_setter(True)
-            logger.info("Line detection polarity set to dark")
-            return jsonify({"status": "ok", "mode": "dark"})
-        if mode_lower in ('light', 'lighter'):
-            line_detection_dark_setter(False)
-            logger.info("Line detection polarity set to light")
-            return jsonify({"status": "ok", "mode": "light"})
-        return jsonify({"error": "Invalid mode. Use 'dark' or 'light'."}), 400
-
-    if isinstance(dark, bool):
-        line_detection_dark_setter(dark)
-        logger.info(f"Line detection polarity set to {'dark' if dark else 'light'}")
-        return jsonify({"status": "ok", "mode": "dark" if dark else "light"})
-
-    return jsonify({"error": "Missing or invalid 'mode' or 'dark' in request body"}), 400
-
-
 @app.route('/api/line_calibration/set_thresholds', methods=['POST'])
 def set_line_thresholds():
     if line_detection_thresholds_setter is None:
@@ -309,15 +276,21 @@ def set_line_thresholds():
     
     thresholds = data['thresholds']
     if not isinstance(thresholds, list) or len(thresholds) != LINE_SENSOR_COUNT:
-        return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} values"}), 400
+        return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs"}), 400
     
     try:
-        thresholds_int = [int(t) for t in thresholds]
-        line_detection_thresholds_setter(thresholds_int)
-        logger.info(f"Line detection thresholds manually set to: {thresholds_int}")
-        return jsonify({"status": "ok", "thresholds": thresholds_int})
+        thresholds_ranges = []
+        for t in thresholds:
+            if isinstance(t, list) and len(t) == 2:
+                thresholds_ranges.append([int(t[0]), int(t[1])])
+            else:
+                return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs"}), 400
+        
+        line_detection_thresholds_setter(thresholds_ranges)  # pyright: ignore[reportGeneralTypeIssues]
+        logger.info(f"Line detection thresholds manually set to: {thresholds_ranges}")
+        return jsonify({"status": "ok", "thresholds": thresholds_ranges})
     except (ValueError, TypeError) as e:
-        return jsonify({"error": f"Invalid threshold values: {e}"}), 400
+        return jsonify({"error": f"Invalid threshold values: {e}"}) , 400
 
 
 def start(host: str = API_HOST, port: int = API_PORT):

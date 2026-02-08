@@ -15,7 +15,7 @@ from config import (
     LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT, COMMUNICATION_LOOP_PERIOD,
-    LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, LINE_DETECTION_THRESHOLDS, LINE_DETECTION_DARK_LINE,
+    LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, LINE_DETECTION_THRESHOLDS,
     CALIBRATION_FILE_PATH
 )
 
@@ -35,12 +35,15 @@ shared_data: dict = {
     'next_log_id': multiprocessing.Value('i', 1),
     'manual_control': multiprocessing.Array('d', [0.0, 0.0, 0.0]),
     'compass_reset': multiprocessing.Value('b', False),
-    'line_detection_thresholds': multiprocessing.Array('i', LINE_DETECTION_THRESHOLDS),
+    'line_detection_thresholds': multiprocessing.Array('i', [val for pair in LINE_DETECTION_THRESHOLDS for val in pair]),
     'line_detected': multiprocessing.Array('b', [False] * LINE_SENSOR_COUNT),
     'line_calibration_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
     'line_calibration_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
-    'line_calibration_active': multiprocessing.Value('b', False),
-    'line_detection_dark': multiprocessing.Value('b', LINE_DETECTION_DARK_LINE),
+    'line_calibration_phase': multiprocessing.Value('i', 0),  # 0=inactive, 1=field, 2=lines
+    'line_calibration_phase1_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
+    'line_calibration_phase1_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
+    'line_calibration_phase2_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
+    'line_calibration_phase2_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
     'running_state': manager.dict(),
     'locks': {
         'frame': multiprocessing.Lock(),
@@ -218,25 +221,33 @@ class SmartMotorsController(MotorsController):
         super().__init__()
         self.target_heading = None
         self.rotation_deadzone = 15.0
-        self.rotation_correction_gain = 1
+        self.rotation_correction_gain = 1.0
 
     def set_motors(self, angle: float, speed: float, rotate: float):
+        self.move_x += (speed * math.cos(math.radians(angle)) - self.move_x) * self.acceleration * LOGIC_LOOP_PERIOD
+        self.move_y += (speed * math.sin(math.radians(angle)) - self.move_y) * self.acceleration * LOGIC_LOOP_PERIOD
+        self.rotate += (rotate - self.rotate) * self.acceleration * LOGIC_LOOP_PERIOD
+        move_angle = math.atan2(self.move_y, self.move_x)
+        move_speed = math.sqrt(self.move_x**2 + self.move_y**2)
+
         hardware_data = get_hardware_data()
-        if abs(rotate) > 0.01:
+        current_heading = hardware_data.compass.heading if hardware_data else None
+
+        if abs(self.rotate) > 0.01:
             self.target_heading = None
-        elif self.target_heading is None and hardware_data:
-            self.target_heading = hardware_data.compass.heading
+        elif self.target_heading is None and current_heading is not None:
+            self.target_heading = current_heading
         rotation_correction = 0.0
-        if hardware_data and self.target_heading is not None:
-            current_heading = hardware_data.compass.heading
+        if current_heading is not None and self.target_heading is not None:
             heading_error = (self.target_heading - current_heading + 180) % 360 - 180
             if abs(heading_error) > self.rotation_deadzone:
                 rotation_correction = (heading_error / 180.0) * self.rotation_correction_gain
 
-        total_rotation = rotate * 0.4 + rotation_correction
+        total_rotation = self.rotate * 0.4 + rotation_correction
         total_rotation = max(-1.0, min(1.0, total_rotation))
 
-        super().set_motors(angle, speed, total_rotation)
+        motors = calculate_motors_speeds(move_angle, move_speed * 255, total_rotation * 255)
+        set_motor_speeds(motors)
     
     def reset(self):
         super().reset()
@@ -395,14 +406,16 @@ def check_and_clear_compass_reset() -> bool:
         return True
     return False
 
-def get_line_detection_thresholds() -> list[int]:
+def get_line_detection_thresholds() -> list[list[int]]:
     with shared_data['locks']['line_calibration']:
-        return list(shared_data['line_detection_thresholds'])
+        flat = list(shared_data['line_detection_thresholds'])
+        return [[flat[i*2], flat[i*2+1]] for i in range(LINE_SENSOR_COUNT)]
 
-def set_line_detection_thresholds(thresholds: list[int], save: bool = True) -> None:
+def set_line_detection_thresholds(thresholds: list[list[int]], save: bool = True) -> None:
     with shared_data['locks']['line_calibration']:
         for i in range(min(LINE_SENSOR_COUNT, len(thresholds))):
-            shared_data['line_detection_thresholds'][i] = thresholds[i]
+            shared_data['line_detection_thresholds'][i * 2] = thresholds[i][0]  # min
+            shared_data['line_detection_thresholds'][i * 2 + 1] = thresholds[i][1]  # max
     if save:
         save_calibration_data()
 
@@ -410,73 +423,132 @@ def get_line_detected() -> list[bool]:
     with shared_data['locks']['line_calibration']:
         return list(shared_data['line_detected'])
 
-def get_line_detection_dark() -> bool:
-    with shared_data['locks']['line_calibration']:
-        return bool(shared_data['line_detection_dark'].value)
-
-def set_line_detection_dark(is_dark_line: bool, save: bool = True) -> None:
-    with shared_data['locks']['line_calibration']:
-        shared_data['line_detection_dark'].value = bool(is_dark_line)
-    if save:
-        save_calibration_data()
-
 def update_line_detected(data: teensy_communication.ParsedTeensyData):
     with shared_data['locks']['line_calibration']:
-        detect_dark = bool(shared_data['line_detection_dark'].value)
         for i, value in enumerate(data.line):
-            if i < LINE_SENSOR_COUNT:
-                threshold = shared_data['line_detection_thresholds'][i]
-                detected = value < threshold if detect_dark else value > threshold
-                shared_data['line_detected'][i] = detected
+            if i >= LINE_SENSOR_COUNT:
+                break
+            threshold_min = shared_data['line_detection_thresholds'][i * 2]
+            threshold_max = shared_data['line_detection_thresholds'][i * 2 + 1]
+            shared_data['line_detected'][i] = value < threshold_min or value > threshold_max
 
-def start_line_calibration() -> None:
+def start_line_calibration(phase: int = 1) -> None:
     with shared_data['locks']['line_calibration']:
-        shared_data['line_calibration_active'].value = True
-        for i in range(LINE_SENSOR_COUNT):
-            shared_data['line_calibration_min'][i] = float('inf')
-            shared_data['line_calibration_max'][i] = float('-inf')
+        if phase == 1:
+            shared_data['line_calibration_phase'].value = 1
+            for i in range(LINE_SENSOR_COUNT):
+                shared_data['line_calibration_min'][i] = float('inf')
+                shared_data['line_calibration_max'][i] = float('-inf')
+                shared_data['line_calibration_phase1_min'][i] = float('inf')
+                shared_data['line_calibration_phase1_max'][i] = float('-inf')
+                shared_data['line_calibration_phase2_min'][i] = float('inf')
+                shared_data['line_calibration_phase2_max'][i] = float('-inf')
+        elif phase == 2:
+            for i in range(LINE_SENSOR_COUNT):
+                shared_data['line_calibration_phase1_min'][i] = shared_data['line_calibration_min'][i]
+                shared_data['line_calibration_phase1_max'][i] = shared_data['line_calibration_max'][i]
+                shared_data['line_calibration_min'][i] = float('inf')
+                shared_data['line_calibration_max'][i] = float('-inf')
+            shared_data['line_calibration_phase'].value = 2
 
-def stop_line_calibration(cancel: bool = False) -> tuple[list[int], list[float], list[float]]:
+def stop_line_calibration(cancel: bool = False) -> tuple[list[list[int]], list[float], list[float], int]:
     with shared_data['locks']['line_calibration']:
-        shared_data['line_calibration_active'].value = False
+        phase = shared_data['line_calibration_phase'].value
         
-        if cancel:
-            return list(shared_data['line_detection_thresholds']), list(shared_data['line_calibration_min']), list(shared_data['line_calibration_max'])
-
         thresholds = []
         min_values = list(shared_data['line_calibration_min'])
         max_values = list(shared_data['line_calibration_max'])
         
-        for i in range(LINE_SENSOR_COUNT):
-            if min_values[i] != float('inf') and max_values[i] != float('-inf'):
-                threshold = int((min_values[i] + max_values[i]) / 2)
-                shared_data['line_detection_thresholds'][i] = threshold
-                thresholds.append(threshold)
-            else:
-                thresholds.append(shared_data['line_detection_thresholds'][i])
+        if phase == 1:
+            for i in range(LINE_SENSOR_COUNT):
+                if min_values[i] != float('inf') and max_values[i] != float('-inf'):
+                    thresholds.append([int(min_values[i]), int(max_values[i])])
+                else:
+                    existing_min = shared_data['line_detection_thresholds'][i * 2]
+                    existing_max = shared_data['line_detection_thresholds'][i * 2 + 1]
+                    thresholds.append([existing_min, existing_max])
+            shared_data['line_calibration_phase'].value = 0
+        elif phase == 2:
+            for i in range(LINE_SENSOR_COUNT):
+                shared_data['line_calibration_phase2_min'][i] = shared_data['line_calibration_min'][i]
+                shared_data['line_calibration_phase2_max'][i] = shared_data['line_calibration_max'][i]
+            
+            for i in range(LINE_SENSOR_COUNT):
+                field_min = shared_data['line_calibration_phase1_min'][i]
+                field_max = shared_data['line_calibration_phase1_max'][i]
+                line_min = shared_data['line_calibration_phase2_min'][i]
+                line_max = shared_data['line_calibration_phase2_max'][i]
+                
+                if field_min != float('inf') and field_max != float('-inf'):
+                    if line_min != float('inf') and line_max != float('-inf'):
+                        field_center = (field_min + field_max) / 2
+                        field_range = field_max - field_min
+                        margin = max(10, field_range * 0.1)
+                        
+                        new_min = max(0, int(field_min - margin))
+                        new_max = int(field_max + margin)
+                        
+                        if line_min < field_center < line_max:
+                            pass
+                        elif line_max < field_min:
+                            new_min = max(new_min, int(line_max + 5))
+                        elif line_min > field_max:
+                            new_max = min(new_max, int(line_min - 5))
+                        
+                        thresholds.append([new_min, new_max])
+                    else:
+                        thresholds.append([int(field_min), int(field_max)])
+                else:
+                    existing_min = shared_data['line_detection_thresholds'][i * 2]
+                    existing_max = shared_data['line_detection_thresholds'][i * 2 + 1]
+                    thresholds.append([existing_min, existing_max])
+            
+            shared_data['line_calibration_phase'].value = 0
 
-    save_calibration_data()
-    return thresholds, min_values, max_values
+    if cancel:
+        shared_data['line_calibration_phase'].value = 0
+    elif phase > 0:
+        for i in range(LINE_SENSOR_COUNT):
+            shared_data['line_detection_thresholds'][i * 2] = thresholds[i][0]
+            shared_data['line_detection_thresholds'][i * 2 + 1] = thresholds[i][1]
+        save_calibration_data()
+    
+    return thresholds, min_values, max_values, phase
 
 def get_line_calibration_status() -> dict:
     with shared_data['locks']['line_calibration']:
+        flat = list(shared_data['line_detection_thresholds'])
+        current_thresholds = [[flat[i*2], flat[i*2+1]] for i in range(LINE_SENSOR_COUNT)]
+        phase = shared_data['line_calibration_phase'].value
+        
+        def sanitize_values(values):
+            if values is None:
+                return None
+            return [None if (v == float('inf') or v == float('-inf')) else v for v in values]
+        
+        calibration_min = list(shared_data['line_calibration_min']) if phase > 0 else None
+        calibration_max = list(shared_data['line_calibration_max']) if phase > 0 else None
+        
         return {
-            'active': shared_data['line_calibration_active'].value,
-            'current_thresholds': list(shared_data['line_detection_thresholds']),
-            'dark_line': bool(shared_data['line_detection_dark'].value),
-            'calibration_min': list(shared_data['line_calibration_min']) if shared_data['line_calibration_active'].value else None,
-            'calibration_max': list(shared_data['line_calibration_max']) if shared_data['line_calibration_active'].value else None,
+            'active': phase > 0,
+            'phase': phase,
+            'current_thresholds': current_thresholds,
+            'calibration_min': sanitize_values(calibration_min),
+            'calibration_max': sanitize_values(calibration_max),
+            'phase1_complete': list(shared_data['line_calibration_phase1_min'])[0] != float('inf'),
+            'phase1_min': sanitize_values(list(shared_data['line_calibration_phase1_min'])) if list(shared_data['line_calibration_phase1_min'])[0] != float('inf') else None,
+            'phase1_max': sanitize_values(list(shared_data['line_calibration_phase1_max'])) if list(shared_data['line_calibration_phase1_max'])[0] != float('inf') else None,
         }
 
 def update_line_calibration(data: teensy_communication.ParsedTeensyData):
     with shared_data['locks']['line_calibration']:
-        if shared_data['line_calibration_active'].value:
+        if shared_data['line_calibration_phase'].value > 0:
             for i, value in enumerate(data.line):
                 if i < LINE_SENSOR_COUNT:
                     shared_data['line_calibration_min'][i] = min(shared_data['line_calibration_min'][i], value)
                     shared_data['line_calibration_max'][i] = max(shared_data['line_calibration_max'][i], value)
 
-CALIBRATION_SCHEMA_VERSION = 1
+CALIBRATION_SCHEMA_VERSION = 2
 
 def _get_calibration_storage_path() -> str:
     if os.path.isabs(CALIBRATION_FILE_PATH):
@@ -485,12 +557,13 @@ def _get_calibration_storage_path() -> str:
 
 def _create_calibration_data() -> dict:
     with shared_data['locks']['line_calibration']:
+        flat = list(shared_data['line_detection_thresholds'])
+        thresholds = [[flat[i*2], flat[i*2+1]] for i in range(LINE_SENSOR_COUNT)]
         return {
             "version": CALIBRATION_SCHEMA_VERSION,
             "calibrations": {
                 "line_detection": {
-                    "thresholds": list(shared_data['line_detection_thresholds']),
-                    "dark_line": bool(shared_data['line_detection_dark'].value),
+                    "thresholds": thresholds,
                 }
             }
         }
@@ -527,12 +600,12 @@ def load_calibration_data() -> None:
         calibrations = data.get("calibrations", {}) if isinstance(data, dict) else {}
         line_data = calibrations.get("line_detection", {}) if isinstance(calibrations, dict) else {}
         thresholds = line_data.get("thresholds", None)
-        dark_line = line_data.get("dark_line", None)
 
         if isinstance(thresholds, list) and len(thresholds) == LINE_SENSOR_COUNT:
-            set_line_detection_thresholds([int(t) for t in thresholds], save=False)
-        if isinstance(dark_line, bool):
-            set_line_detection_dark(dark_line, save=False)
+            if isinstance(thresholds[0], list):
+                set_line_detection_thresholds([[int(t[0]), int(t[1])] for t in thresholds], save=False)
+            else:
+                set_line_detection_thresholds([[int(t), int(t)] for t in thresholds], save=False)
 
         hardware_logger.info("Calibration data loaded")
     except Exception as e:
@@ -596,8 +669,6 @@ def init_api():
     api.line_calibration_starter = start_line_calibration
     api.line_calibration_stopper = stop_line_calibration
     api.line_calibration_status_getter = get_line_calibration_status
-    api.line_detection_dark_getter = get_line_detection_dark
-    api.line_detection_dark_setter = set_line_detection_dark
     api.running_state_getter = get_running_state
 
 def api_get_camera_frame():

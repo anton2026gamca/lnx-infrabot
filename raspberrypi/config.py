@@ -33,7 +33,7 @@ IDLE_SLEEP_DURATION = 0.1
 
 # ==================== API SERVER SETTINGS ====================
 # Video streaming
-API_VIDEO_JPEG_QUALITY = 85  # 0-100
+API_VIDEO_JPEG_QUALITY = 60  # 0-100
 API_VIDEO_TARGET_FPS = 30
 
 # Server settings
@@ -60,8 +60,7 @@ LINE_SENSOR_COUNT = 12
 LINE_SENSOR_LOCATIONS = [i * (360 / LINE_SENSOR_COUNT) for i in range(LINE_SENSOR_COUNT)]
 
 # Default values, can be calibrated/changed via api
-LINE_DETECTION_THRESHOLDS = [500] * LINE_SENSOR_COUNT
-LINE_DETECTION_DARK_LINE = False
+LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT # Array of [min, max] values
 
 # ==================== CALIBRATION STORAGE ====================
 CALIBRATION_FILE_PATH = "calibration_data.json"
