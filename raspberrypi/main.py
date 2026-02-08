@@ -45,6 +45,8 @@ shared_data: dict = {
     'line_calibration_phase2_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
     'line_calibration_phase2_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
     'running_state': manager.dict(),
+    'rotation_correction_enabled': multiprocessing.Value('b', True),
+    'line_avoiding_enabled': multiprocessing.Value('b', True),
     'locks': {
         'frame': multiprocessing.Lock(),
         'hardware_data': multiprocessing.Lock(),
@@ -233,18 +235,33 @@ class SmartMotorsController(MotorsController):
         hardware_data = get_hardware_data()
         current_heading = hardware_data.compass.heading if hardware_data else None
 
-        if abs(self.rotate) > 0.01:
-            self.target_heading = None
-        elif self.target_heading is None and current_heading is not None:
-            self.target_heading = current_heading
+        rotation_correction_enabled = get_rotation_correction_enabled()
         rotation_correction = 0.0
-        if current_heading is not None and self.target_heading is not None:
-            heading_error = (self.target_heading - current_heading + 180) % 360 - 180
-            if abs(heading_error) > self.rotation_deadzone:
-                rotation_correction = (heading_error / 180.0) * self.rotation_correction_gain
+        if rotation_correction_enabled:
+            if abs(self.rotate) > 0.01:
+                self.target_heading = None
+            elif self.target_heading is None and current_heading is not None:
+                self.target_heading = current_heading
+            if current_heading is not None and self.target_heading is not None:
+                heading_error = (self.target_heading - current_heading + 180) % 360 - 180
+                if abs(heading_error) > self.rotation_deadzone:
+                    rotation_correction = (heading_error / 180.0) * self.rotation_correction_gain
 
         total_rotation = self.rotate * 0.4 + rotation_correction
         total_rotation = max(-1.0, min(1.0, total_rotation))
+
+        line_avoiding_enabled = get_line_avoiding_enabled()
+        if line_avoiding_enabled:
+            lines_detected = get_line_detected()
+            sum = 0
+            count = 0
+            for i, line in enumerate(lines_detected):
+                if line:
+                    sum += LINE_SENSOR_LOCATIONS[i]
+                    count += 1
+            if count > 0:
+                avg = sum / count
+                move_angle = min(max(move_angle - avg, 135), 225) + avg
 
         motors = calculate_motors_speeds(move_angle, move_speed * 255, total_rotation * 255)
         set_motor_speeds(motors)
@@ -302,6 +319,18 @@ def get_manual_control() -> RobotManualControl:
         move_speed=shared_data['manual_control'][1],
         rotate=shared_data['manual_control'][2]
     )
+
+def set_rotation_correction_enabled(enabled: bool) -> None:
+    shared_data['rotation_correction_enabled'].value = enabled
+
+def get_rotation_correction_enabled() -> bool:
+    return shared_data['rotation_correction_enabled'].value
+
+def set_line_avoiding_enabled(enabled: bool) -> None:
+    shared_data['line_avoiding_enabled'].value = enabled
+
+def get_line_avoiding_enabled() -> bool:
+    return shared_data['line_avoiding_enabled'].value
 
 #endregion
 #region Hardware
@@ -670,6 +699,10 @@ def init_api():
     api.line_calibration_stopper = stop_line_calibration
     api.line_calibration_status_getter = get_line_calibration_status
     api.running_state_getter = get_running_state
+    api.rotation_correction_enabled_getter = get_rotation_correction_enabled
+    api.rotation_correction_enabled_setter = set_rotation_correction_enabled
+    api.line_avoiding_enabled_getter = get_line_avoiding_enabled
+    api.line_avoiding_enabled_setter = set_line_avoiding_enabled
 
 def api_get_camera_frame():
     data = get_camera_frame()

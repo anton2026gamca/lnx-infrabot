@@ -35,6 +35,11 @@ line_calibration_status_getter = None
 
 running_state_getter = None
 
+rotation_correction_enabled_getter = None
+rotation_correction_enabled_setter = None
+line_avoiding_enabled_getter = None
+line_avoiding_enabled_setter = None
+
 logger = logging.getLogger("API Process")
 
 
@@ -291,6 +296,41 @@ def set_line_thresholds():
         return jsonify({"status": "ok", "thresholds": thresholds_ranges})
     except (ValueError, TypeError) as e:
         return jsonify({"error": f"Invalid threshold values: {e}"}) , 400
+
+
+@app.route('/api/get_motor_settings')
+def get_motor_settings():
+    if rotation_correction_enabled_getter is None or line_avoiding_enabled_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    return jsonify({
+        "rotation_correction_enabled": rotation_correction_enabled_getter(),
+        "line_avoiding_enabled": line_avoiding_enabled_getter()
+    })
+
+
+@app.route('/api/set_motor_settings', methods=['POST'])
+def set_motor_settings():
+    if rotation_correction_enabled_setter is None or line_avoiding_enabled_setter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing request body"}), 400
+    
+    if 'rotation_correction_enabled' in data:
+        if not isinstance(data['rotation_correction_enabled'], bool):
+            return jsonify({"error": "rotation_correction_enabled must be a boolean"}), 400
+        rotation_correction_enabled_setter(data['rotation_correction_enabled'])
+        logger.info(f"Rotation correction {'enabled' if data['rotation_correction_enabled'] else 'disabled'}")
+    
+    if 'line_avoiding_enabled' in data:
+        if not isinstance(data['line_avoiding_enabled'], bool):
+            return jsonify({"error": "line_avoiding_enabled must be a boolean"}), 400
+        line_avoiding_enabled_setter(data['line_avoiding_enabled'])
+        logger.info(f"Line avoiding {'enabled' if data['line_avoiding_enabled'] else 'disabled'}")
+    
+    return jsonify({"status": "ok"})
 
 
 def start(host: str = API_HOST, port: int = API_PORT):

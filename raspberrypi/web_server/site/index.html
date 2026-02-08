@@ -257,11 +257,11 @@
       }
 
       .toggle-btn {
-        background: #333;
+        background: #333; 
         color: white; 
         border: none; 
-        padding: 10px 16px; 
-        border-radius: 10px; 
+        padding: 3px 10px; 
+        border-radius: 7px; 
         cursor: pointer; 
         font-size: 0.95em; 
         user-select: none; 
@@ -852,6 +852,10 @@
                   <div class="manual-control-hint">Click to focus, press keys to control</div>
                 </div>
               </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="toggle-btn rotation-correction-toggle">Rotation Correction</button>
+                <button class="toggle-btn line-avoiding-toggle">Line Avoiding</button>
+              </div>
             </div>
             
           </div>
@@ -875,6 +879,7 @@
                 <div class="btn" changemodeto="manual">Manual</div>
               </div>
             </div>
+
             <div class="control-group" style="display: none;">
               <div class="control-group-label">Manual Control (focus here)</div>
               <div tabindex="0" id="calibration-manual-control-box" class="manual-control-box" style="box-shadow: 0 0 0 2px #444;">
@@ -882,6 +887,10 @@
                   <div>Use <strong class="manual-control-keys">W/A/S/D</strong> to move, <strong class="manual-control-keys">← →</strong> to rotate</div>
                   <div class="manual-control-hint">Click to focus, press keys to control</div>
                 </div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="toggle-btn rotation-correction-toggle">Rotation Correction</button>
+                <button class="toggle-btn line-avoiding-toggle">Line Avoiding</button>
               </div>
             </div>
           </div>
@@ -1110,6 +1119,76 @@
           }
         });
       }
+
+      // ========== Motor Settings Toggles ==========
+      const rotationCorrectionToggles = document.querySelectorAll('.toggle-btn.rotation-correction-toggle');
+      const lineAvoidingToggles = document.querySelectorAll('.toggle-btn.line-avoiding-toggle');
+      
+      let rotationCorrectionEnabled = true;
+      let lineAvoidingEnabled = true;
+
+      async function updateMotorSettings(settings) {
+        try {
+          const response = await fetch('/api/set_motor_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+          });
+          if (!response.ok) {
+            console.error('Failed to update motor settings:', response.status);
+          }
+        } catch (e) {
+          console.error('Error updating motor settings:', e);
+        }
+      }
+
+      async function fetchMotorSettings() {
+        try {
+          const response = await fetch('/api/get_motor_settings');
+          if (response.ok) {
+            const data = await response.json();
+            rotationCorrectionEnabled = data.rotation_correction_enabled;
+            lineAvoidingEnabled = data.line_avoiding_enabled;
+            updateMotorSettingsUI();
+          }
+        } catch (e) {
+          console.error('Error fetching motor settings:', e);
+        }
+      }
+
+      function updateMotorSettingsUI() {
+        rotationCorrectionToggles.forEach(toggle => {
+          if (rotationCorrectionEnabled) {
+            toggle.classList.add('selected');
+          } else {
+            toggle.classList.remove('selected');
+          }
+        });
+        lineAvoidingToggles.forEach(toggle => {
+          if (lineAvoidingEnabled) {
+            toggle.classList.add('selected');
+          } else {
+            toggle.classList.remove('selected');
+          }
+        });
+      }
+
+      rotationCorrectionToggles.forEach(toggle => {
+        toggle.addEventListener('click', async () => {
+          rotationCorrectionEnabled = !rotationCorrectionEnabled;
+          updateMotorSettingsUI();
+          await updateMotorSettings({ rotation_correction_enabled: rotationCorrectionEnabled });
+        });
+      });
+
+      lineAvoidingToggles.forEach(toggle => {
+        toggle.addEventListener('click', async () => {
+          lineAvoidingEnabled = !lineAvoidingEnabled;
+          updateMotorSettingsUI();
+          await updateMotorSettings({ line_avoiding_enabled: lineAvoidingEnabled });
+        });
+      });
+
 
       function computeCommandFromKeys(keys) {
         let dy = 0, dx = 0;
@@ -1693,6 +1772,7 @@
 
       async function slowerUpdate() {
         updateMode();
+        fetchMotorSettings();
       }
 
       setInterval(fasterUpdate, 500);
