@@ -120,6 +120,12 @@ class RobotManualControl:
     move_speed: float = 0.0
     rotate: float = 0.0
 
+@dataclass
+class PositionEstimate:
+    x_mm: float
+    y_mm: float
+    confidence: float
+
 def calculate_motors_speeds(move_angle_rad: float, move_speed: float, rotate: float) -> list[int]:
     speeds = []
     for motor_angle in MOTOR_LOCATIONS:
@@ -127,3 +133,4 @@ def calculate_motors_speeds(move_angle_rad: float, move_speed: float, rotate: fl
         motor_speed = move_speed * math.cos(move_angle_rad - motor_rad) + rotate
         speeds.append(int(motor_speed))
     return speeds
+    

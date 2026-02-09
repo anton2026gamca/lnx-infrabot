@@ -28,6 +28,8 @@ class GoalDetectionResult:
     goal_detected: bool
     goal_center_x: int | None   # X coordinate of goal center in frame
     goal_area: float            # Area of detected goal in pixels
+    distance_mm: float | None   # Distance to goal in millimeters
+    goal_height_pixels: float   # Height of detected goal in pixels
 
 
 picam = None
@@ -55,7 +57,9 @@ def detect_goal_alignment(
     frame: np.ndarray,
     goal_color: str = "yellow",
     calibration: GoalColorCalibration | None = None,
-    min_area: int = 500
+    min_area: int = 500,
+    focal_length_pixels: float | None = None,
+    real_goal_height_mm: float = 100.0
 ) -> GoalDetectionResult:
     if calibration is None:
         calibration = GoalColorCalibration()
@@ -84,7 +88,9 @@ def detect_goal_alignment(
             alignment=0.0,
             goal_detected=False,
             goal_center_x=None,
-            goal_area=0.0
+            goal_area=0.0,
+            distance_mm=None,
+            goal_height_pixels=0.0
         )
     
     largest_contour = max(contours, key=cv2.contourArea)
@@ -95,7 +101,9 @@ def detect_goal_alignment(
             alignment=0.0,
             goal_detected=False,
             goal_center_x=None,
-            goal_area=goal_area
+            goal_area=goal_area,
+            distance_mm=None,
+            goal_height_pixels=0.0
         )
     
     M = cv2.moments(largest_contour)
@@ -104,10 +112,18 @@ def detect_goal_alignment(
             alignment=0.0,
             goal_detected=False,
             goal_center_x=None,
-            goal_area=goal_area
+            goal_area=goal_area,
+            distance_mm=None,
+            goal_height_pixels=0.0
         )
     
     goal_center_x = int(M["m10"] / M["m00"])
+    
+    _, _, _, goal_height_pixels = cv2.boundingRect(largest_contour)
+    
+    distance_mm = None
+    if focal_length_pixels is not None and goal_height_pixels > 0:
+        distance_mm = (real_goal_height_mm * focal_length_pixels) / goal_height_pixels
     
     frame_center_x = frame.shape[1] // 2
     max_offset = frame.shape[1] // 2
@@ -119,5 +135,7 @@ def detect_goal_alignment(
         alignment=alignment,
         goal_detected=True,
         goal_center_x=goal_center_x,
-        goal_area=goal_area
+        goal_area=goal_area,
+        distance_mm=distance_mm,
+        goal_height_pixels=float(goal_height_pixels)
     )

@@ -64,3 +64,8 @@ LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT # Array of [min, ma
 
 # ==================== CALIBRATION STORAGE ====================
 CALIBRATION_FILE_PATH = "calibration_data.json"
+
+# ==================== GOAL DETECTION SETTINGS ====================
+# Real-world goal height in millimeters
+GOAL_HEIGHT_MM = 100.0
+DEFAULT_FOCAL_LENGTH_PIXELS = 1000.0

@@ -17,8 +17,8 @@
 
       .container {
         display: flex;
-        gap: 7px;
-        padding: 7px;
+        gap: 5px;
+        padding: 5px;
         height: 100vh;
       }
 
@@ -26,14 +26,14 @@
         flex: 1;
         display: flex;
         flex-direction: column;
-        max-width: 65%;
-        gap: 7px;
+        max-width: 70%;
+        gap: 5px;
       }
 
       .panel {
         background: #111;
-        border-radius: 7px;
-        padding: 7px;
+        border-radius: 5px;
+        padding: 5px;
         overflow: hidden;
         display: flex;
         flex-direction: column;
@@ -78,35 +78,42 @@
       /* Sensors Panel */
       .sensors-grid {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 5px;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
+        align-content: start;
+      }
+
+      @media (max-width: 1300px) {
+        .sensors-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
       }
 
       .sensor-card {
         background: #222;
         border-radius: 2px;
-        padding: 5px;
+        padding: 4px;
         display: flex;
         flex-direction: column;
         align-items: center;
-        border: 2px solid #333;
+        border: 1px solid #333;
         min-height: 0;
       }
 
       .sensor-label {
-        font-size: 0.8em;
+        font-size: 0.75em;
         color: #aaa;
-        margin-bottom: 6px;
+        margin-bottom: 3px;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.3px;
         flex-shrink: 0;
       }
 
       .sensor-value {
-        font-size: 1.5em;
+        font-size: 1.3em;
         font-weight: bold;
         color: #4CAF50;
         flex-shrink: 0;
@@ -114,30 +121,30 @@
 
       .sensor-visual {
         width: 100%;
-        height: 50px;
+        height: 40px;
         background: #1a1a1a;
-        border-radius: 8px;
+        border-radius: 5px;
         position: relative;
         overflow: hidden;
-        margin-top: 5px;
+        margin-top: 3px;
         flex-shrink: 0;
       }
 
       /* Compass visualization */
       .compass {
-        width: 70px;
-        height: 70px;
+        width: 55px;
+        height: 55px;
         border-radius: 50%;
-        border: 3px solid #4CAF50;
+        border: 2px solid #4CAF50;
         position: relative;
-        margin: 8px auto;
+        margin: 3px auto;
         flex-shrink: 0;
       }
 
       .compass-needle {
         position: absolute;
-        width: 3px;
-        height: 30px;
+        width: 2px;
+        height: 22px;
         background: linear-gradient(to bottom, #f44336 0%, #f44336 50%, #2196F3 50%, #2196F3 100%);
         left: 50%;
         top: 50%;
@@ -147,7 +154,7 @@
 
       .compass-direction {
         position: absolute;
-        font-size: 0.65em;
+        font-size: 0.6em;
         color: #888;
       }
 
@@ -159,23 +166,24 @@
       /* Line sensors visualization */
       .line-sensors {
         display: flex;
-        gap: 5px;
+        gap: 3px;
         justify-content: center;
-        padding: 8px;
+        padding: 5px;
       }
 
       .line-sensor {
-        width: 20px;
-        height: 35px;
+        width: 14px;
+        height: 25px;
         background: #333;
-        border-radius: 5px;
+        border-radius: 3px;
         position: relative;
-        border: 2px solid #555;
+        border: 1px solid #555;
         flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: center;
         font-weight: bold;
+        font-size: 0.7em;
         transition: border-color 0.2s, box-shadow 0.2s;
       }
 
@@ -206,7 +214,7 @@
         flex: 1;
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 8px;
         overflow-y: auto;
         min-height: 0;
       }
@@ -214,7 +222,7 @@
       .control-group {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 5px;
         flex-shrink: 0;
       }
 
@@ -306,7 +314,7 @@
         background: #222;
         color: white;
         border: 2px solid #444;
-        padding: 2px 8px;
+        padding: 1px 4px;
         border-radius: 5px;
         cursor: pointer;
         font-size: 0.85em;
@@ -427,8 +435,8 @@
       }
 
       .ball-direction-circle {
-        width: 50px;
-        height: 50px;
+        width: 45px;
+        height: 45px;
         border-radius: 50%;
         background: #333;
         position: relative;
@@ -436,8 +444,8 @@
 
       .ball-direction-arrow {
         position: absolute;
-        width: 4px;
-        height: 25px;
+        width: 3px;
+        height: 20px;
         background: #4CAF50;
         top: 50%;
         left: 50%;
@@ -449,16 +457,16 @@
       .line-sensor-grid {
         display: grid;
         grid-template-columns: repeat(12, 1fr);
-        gap: 5px;
+        gap: 3px;
         margin-top: 5px;
       }
 
       .line-sensor-compact {
-        height: 30px;
+        height: 20px;
       }
 
       .line-sensor-full {
-        height: 35px;
+        height: 25px;
       }
 
       .line-sensor-status {
@@ -496,8 +504,22 @@
       }
 
       /* Grid Span Utilities */
+      .grid-span-1 {
+        grid-column: span 1;
+      }
+
       .grid-span-2 {
         grid-column: span 2;
+      }
+
+      .grid-span-4 {
+        grid-column: span 4;
+      }
+
+      @media (max-width: 1300px) {
+        .grid-span-4 {
+          grid-column: span 2;
+        }
       }
 
       .position-relative {
@@ -527,7 +549,7 @@
         background: #1a1a1a;
         border: 2px solid #333;
         border-radius: 12px;
-        padding: 24px;
+        padding: 10px;
         max-width: 600px;
         width: 90%;
         max-height: 80vh;
@@ -547,12 +569,12 @@
       .modal-content {
         display: flex;
         flex-direction: column;
-        gap: 20px;
+        gap: 10px;
       }
 
       .modal-section {
         background: #222;
-        padding: 16px;
+        padding: 10px;
         border-radius: 8px;
         border: 2px solid #333;
       }
@@ -630,8 +652,8 @@
 
       .modal-close-btn {
         position: absolute;
-        top: 20px;
-        right: 20px;
+        top: 10px;
+        right: 10px;
         background: transparent;
         border: none;
         color: #888;
@@ -652,7 +674,7 @@
   </head>
   <body>
     <div class="container">
-      <div class="side" style="flex: 2;">
+      <div class="side" style="flex: 3;">
         <!-- Camera Panel -->
         <div class="panel shrink">
           <!-- <div class="panel-header">Camera Feed</div> -->
@@ -680,7 +702,7 @@
         </div>
       </div>
 
-      <div class="side">
+      <div class="side" style="flex: 2;">
         <!-- Sensors Panel -->
         <div class="panel shrink">
           <!-- <div class="panel-header">Sensors</div> -->
@@ -725,6 +747,26 @@
                 </div>
               </div>
             </div>
+
+            <!-- Line Sensors -->
+            <div class="sensor-card grid-span-2 position-relative">
+              <div class="sensor-label">Line Sensors (12)</div>
+              <div class="line-sensor-grid">
+                <div class="line-sensor line-sensor-full" id="line-0"></div>
+                <div class="line-sensor line-sensor-full" id="line-1"></div>
+                <div class="line-sensor line-sensor-full" id="line-2"></div>
+                <div class="line-sensor line-sensor-full" id="line-3"></div>
+                <div class="line-sensor line-sensor-full" id="line-4"></div>
+                <div class="line-sensor line-sensor-full" id="line-5"></div>
+                <div class="line-sensor line-sensor-full" id="line-6"></div>
+                <div class="line-sensor line-sensor-full" id="line-7"></div>
+                <div class="line-sensor line-sensor-full" id="line-8"></div>
+                <div class="line-sensor line-sensor-full" id="line-9"></div>
+                <div class="line-sensor line-sensor-full" id="line-10"></div>
+                <div class="line-sensor line-sensor-full" id="line-11"></div>
+              </div>
+              <div class="corner-btn" style="top: 3px; right: 3px;" id="calibrate-line">Calibrate</div>
+            </div>
             
             <!-- IR Sensors -->
             <div class="sensor-card grid-span-2">
@@ -745,50 +787,9 @@
               </div>
               <div class="line-sensor-status">Status: <span id="ir-status">0</span></div>
             </div>
-            
-            <!-- Line Sensors -->
-            <div class="sensor-card grid-span-2 position-relative">
-              <div class="sensor-label">Line Sensors (12)</div>
-              <div class="line-sensor-grid">
-                <div class="line-sensor line-sensor-full" id="line-0"></div>
-                <div class="line-sensor line-sensor-full" id="line-1"></div>
-                <div class="line-sensor line-sensor-full" id="line-2"></div>
-                <div class="line-sensor line-sensor-full" id="line-3"></div>
-                <div class="line-sensor line-sensor-full" id="line-4"></div>
-                <div class="line-sensor line-sensor-full" id="line-5"></div>
-                <div class="line-sensor line-sensor-full" id="line-6"></div>
-                <div class="line-sensor line-sensor-full" id="line-7"></div>
-                <div class="line-sensor line-sensor-full" id="line-8"></div>
-                <div class="line-sensor line-sensor-full" id="line-9"></div>
-                <div class="line-sensor line-sensor-full" id="line-10"></div>
-                <div class="line-sensor line-sensor-full" id="line-11"></div>
-              </div>
-              <div class="corner-btn" style="top: 3px; right: 3px;" id="calibrate-line">Calibrate</div>
-            </div>
-
-            <!-- Motors -->
-            <div class="sensor-card">
-              <div class="sensor-label">Motor 1</div>
-              <div class="sensor-value" id="motor-0">0</div>
-            </div>
-
-            <div class="sensor-card">
-              <div class="sensor-label">Motor 2</div>
-              <div class="sensor-value" id="motor-1">0</div>
-            </div>
-
-            <div class="sensor-card">
-              <div class="sensor-label">Motor 3</div>
-              <div class="sensor-value" id="motor-2">0</div>
-            </div>
-
-            <div class="sensor-card">
-              <div class="sensor-label">Motor 4</div>
-              <div class="sensor-value" id="motor-3">0</div>
-            </div>
 
             <!-- Running State -->
-            <div class="sensor-card grid-span-2">
+            <div class="sensor-card grid-span-4">
               <div class="sensor-label">Running State</div>
               <div style="display: flex; gap: 7px; align-items: center; justify-content: center;">
                 <div style="border-radius: 5px; text-align: center; min-width: 50px; min-height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
@@ -817,6 +818,61 @@
               </div>
             </div>
 
+            
+            <!-- Motors -->
+            <div class="sensor-card grid-span-2">
+              <div class="sensor-label">Motors</div>
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; margin-top: 5px;">
+                <div style="text-align: center;">
+                  <div style="font-size: 0.7em; color: #888; margin-bottom: 3px;">M0</div>
+                  <div class="sensor-value" style="font-size: 1.2em;" id="motor-0">0</div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="font-size: 0.7em; color: #888; margin-bottom: 3px;">M1</div>
+                  <div class="sensor-value" style="font-size: 1.2em;" id="motor-1">0</div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="font-size: 0.7em; color: #888; margin-bottom: 3px;">M2</div>
+                  <div class="sensor-value" style="font-size: 1.2em;" id="motor-2">0</div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="font-size: 0.7em; color: #888; margin-bottom: 3px;">M3</div>
+                  <div class="sensor-value" style="font-size: 1.2em;" id="motor-3">0</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Position Estimation -->
+            <div class="sensor-card grid-span-2" style="grid-row: span 2;">
+              <div class="sensor-label">Robot Position Estimate</div>
+              <div style="display: flex; gap: 10px; align-items: stretch;">
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+                  <div>
+                    <div style="font-size: 0.75em; color: #888; margin-bottom: 3px;">X Position:</div>
+                    <div class="sensor-value" id="position-x-display" style="font-size: 1em;">---</div>
+                  </div>
+                  <div>
+                    <div style="font-size: 0.75em; color: #888; margin-bottom: 3px;">Y Position:</div>
+                    <div class="sensor-value" id="position-y-display" style="font-size: 1em;">---</div>
+                  </div>
+                  <div>
+                    <div style="font-size: 0.75em; color: #888; margin-bottom: 3px;">Confidence:</div>
+                    <div class="sensor-value" id="position-confidence-display" style="font-size: 1em;">---</div>
+                  </div>
+                </div>
+                <div style="width: 150px; height: 220px; background: #1a1a1a; border: 2px solid #333; border-radius: 5px; position: relative; flex-shrink: 0;">
+                  <!-- Field visualization -->
+                  <div style="position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 60px; height: 8px; background: #FFD700; border-radius: 2px;"></div>
+                  <div style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 60px; height: 8px; background: #4169E1; border-radius: 2px;"></div>
+                  <div style="position: absolute; top: 2px; right: 2px; font-size: 0.6em; color: #666;">1590mm</div>
+                  <div style="position: absolute; bottom: 2px; left: 2px; font-size: 0.6em; color: #666; writing-mode: vertical-rl; text-orientation: mixed;">2190mm</div>
+                  <!-- Robot marker -->
+                  <div id="position-robot-marker" style="position: absolute; width: 12px; height: 12px; background: #4CAF50; border-radius: 50%; border: 2px solid #fff; transform: translate(-50%, -50%); transition: all 0.3s; opacity: 0.5;"></div>
+                  <div id="position-robot-heading" style="position: absolute; width: 2px; height: 15px; background: #4CAF50; transform-origin: center bottom; transition: all 0.3s; opacity: 0.5;"></div>
+                </div>
+              </div>
+            </div>
+
             <!-- Goal Detection -->
             <div class="sensor-card grid-span-2">
               <div class="sensor-label">Goal Detection</div>
@@ -838,6 +894,16 @@
                   <div class="sensor-value" id="goal-center-display" style="font-size: 1em;">---</div>
                   <div style="font-size: 0.75em; color: #888; margin-top: 3px; margin-bottom: 3px;">Area:</div>
                   <div class="sensor-value" id="goal-area-display" style="font-size: 0.85em;">---</div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #333;">
+                <div style="flex: 1;">
+                  <div style="font-size: 0.75em; color: #888; margin-bottom: 3px;">Distance:</div>
+                  <div class="sensor-value" id="goal-distance-display" style="font-size: 1em;">---</div>
+                </div>
+                <div style="flex: 1;">
+                  <div style="font-size: 0.75em; color: #888; margin-bottom: 3px;">Angle:</div>
+                  <div class="sensor-value" id="goal-angle-display" style="font-size: 1em;">---</div>
                 </div>
               </div>
             </div>
@@ -895,6 +961,7 @@
                 </div>
                 <div style="display: flex; gap: 8px;">
                   <button class="btn btn-action" id="calibrate-goal-btn" style="flex: 1;">Calibrate Colors</button>
+                  <button class="btn btn-action" id="calibrate-goal-distance-btn" style="flex: 1;">Calibrate Distance</button>
                 </div>
               </div>
             </div>
@@ -923,7 +990,7 @@
 
             <div class="control-group" style="display: none;">
               <div class="control-group-label">Manual Control (focus here)</div>
-              <div tabindex="0" id="calibration-manual-control-box" class="manual-control-box" style="box-shadow: 0 0 0 2px #444;">
+              <div tabindex="0" id="line-manual-control-box" class="manual-control-box" style="box-shadow: 0 0 0 2px #444;">
                 <div class="manual-control-content">
                   <div>Use <strong class="manual-control-keys">W/A/S/D</strong> to move, <strong class="manual-control-keys">← →</strong> to rotate</div>
                   <div class="manual-control-hint">Click to focus, press keys to control</div>
@@ -1068,6 +1135,80 @@
             </div>
           </div>
 
+        </div>
+      </div>
+    </div>
+
+    <!-- Goal Distance Calibration Modal -->
+    <div class="modal-overlay" id="goal-distance-calibration-modal">
+      <div class="modal-dialog" style="position: relative;">
+        <button class="modal-close-btn" id="close-goal-distance-calibration-modal">&times;</button>
+        <div class="modal-header">Goal Distance Calibration</div>
+        <div class="modal-content">
+          <div class="modal-section">
+            <p>This calibration calculates the camera focal length to accurately measure distance to the goal.</p>
+            <ol style="margin: 10px 0; padding-left: 20px;">
+              <li>Place the robot near your own goal (starting position)</li>
+              <li>Set the initial distance value (distance from robot to enemy goal in mm)</li>
+              <li>Start calibration and switch to Manual mode using the buttons below</li>
+              <li>Drive the robot straight toward the enemy goal</li>
+              <li>When line sensors detect the line, stop calibration</li>
+            </ol>
+          </div>
+
+          <div class="modal-section">
+            <div style="margin-bottom: 15px;">
+              <label style="display: block; color: #aaa; margin-bottom: 5px; font-size: 0.9em;">Initial Distance (mm):</label>
+              <input type="number" id="goal-distance-initial-input" value="1600" min="100" max="3000" step="10" style="width: 100%; padding: 8px; background: #333; border: 1px solid #555; color: #fff; border-radius: 4px; font-size: 1em;">
+              <div style="color: #666; font-size: 0.8em; margin-top: 3px;">Distance from robot start position to enemy goal</div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+              <label style="display: block; color: #aaa; margin-bottom: 5px; font-size: 0.9em;">Line to Goal Distance (mm):</label>
+              <input type="number" id="goal-distance-line-input" value="200" min="50" max="1000" step="10" style="width: 100%; padding: 8px; background: #333; border: 1px solid #555; color: #fff; border-radius: 4px; font-size: 1em;">
+              <div style="color: #666; font-size: 0.8em; margin-top: 3px;">Distance from line detection to enemy goal</div>
+            </div>
+          </div>
+
+          <div class="modal-section controls-content">
+            <div class="control-group">
+              <div class="control-group-label">Mode Selection</div>
+              <div class="mode-buttons">
+                <div class="btn" changemodeto="idle">Idle</div>
+                <div class="btn" changemodeto="manual">Manual</div>
+              </div>
+            </div>
+
+            <div class="control-group" style="display: none;">
+              <div class="control-group-label">Manual Control (focus here)</div>
+              <div tabindex="0" id="goal-distance-manual-control-box" class="manual-control-box" style="box-shadow: 0 0 0 2px #444;">
+                <div class="manual-control-content">
+                  <div>Use <strong class="manual-control-keys">W/A/S/D</strong> to move, <strong class="manual-control-keys">← →</strong> to rotate</div>
+                  <div class="manual-control-hint">Click to focus, press keys to control</div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="toggle-btn rotation-correction-toggle">Rotation Correction</button>
+                <button class="toggle-btn line-avoiding-toggle">Line Avoiding</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-status" id="goal-distance-calibration-status" style="display: none;">
+            <strong>Calibration Active</strong>
+            <div style="margin-top: 10px; color: #aaa;">
+              <span id="goal-distance-calibration-phase-text">Waiting for goal detection...</span>
+            </div>
+            <div style="margin-top: 5px; color: #666; font-size: 0.85em;">
+              Initial height: <span id="goal-distance-start-height">---</span> px
+            </div>
+          </div>
+
+          <div class="modal-buttons">
+            <button class="btn btn-action" id="start-goal-distance-calibration">Start Calibration</button>
+            <button class="btn btn-action" id="stop-goal-distance-calibration" style="display: none;">Stop & Calculate</button>
+            <button class="btn btn-danger" id="cancel-goal-distance-calibration" style="display: none;">Cancel</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1444,6 +1585,13 @@
       const goalCenterDisplay = document.getElementById('goal-center-display');
       const goalAreaDisplay = document.getElementById('goal-area-display');
       const goalAlignmentArrowSensor = document.getElementById('goal-alignment-arrow-sensor');
+      const goalDistanceDisplay = document.getElementById('goal-distance-display');
+      const goalAngleDisplay = document.getElementById('goal-angle-display');
+      const positionXDisplay = document.getElementById('position-x-display');
+      const positionYDisplay = document.getElementById('position-y-display');
+      const positionConfidenceDisplay = document.getElementById('position-confidence-display');
+      const positionRobotMarker = document.getElementById('position-robot-marker');
+      const positionRobotHeading = document.getElementById('position-robot-heading');
 
       async function updateSensorData() {
         const response = await fetch('/api/get_sensor_data');
@@ -1581,7 +1729,7 @@
       const calibrationModal = document.getElementById('calibration-modal');
       const closeModalBtn = document.getElementById('close-calibration-modal');
 
-      const calibrationManualControlBox = document.getElementById('calibration-manual-control-box');
+      const lineManualControlBox = document.getElementById('line-manual-control-box');
       
       const phase1Section = document.getElementById('phase1-section');
       const phase2Section = document.getElementById('phase2-section');
@@ -1610,7 +1758,7 @@
       if (calibrateLineBtn) {
         calibrateLineBtn.addEventListener('click', () => {
           calibrationModal.classList.add('active');
-          activeManualControlBox = calibrationManualControlBox;
+          activeManualControlBox = lineManualControlBox;
           if (selectedMode === 'autonomous') {
             requestModeUpdate('idle');
           }
@@ -1974,6 +2122,18 @@
             goalAreaDisplay.textContent = `${Math.round(data.goal_area)} px²`;
             goalAreaDisplay.style.color = '#4CAF50';
             
+            if (data.distance_mm !== null && data.distance_mm !== undefined) {
+              goalDistanceDisplay.textContent = `${Math.round(data.distance_mm)} mm`;
+              goalDistanceDisplay.style.color = '#4CAF50';
+            } else {
+              goalDistanceDisplay.textContent = '---';
+              goalDistanceDisplay.style.color = '#888';
+            }
+            
+            const alignmentAngle = data.alignment * 45;
+            goalAngleDisplay.textContent = `${alignmentAngle.toFixed(1)}°`;
+            goalAngleDisplay.style.color = '#4CAF50';
+            
             const angle = data.alignment * 45;
             goalAlignmentArrowSensor.style.transform = `translate(-50%, -100%) rotate(${angle}deg)`;
             goalAlignmentArrowSensor.style.background = Math.abs(data.alignment) < 0.1 ? '#4CAF50' : '#FFC107';
@@ -1986,11 +2146,70 @@
             goalCenterDisplay.style.color = '#888';
             goalAreaDisplay.textContent = '---';
             goalAreaDisplay.style.color = '#888';
+            goalDistanceDisplay.textContent = '---';
+            goalDistanceDisplay.style.color = '#888';
+            goalAngleDisplay.textContent = '---';
+            goalAngleDisplay.style.color = '#888';
             goalAlignmentArrowSensor.style.transform = 'translate(-50%, -100%) rotate(0deg)';
             goalAlignmentArrowSensor.style.background = '#333';
           }
         } catch (e) {
           console.error('Error updating goal detection:', e);
+        }
+      }
+
+      async function updatePositionEstimate() {
+        try {
+          const response = await fetch('/api/get_position_estimate');
+          if (!response.ok) return;
+          
+          const data = await response.json();
+          
+          if (data.x_mm !== null && data.y_mm !== null && data.confidence > 0) {
+            positionXDisplay.textContent = `${Math.round(data.x_mm)} mm`;
+            positionXDisplay.style.color = '#4CAF50';
+            
+            positionYDisplay.textContent = `${Math.round(data.y_mm)} mm`;
+            positionYDisplay.style.color = '#4CAF50';
+            
+            const confidencePercent = (data.confidence * 100).toFixed(0);
+            positionConfidenceDisplay.textContent = `${confidencePercent}%`;
+            if (data.confidence > 0.7) {
+              positionConfidenceDisplay.style.color = '#4CAF50';
+            } else if (data.confidence > 0.4) {
+              positionConfidenceDisplay.style.color = '#FFC107';
+            } else {
+              positionConfidenceDisplay.style.color = '#FF5722';
+            }
+            
+            const fieldWidth = 1580;
+            const fieldLength = 2190;
+            const vizWidth = 158;
+            const vizHeight = 219;
+            
+            const padding = 5;
+            const vizX = padding + (data.x_mm / fieldWidth) * (vizWidth - 2 * padding);
+            const vizY = vizHeight - padding - (data.y_mm / fieldLength) * (vizHeight - 2 * padding);
+            
+            positionRobotMarker.style.left = `${vizX}px`;
+            positionRobotMarker.style.top = `${vizY}px`;
+            positionRobotMarker.style.opacity = data.confidence;
+            
+            positionRobotHeading.style.left = `${vizX}px`;
+            positionRobotHeading.style.top = `${vizY}px`;
+            positionRobotHeading.style.opacity = data.confidence;
+          } else {
+            positionXDisplay.textContent = '---';
+            positionXDisplay.style.color = '#888';
+            positionYDisplay.textContent = '---';
+            positionYDisplay.style.color = '#888';
+            positionConfidenceDisplay.textContent = '---';
+            positionConfidenceDisplay.style.color = '#888';
+            positionRobotMarker.style.opacity = 0.1;
+            positionRobotHeading.style.opacity = 0.1;
+          }
+        } catch (e) {
+          console.error('Error updating position estimate:', e);
         }
       }
 
@@ -2289,11 +2508,177 @@
       }
 
 
+      // ========== Goal Distance Calibration ==========
+      const calibrateGoalDistanceBtn = document.getElementById('calibrate-goal-distance-btn');
+      const goalDistanceCalibrationModal = document.getElementById('goal-distance-calibration-modal');
+      const closeGoalDistanceCalibrationModalBtn = document.getElementById('close-goal-distance-calibration-modal');
+      const startGoalDistanceCalibrationBtn = document.getElementById('start-goal-distance-calibration');
+      const stopGoalDistanceCalibrationBtn = document.getElementById('stop-goal-distance-calibration');
+      const cancelGoalDistanceCalibrationBtn = document.getElementById('cancel-goal-distance-calibration');
+      const goalDistanceInitialInput = document.getElementById('goal-distance-initial-input');
+      const goalDistanceLineInput = document.getElementById('goal-distance-line-input');
+      const goalDistanceCalibrationStatus = document.getElementById('goal-distance-calibration-status');
+      const goalDistanceStartHeight = document.getElementById('goal-distance-start-height');
+      const goalDistancePhaseText = document.getElementById('goal-distance-calibration-phase-text');
+      const goalDistanceManualControlBox = document.getElementById('goal-distance-manual-control-box');
+
+      if (calibrateGoalDistanceBtn) {
+        calibrateGoalDistanceBtn.addEventListener('click', () => {
+          goalDistanceCalibrationModal.classList.add('active');
+          activeManualControlBox = goalDistanceManualControlBox;
+          updateGoalDistanceCalibrationUI();
+        });
+      }
+
+      if (closeGoalDistanceCalibrationModalBtn) {
+        closeGoalDistanceCalibrationModalBtn.addEventListener('click', async () => {
+          const status = await getGoalDistanceCalibrationStatus();
+          if (status.active) {
+            if (confirm('Calibration is in progress. Cancel it?')) {
+              await cancelGoalDistanceCalibration();
+            } else {
+              return;
+            }
+          }
+          goalDistanceCalibrationModal.classList.remove('active');
+          activeManualControlBox = mainManualControlBox;
+        });
+      }
+
+      if (startGoalDistanceCalibrationBtn) {
+        startGoalDistanceCalibrationBtn.addEventListener('click', async () => {
+          const initialDistance = parseFloat(goalDistanceInitialInput.value);
+          const lineDistance = parseFloat(goalDistanceLineInput.value);
+          
+          if (isNaN(initialDistance) || initialDistance <= 0) {
+            alert(`Invalid distance: \"${initialDistance}\"`);
+            return;
+          }
+          
+          if (isNaN(lineDistance) || lineDistance <= 0) {
+            alert(`Invalid distance: \"${lineDistance}\"`);
+            return;
+          }
+
+          try {
+            const response = await fetch('/api/goal_distance_calibration/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                initial_distance: initialDistance, 
+                line_distance: lineDistance 
+              })
+            });
+            
+            if (response.ok) {
+              updateGoalDistanceCalibrationUI();
+            } else {
+              const data = await response.json();
+              console.error('Error starting goal distance calibration:', data.error || 'Unknown error');
+            }
+          } catch (e) {
+            console.error('Error starting goal distance calibration:', e);
+          }
+        });
+      }
+
+      if (stopGoalDistanceCalibrationBtn) {
+        stopGoalDistanceCalibrationBtn.addEventListener('click', async () => {
+          try {
+            const response = await fetch('/api/goal_distance_calibration/stop', {
+              method: 'POST'
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+              updateGoalDistanceCalibrationUI();
+              goalDistanceCalibrationModal.classList.remove('active');
+              activeManualControlBox = mainManualControlBox;
+            } else {
+              console.error('Error stopping goal distance calibration:', data.error || 'Unknown error');
+            }
+          } catch (e) {
+            console.error('Error stopping goal distance calibration:', e);
+          }
+        });
+      }
+
+      if (cancelGoalDistanceCalibrationBtn) {
+        cancelGoalDistanceCalibrationBtn.addEventListener('click', async () => {
+          await cancelGoalDistanceCalibration();
+          updateGoalDistanceCalibrationUI();
+        });
+      }
+
+      async function cancelGoalDistanceCalibration() {
+        try {
+          await fetch('/api/goal_distance_calibration/cancel', { method: 'POST' });
+        } catch (e) {
+          console.error('Error cancelling goal distance calibration:', e);
+        }
+      }
+
+      async function getGoalDistanceCalibrationStatus() {
+        try {
+          const response = await fetch('/api/goal_distance_calibration/status');
+          if (response.ok) {
+            return await response.json();
+          }
+        } catch (e) {
+          console.error('Error getting goal distance calibration status:', e);
+        }
+        return { active: false, phase: 0 };
+      }
+
+      async function updateGoalDistanceCalibrationUI() {
+        const status = await getGoalDistanceCalibrationStatus();
+        
+        if (status.active) {
+          startGoalDistanceCalibrationBtn.style.display = 'none';
+          stopGoalDistanceCalibrationBtn.style.display = 'inline-block';
+          cancelGoalDistanceCalibrationBtn.style.display = 'inline-block';
+          goalDistanceCalibrationStatus.style.display = 'block';
+          goalDistanceInitialInput.disabled = true;
+          goalDistanceLineInput.disabled = true;
+          
+          if (status.initial_height_pixels && status.initial_height_pixels > 0) {
+            goalDistanceStartHeight.textContent = status.initial_height_pixels.toFixed(1);
+            if (status.phase === 'driving') {
+              goalDistancePhaseText.textContent = 'Goal detected! Now drive toward the enemy goal until line is detected.';
+              if (status.line_height_pixels && status.line_height_pixels > 0) {
+                goalDistancePhaseText.textContent = 'Line detected! Click "Stop & Calculate" to finish calibration.';
+              }
+            } else {
+              goalDistancePhaseText.textContent = 'Goal detected! Recording initial measurement...';
+            }
+          } else {
+            goalDistanceStartHeight.textContent = 'Waiting for goal...';
+            goalDistancePhaseText.textContent = 'Point the camera at the enemy goal to begin.';
+          }
+        } else {
+          startGoalDistanceCalibrationBtn.style.display = 'inline-block';
+          stopGoalDistanceCalibrationBtn.style.display = 'none';
+          cancelGoalDistanceCalibrationBtn.style.display = 'none';
+          goalDistanceCalibrationStatus.style.display = 'none';
+          goalDistanceInitialInput.disabled = false;
+          goalDistanceLineInput.disabled = false;
+        }
+      }
+
+      setInterval(() => {
+        if (goalDistanceCalibrationModal.classList.contains('active')) {
+          updateGoalDistanceCalibrationUI();
+        }
+      }, 500);
+
+
       // ========== Updates ==========
       async function fasterUpdate() {
         updateSensorData();
         updateLogs();
         updateGoalDetection();
+        updatePositionEstimate();
       }
 
       async function slowerUpdate() {

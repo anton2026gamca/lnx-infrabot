@@ -10,13 +10,16 @@ import time
 import helpers.camera as camera
 import helpers.teensy_communication as teensy_communication
 import web_server.api.api as api
-from helpers.helpers import RobotMode, Suppress200Filter, setup_logger, BufferedLogHandler, RobotManualControl, calculate_motors_speeds
+from helpers.helpers import (
+  RobotMode, RobotManualControl, PositionEstimate, calculate_motors_speeds,
+  Suppress200Filter, BufferedLogHandler, setup_logger
+)
 from config import (
     LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT, COMMUNICATION_LOOP_PERIOD,
     LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, LINE_DETECTION_THRESHOLDS,
-    CALIBRATION_FILE_PATH
+    CALIBRATION_FILE_PATH, DEFAULT_FOCAL_LENGTH_PIXELS, GOAL_HEIGHT_MM
 )
 
 
@@ -51,6 +54,9 @@ shared_data: dict = {
     'goal_calibration_yellow': multiprocessing.Array('i', [20, 100, 100, 30, 255, 255]),
     'goal_calibration_blue': multiprocessing.Array('i', [100, 100, 100, 130, 255, 255]),
     'goal_detection_result': manager.dict(),
+    'goal_focal_length': multiprocessing.Value('d', DEFAULT_FOCAL_LENGTH_PIXELS),
+    'goal_distance_calibration_active': multiprocessing.Value('b', False),
+    'goal_distance_calibration_data': manager.dict(),
     'locks': {
         'frame': multiprocessing.Lock(),
         'hardware_data': multiprocessing.Lock(),
@@ -60,6 +66,7 @@ shared_data: dict = {
         'running_state': multiprocessing.Lock(),
         'calibration_storage': multiprocessing.Lock(),
         'goal_detection': multiprocessing.Lock(),
+        'goal_distance_calibration': multiprocessing.Lock(),
     }
 }
 
@@ -190,8 +197,17 @@ def logic_process(stop_event):
                     blue_lower=np.array(lower) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_lower,
                     blue_upper=np.array(upper) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_upper
                 )
-                result = camera.detect_goal_alignment(frame_data.frame, goal_color, calibration)
+                focal_length = get_goal_focal_length()
+                result = camera.detect_goal_alignment(
+                    frame_data.frame, 
+                    goal_color, 
+                    calibration, 
+                    focal_length_pixels=focal_length,
+                    real_goal_height_mm=GOAL_HEIGHT_MM
+                )
                 set_goal_detection_result(result)
+                
+                update_goal_distance_calibration(result)
 
             mode = get_robot_mode()
             if mode == RobotMode.IDLE:
@@ -396,6 +412,8 @@ def set_goal_detection_result(result: camera.GoalDetectionResult | None) -> None
             shared_data['goal_detection_result']['goal_detected'] = result.goal_detected
             shared_data['goal_detection_result']['goal_center_x'] = result.goal_center_x
             shared_data['goal_detection_result']['goal_area'] = result.goal_area
+            shared_data['goal_detection_result']['distance_mm'] = result.distance_mm
+            shared_data['goal_detection_result']['goal_height_pixels'] = result.goal_height_pixels
 
 def get_goal_detection_result() -> camera.GoalDetectionResult | None:
     with shared_data['locks']['goal_detection']:
@@ -405,8 +423,114 @@ def get_goal_detection_result() -> camera.GoalDetectionResult | None:
             alignment=shared_data['goal_detection_result'].get('alignment', 0.0),
             goal_detected=shared_data['goal_detection_result'].get('goal_detected', False),
             goal_center_x=shared_data['goal_detection_result'].get('goal_center_x', None),
-            goal_area=shared_data['goal_detection_result'].get('goal_area', 0.0)
+            goal_area=shared_data['goal_detection_result'].get('goal_area', 0.0),
+            distance_mm=shared_data['goal_detection_result'].get('distance_mm', None),
+            goal_height_pixels=shared_data['goal_detection_result'].get('goal_height_pixels', 0.0)
         )
+
+def get_goal_focal_length() -> float:
+    return shared_data['goal_focal_length'].value
+
+def set_goal_focal_length(focal_length: float) -> None:
+    shared_data['goal_focal_length'].value = focal_length
+    save_calibration_data()
+
+def start_goal_distance_calibration(initial_distance_mm: float, line_distance_mm: float) -> None:
+    with shared_data['locks']['goal_distance_calibration']:
+        shared_data['goal_distance_calibration_active'].value = True
+        shared_data['goal_distance_calibration_data'].clear()
+        shared_data['goal_distance_calibration_data']['initial_distance_mm'] = initial_distance_mm
+        shared_data['goal_distance_calibration_data']['line_distance_mm'] = line_distance_mm
+        shared_data['goal_distance_calibration_data']['initial_height_pixels'] = None
+        shared_data['goal_distance_calibration_data']['line_height_pixels'] = None
+        shared_data['goal_distance_calibration_data']['phase'] = 'initial'  # 'initial' or 'driving'
+    logic_logger.info(f"Started goal distance calibration: initial={initial_distance_mm}mm, line={line_distance_mm}mm")
+
+def stop_goal_distance_calibration() -> dict:
+    with shared_data['locks']['goal_distance_calibration']:
+        if not shared_data['goal_distance_calibration_active'].value:
+            return {'success': False, 'error': 'No calibration in progress'}
+        
+        data = dict(shared_data['goal_distance_calibration_data'])
+        initial_height = data.get('initial_height_pixels')
+        line_height = data.get('line_height_pixels')
+        initial_distance = data.get('initial_distance_mm')
+        line_distance = data.get('line_distance_mm')
+        
+        if initial_height is None or line_height is None:
+            shared_data['goal_distance_calibration_active'].value = False
+            return {'success': False, 'error': 'Calibration incomplete: goal not detected at both positions'}
+        
+        if initial_height <= 0 or line_height <= 0:
+            shared_data['goal_distance_calibration_active'].value = False
+            return {'success': False, 'error': 'Invalid goal height detected'}
+        
+        focal1 = (initial_height * initial_distance) / GOAL_HEIGHT_MM
+        focal2 = (line_height * line_distance) / GOAL_HEIGHT_MM
+        focal_length = (focal1 + focal2) / 2.0
+        
+        set_goal_focal_length(focal_length)
+        shared_data['goal_distance_calibration_active'].value = False
+        
+        logic_logger.info(f"Goal distance calibration complete: focal_length={focal_length:.2f} pixels")
+        
+        return {
+            'success': True,
+            'focal_length_pixels': focal_length,
+            'initial_height_pixels': initial_height,
+            'line_height_pixels': line_height,
+            'calculated_focal1': focal1,
+            'calculated_focal2': focal2
+        }
+
+def cancel_goal_distance_calibration() -> None:
+    with shared_data['locks']['goal_distance_calibration']:
+        shared_data['goal_distance_calibration_active'].value = False
+        shared_data['goal_distance_calibration_data'].clear()
+    logic_logger.info("Goal distance calibration cancelled")
+
+def get_goal_distance_calibration_status() -> dict:
+    with shared_data['locks']['goal_distance_calibration']:
+        if not shared_data['goal_distance_calibration_active'].value:
+            return {'active': False}
+        
+        data = dict(shared_data['goal_distance_calibration_data'])
+        return {
+            'active': True,
+            'phase': data.get('phase', 'initial'),
+            'initial_distance_mm': data.get('initial_distance_mm'),
+            'line_distance_mm': data.get('line_distance_mm'),
+            'initial_height_pixels': data.get('initial_height_pixels'),
+            'line_height_pixels': data.get('line_height_pixels')
+        }
+
+def get_position_estimate() -> PositionEstimate | None:
+    # Not implemented yet
+    return None
+
+def update_goal_distance_calibration(goal_result: camera.GoalDetectionResult) -> None:
+    with shared_data['locks']['goal_distance_calibration']:
+        if not shared_data['goal_distance_calibration_active'].value:
+            return
+        
+        phase = shared_data['goal_distance_calibration_data'].get('phase')
+        initial_height = shared_data['goal_distance_calibration_data'].get('initial_height_pixels')
+        
+        if phase == 'initial' and goal_result.goal_detected and goal_result.goal_height_pixels > 0:
+            shared_data['goal_distance_calibration_data']['initial_height_pixels'] = goal_result.goal_height_pixels
+            logic_logger.debug(f"Recording initial goal height: {goal_result.goal_height_pixels:.2f} pixels")
+            initial_height = goal_result.goal_height_pixels
+        
+        if phase == 'initial' and initial_height is not None and initial_height > 0:
+            shared_data['goal_distance_calibration_data']['phase'] = 'driving'
+            logic_logger.info(f"Initial goal height recorded: {initial_height:.2f} pixels. Now drive toward the goal.")
+        
+        if phase == 'driving':
+            line_detected = get_line_detected()
+            if any(line_detected) and goal_result.goal_detected and goal_result.goal_height_pixels > 0:
+                shared_data['goal_distance_calibration_data']['line_height_pixels'] = goal_result.goal_height_pixels
+                logic_logger.info(f"Line detected! Recorded goal height: {goal_result.goal_height_pixels:.2f} pixels.")
+
 
 #endregion
 #region Hardware
@@ -682,6 +806,7 @@ def _create_calibration_data() -> dict:
                     "yellow_upper": yellow_cal[3:],
                     "blue_lower": blue_cal[:3],
                     "blue_upper": blue_cal[3:],
+                    "focal_length_pixels": shared_data['goal_focal_length'].value,
                 }
             }
         }
@@ -749,6 +874,10 @@ def load_calibration_data() -> None:
                     for i in range(3):
                         shared_data['goal_calibration_blue'][i] = int(blue_lower[i])
                         shared_data['goal_calibration_blue'][i + 3] = int(blue_upper[i])
+            
+            focal_length = goal_data.get("focal_length_pixels")
+            if focal_length is not None and isinstance(focal_length, (int, float)) and focal_length > 0:
+                shared_data['goal_focal_length'].value = float(focal_length)
 
         hardware_logger.info("Calibration data loaded")
     except Exception as e:
@@ -822,6 +951,13 @@ def init_api():
     api.goal_calibration_getter = get_goal_calibration
     api.goal_calibration_setter = set_goal_calibration
     api.goal_detection_result_getter = get_goal_detection_result
+    api.goal_focal_length_getter = get_goal_focal_length
+    api.goal_focal_length_setter = set_goal_focal_length
+    api.goal_distance_calibration_starter = start_goal_distance_calibration
+    api.goal_distance_calibration_stopper = stop_goal_distance_calibration
+    api.goal_distance_calibration_canceler = cancel_goal_distance_calibration
+    api.goal_distance_calibration_status_getter = get_goal_distance_calibration_status
+    api.position_estimate_getter = get_position_estimate
 
 def api_get_camera_frame():
     data = get_camera_frame()

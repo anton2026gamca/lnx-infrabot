@@ -12,7 +12,7 @@ from serial.tools import list_ports
 logger = logging.getLogger("teensy_communication")
 
 DEFAULT_TEENSY_PORT = "/dev/ttyAMA0"
-DEFAULT_TEENSY_BAUD = 38400
+DEFAULT_TEENSY_BAUD = 164000
 DEFAULT_TEENSY_TIMEOUT = 1
 
 try:

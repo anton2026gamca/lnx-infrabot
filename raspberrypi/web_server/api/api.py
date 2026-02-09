@@ -5,7 +5,7 @@ import time
 from flask import Flask, Response, request, jsonify
 from werkzeug.serving import make_server
 
-from helpers.helpers import RobotMode, RobotManualControl
+from helpers.helpers import RobotMode, RobotManualControl, PositionEstimate
 from config import API_VIDEO_JPEG_QUALITY, API_VIDEO_TARGET_FPS, API_HOST, API_PORT, LINE_SENSOR_COUNT
 
 
@@ -45,6 +45,13 @@ goal_color_setter = None
 goal_calibration_getter = None
 goal_calibration_setter = None
 goal_detection_result_getter = None
+goal_focal_length_getter = None
+goal_focal_length_setter = None
+goal_distance_calibration_starter = None
+goal_distance_calibration_stopper = None
+goal_distance_calibration_canceler = None
+goal_distance_calibration_status_getter = None
+position_estimate_getter = None
 
 logger = logging.getLogger("API Process")
 
@@ -414,7 +421,9 @@ def get_goal_detection():
         "goal_detected": result.goal_detected,
         "alignment": result.alignment,
         "goal_center_x": result.goal_center_x,
-        "goal_area": result.goal_area
+        "goal_area": result.goal_area,
+        "distance_mm": result.distance_mm,
+        "goal_height_pixels": result.goal_height_pixels
     })
 
 
@@ -479,6 +488,109 @@ def compute_hsv_from_region():
         "lower": [h_min, s_min, v_min],
         "upper": [h_max, s_max, v_max]
     })
+
+
+@app.route('/api/get_position_estimate')
+def get_position_estimate():
+    if position_estimate_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    position: PositionEstimate = position_estimate_getter()
+    if position is None:
+        return jsonify({
+            "x_mm": None,
+            "y_mm": None,
+            "confidence": 0.0
+        })
+    
+    return jsonify({
+        "x_mm": position.x_mm,
+        "y_mm": position.y_mm,
+        "confidence": position.confidence
+    })
+
+
+@app.route('/api/goal_distance/get_focal_length')
+def get_goal_focal_length_api():
+    if goal_focal_length_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    focal_length = goal_focal_length_getter()
+    return jsonify({"focal_length_pixels": focal_length})
+
+
+@app.route('/api/goal_distance/set_focal_length', methods=['POST'])
+def set_goal_focal_length_api():
+    if goal_focal_length_setter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    data = request.get_json()
+    if not data or 'focal_length_pixels' not in data:
+        return jsonify({"error": "Missing 'focal_length_pixels' in request body"}), 400
+    
+    focal_length = data['focal_length_pixels']
+    if not isinstance(focal_length, (int, float)) or focal_length <= 0:
+        return jsonify({"error": "focal_length_pixels must be a positive number"}), 400
+    
+    goal_focal_length_setter(float(focal_length))
+    logger.info(f"Goal focal length set to {focal_length}")
+    return jsonify({"status": "ok", "focal_length_pixels": focal_length})
+
+
+@app.route('/api/goal_distance_calibration/start', methods=['POST'])
+def start_goal_distance_calibration_api():
+    if goal_distance_calibration_starter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    data = request.get_json(silent=True) or {}
+    initial_distance = data.get('initial_distance', 200.0)
+    line_distance = data.get('line_distance', 200.0)
+    
+    if not isinstance(initial_distance, (int, float)) or initial_distance <= 0:
+        return jsonify({"error": "initial_distance must be a positive number"}), 400
+    
+    if not isinstance(line_distance, (int, float)) or line_distance <= 0:
+        return jsonify({"error": "line_distance must be a positive number"}), 400
+    
+    goal_distance_calibration_starter(float(initial_distance), float(line_distance))
+    logger.info(f"Goal distance calibration started: initial={initial_distance}mm, line={line_distance}mm")
+    return jsonify({
+        "status": "ok",
+        "message": "Drive the robot toward the enemy goal until it detects the line, then stop calibration"
+    })
+
+
+@app.route('/api/goal_distance_calibration/stop', methods=['POST'])
+def stop_goal_distance_calibration_api():
+    if goal_distance_calibration_stopper is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    result = goal_distance_calibration_stopper()
+    
+    if not result.get('success'):
+        return jsonify(result), 400
+    
+    logger.info(f"Goal distance calibration completed: focal_length={result['focal_length_pixels']:.2f} pixels")
+    return jsonify(result)
+
+
+@app.route('/api/goal_distance_calibration/cancel', methods=['POST'])
+def cancel_goal_distance_calibration_api():
+    if goal_distance_calibration_canceler is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    goal_distance_calibration_canceler()
+    logger.info("Goal distance calibration cancelled")
+    return jsonify({"status": "ok", "message": "Calibration cancelled"})
+
+
+@app.route('/api/goal_distance_calibration/status')
+def get_goal_distance_calibration_status_api():
+    if goal_distance_calibration_status_getter is None:
+        return jsonify({"error": "Internal server error"}), 503
+    
+    status = goal_distance_calibration_status_getter()
+    return jsonify(status)
 
 
 def start(host: str = API_HOST, port: int = API_PORT):
