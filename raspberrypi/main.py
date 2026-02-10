@@ -125,13 +125,32 @@ def camera_process(stop_event):
             if time_elapsed < CAMERA_MIN_FRAME_INTERVAL:
                 time.sleep(max(CAMERA_MIN_FRAME_INTERVAL - time_elapsed - 0.001, 0))
                 continue
+            last_frame_time = current_time
             
             frame = camera.get_frame()
             frames += 1
-            
             set_camera_frame(frame)
+
+            goal_color = get_goal_color()
+            lower, upper = get_goal_calibration(goal_color)
+            calibration = camera.GoalColorCalibration(
+                yellow_lower=np.array(lower) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_lower,
+                yellow_upper=np.array(upper) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_upper,
+                blue_lower=np.array(lower) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_lower,
+                blue_upper=np.array(upper) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_upper
+            )
+            focal_length = get_goal_focal_length()
+            result = camera.detect_goal_alignment(
+                frame.frame,
+                goal_color,
+                calibration,
+                focal_length_pixels=focal_length,
+                real_goal_height_mm=GOAL_HEIGHT_MM
+            )
+            set_goal_detection_result(result)
+            update_goal_distance_calibration(result)
+
             frames_processed += 1
-            last_frame_time = current_time
             
             if current_time > time_start + 1:
                 camera_logger.debug(f"Camera FPS: {frames} (processed: {frames_processed})")
@@ -186,29 +205,6 @@ def logic_process(stop_event):
         while not stop_event.is_set():
             start_time = time.time()
 
-            frame_data = get_camera_frame()
-
-            if frame_data:
-                goal_color = get_goal_color()
-                lower, upper = get_goal_calibration(goal_color)
-                calibration = camera.GoalColorCalibration(
-                    yellow_lower=np.array(lower) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_lower,
-                    yellow_upper=np.array(upper) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_upper,
-                    blue_lower=np.array(lower) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_lower,
-                    blue_upper=np.array(upper) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_upper
-                )
-                focal_length = get_goal_focal_length()
-                result = camera.detect_goal_alignment(
-                    frame_data.frame, 
-                    goal_color, 
-                    calibration, 
-                    focal_length_pixels=focal_length,
-                    real_goal_height_mm=GOAL_HEIGHT_MM
-                )
-                set_goal_detection_result(result)
-                
-                update_goal_distance_calibration(result)
-
             mode = get_robot_mode()
             if mode == RobotMode.IDLE:
                 motors_controller.reset()
@@ -259,6 +255,14 @@ class SmartMotorsController(MotorsController):
         self.target_heading = None
         self.rotation_deadzone = 15.0
         self.rotation_correction_gain = 1.0
+        
+        self.line_avoidance_active = False
+        self.line_avoidance_direction = 0.0
+        self.line_avoidance_start_time = 0.0
+        self.line_avoidance_min_duration = 0.5
+        self.line_avoidance_cooldown_duration = 0.5
+        self.last_line_avoid_end_time = 0.0
+        self.recently_crossed_angles = []
 
     def set_motors(self, angle: float, speed: float, rotate: float):
         self.move_x += (speed * math.cos(math.radians(angle)) - self.move_x) * self.acceleration * LOGIC_LOOP_PERIOD
@@ -286,21 +290,73 @@ class SmartMotorsController(MotorsController):
         total_rotation = max(-1.0, min(1.0, total_rotation))
 
         line_avoiding_enabled = get_line_avoiding_enabled()
+        current_time = time.time()
+        
+        self.recently_crossed_angles = [
+            (angle, t) for angle, t in self.recently_crossed_angles 
+            if current_time - t < self.line_avoidance_cooldown_duration
+        ]
+        
         if line_avoiding_enabled:
             lines_detected = get_line_detected()
-            avg_angle = 0.0
             detected_angles = []
             for i, detected in enumerate(lines_detected):
                 if detected and i < len(LINE_SENSOR_LOCATIONS):
-                    detected_angles.append(math.radians(LINE_SENSOR_LOCATIONS[i]))
-            if detected_angles:
-                x = sum(math.cos(a) for a in detected_angles)
-                y = sum(math.sin(a) for a in detected_angles)
+                    sensor_angle = LINE_SENSOR_LOCATIONS[i]
+                    detected_angles.append(sensor_angle)
+            
+            in_cooldown = (current_time - self.last_line_avoid_end_time) < self.line_avoidance_cooldown_duration
+            
+            new_detected_angles = []
+            for angle in detected_angles:
+                is_recent = False
+                for crossed_angle, _ in self.recently_crossed_angles:
+                    angle_diff = abs(((angle - crossed_angle + 180) % 360) - 180)
+                    if angle_diff < 45:
+                        is_recent = True
+                        break
+                if not is_recent:
+                    new_detected_angles.append(angle)
+            
+            if self.line_avoidance_active:
+                if current_time - self.line_avoidance_start_time < self.line_avoidance_min_duration:
+                    move_speed = 1.0
+                    self.move_x = move_speed * math.cos(self.line_avoidance_direction)
+                    self.move_y = move_speed * math.sin(self.line_avoidance_direction)
+                elif not detected_angles:
+                    self.line_avoidance_active = False
+                    self.last_line_avoid_end_time = current_time
+                    
+                    if hasattr(self, '_avoiding_angles'):
+                        for angle in self._avoiding_angles:
+                            self.recently_crossed_angles.append((angle, current_time))
+                else:
+                    angles_rad = [math.radians(a) for a in detected_angles]
+                    x = sum(math.cos(a) for a in angles_rad)
+                    y = sum(math.sin(a) for a in angles_rad)
+                    avg_angle = (math.degrees(math.atan2(y, x)) + 360) % 360
+                    avoid_angle = math.radians(avg_angle + 180)
+                    move_speed = 1.0
+                    self.move_x = move_speed * math.cos(avoid_angle)
+                    self.move_y = move_speed * math.sin(avoid_angle)
+                    self.line_avoidance_direction = avoid_angle
+            elif new_detected_angles and not in_cooldown:
+                self.line_avoidance_active = True
+                self.line_avoidance_start_time = current_time
+                self._avoiding_angles = detected_angles.copy()
+                
+                angles_rad = [math.radians(a) for a in detected_angles]
+                x = sum(math.cos(a) for a in angles_rad)
+                y = sum(math.sin(a) for a in angles_rad)
                 avg_angle = (math.degrees(math.atan2(y, x)) + 360) % 360
-                move_angle = math.radians(avg_angle + 180)
+                avoid_angle = math.radians(avg_angle + 180)
                 move_speed = 1.0
-                self.move_x = move_speed * math.cos(move_angle)
-                self.move_y = move_speed * math.sin(move_angle)
+                self.move_x = move_speed * math.cos(avoid_angle)
+                self.move_y = move_speed * math.sin(avoid_angle)
+                self.line_avoidance_direction = avoid_angle
+        
+        move_angle = math.atan2(self.move_y, self.move_x)
+        move_speed = math.sqrt(self.move_x**2 + self.move_y**2)
 
         motors = calculate_motors_speeds(move_angle, move_speed * 255, total_rotation * 255)
         set_motor_speeds(motors)
@@ -308,6 +364,9 @@ class SmartMotorsController(MotorsController):
     def reset(self):
         super().reset()
         self.target_heading = None
+        self.line_avoidance_active = False
+        self.line_avoidance_direction = 0.0
+        self.recently_crossed_angles = []
 
 
 def set_motor_speeds(speeds: list[int]):
