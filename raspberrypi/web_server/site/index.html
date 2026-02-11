@@ -2188,7 +2188,7 @@
             const vizHeight = 219;
             
             const padding = 5;
-            const vizX = padding + (data.x_mm / fieldWidth) * (vizWidth - 2 * padding);
+            const vizX = padding + ((data.x_mm + fieldWidth / 2) / fieldWidth) * (vizWidth - 2 * padding);
             const vizY = vizHeight - padding - (data.y_mm / fieldLength) * (vizHeight - 2 * padding);
             
             positionRobotMarker.style.left = `${vizX}px`;

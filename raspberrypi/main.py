@@ -15,7 +15,7 @@ from helpers.helpers import (
   Suppress200Filter, BufferedLogHandler, setup_logger
 )
 from config import (
-    LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH,
+    LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH, CAMERA_FOV_DEG,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT, COMMUNICATION_LOOP_PERIOD,
     LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, LINE_DETECTION_THRESHOLDS,
@@ -564,8 +564,31 @@ def get_goal_distance_calibration_status() -> dict:
         }
 
 def get_position_estimate() -> PositionEstimate | None:
-    # Not implemented yet
-    return None
+    goal_result = get_goal_detection_result()
+    hardware_data = get_hardware_data()
+    
+    if not goal_result or not goal_result.goal_detected or goal_result.distance_mm is None:
+        return None
+    
+    if not hardware_data or hardware_data.compass.heading is None:
+        return None
+    
+    distance_mm = goal_result.distance_mm
+    alignment = goal_result.alignment
+    
+    robot_heading_deg = hardware_data.compass.heading
+    angle_offset_deg = alignment * (CAMERA_FOV_DEG / 2.0)
+    angle_to_goal_deg = robot_heading_deg + angle_offset_deg
+    angle_to_goal_rad = math.radians(angle_to_goal_deg)
+    
+    x_mm = distance_mm * math.sin(angle_to_goal_rad) * -1
+    y_mm = distance_mm * math.cos(angle_to_goal_rad)
+    
+    area_confidence = min(1.0, goal_result.goal_area / 50000.0)
+    alignment_confidence = 1.0 - abs(alignment)
+    confidence = (area_confidence * 0.6) + (alignment_confidence * 0.4)
+    
+    return PositionEstimate(x_mm=x_mm, y_mm=y_mm, confidence=confidence)
 
 def update_goal_distance_calibration(goal_result: camera.GoalDetectionResult) -> None:
     with shared_data['locks']['goal_distance_calibration']:
