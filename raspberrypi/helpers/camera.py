@@ -1,8 +1,13 @@
-from dataclasses import dataclass, field
-from picamera2 import Picamera2 # pyright: ignore[reportMissingImports]
 import time
 import numpy as np
 import cv2
+from dataclasses import dataclass, field
+
+try:
+    from picamera2 import Picamera2 # pyright: ignore[reportMissingImports]
+except ImportError:
+    Picamera2 = None
+
 from config import FRAME_WIDTH, FRAME_HEIGHT, CAMERA_BUFFER_COUNT
 
 
@@ -37,6 +42,8 @@ picam = None
 
 def init_camera():
     """Must be called from within the process that will use it."""
+    if Picamera2 is None:
+        raise ImportError("Picamera2 library not found.")
     global picam
     picam = Picamera2()
     camera_config = picam.create_preview_configuration(

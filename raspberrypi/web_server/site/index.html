@@ -2267,7 +2267,7 @@
       
       if (calibrateGoalBtn) {
         calibrateGoalBtn.addEventListener('click', () => {
-          populateGoalCalibrationInputs();
+          createGoalCalibrationInputs();
           goalCalibrationModal.classList.add('active');
           resetCanvasSelection();
         });
@@ -2483,7 +2483,7 @@
             });
             if (response.ok) {
               await fetchGoalSettings();
-              populateGoalCalibrationInputs();
+              createGoalCalibrationInputs();
             }
           } catch (e) {
             console.error('Error resetting goal calibration:', e);
@@ -2491,7 +2491,7 @@
         });
       }
 
-      function populateGoalCalibrationInputs() {
+      function createGoalCalibrationInputs() {
         document.getElementById('yellow-h-min').value = goalCalibration.yellow.lower[0];
         document.getElementById('yellow-s-min').value = goalCalibration.yellow.lower[1];
         document.getElementById('yellow-v-min').value = goalCalibration.yellow.lower[2];

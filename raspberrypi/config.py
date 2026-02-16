@@ -42,9 +42,9 @@ API_HOST = '0.0.0.0'
 API_PORT = 5000
 
 # ==================== LOGGING SETTINGS ====================
+LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Log buffer
 LOG_BUFFER_MAX_ENTRIES = 100
-LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 # ==================== MOTOR CONTROL ====================
 MOTOR_COUNT = 4
@@ -61,7 +61,7 @@ LINE_SENSOR_COUNT = 12
 LINE_SENSOR_LOCATIONS = [i * (360 / LINE_SENSOR_COUNT) for i in range(LINE_SENSOR_COUNT)]
 
 # Default values, can be calibrated/changed via api
-LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT # Array of [min, max] values
+DEFAULT_LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT # Array of [min, max] values
 
 # ==================== CALIBRATION STORAGE ====================
 CALIBRATION_FILE_PATH = "calibration_data.json"

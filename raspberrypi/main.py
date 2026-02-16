@@ -12,13 +12,13 @@ import helpers.teensy_communication as teensy_communication
 import web_server.api.api as api
 from helpers.helpers import (
   RobotMode, RobotManualControl, PositionEstimate, calculate_motors_speeds,
-  Suppress200Filter, BufferedLogHandler, setup_logger
+  Suppress200Filter, setup_logger
 )
 from config import (
     LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH, CAMERA_FOV_DEG,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT, COMMUNICATION_LOOP_PERIOD,
-    LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, LINE_DETECTION_THRESHOLDS,
+    LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, DEFAULT_LINE_DETECTION_THRESHOLDS,
     CALIBRATION_FILE_PATH, DEFAULT_FOCAL_LENGTH_PIXELS, GOAL_HEIGHT_MM
 )
 
@@ -38,7 +38,7 @@ shared_data: dict = {
     'next_log_id': multiprocessing.Value('i', 1),
     'manual_control': multiprocessing.Array('d', [0.0, 0.0, 0.0]),
     'compass_reset': multiprocessing.Value('b', False),
-    'line_detection_thresholds': multiprocessing.Array('i', [val for pair in LINE_DETECTION_THRESHOLDS for val in pair]),
+    'line_detection_thresholds': multiprocessing.Array('i', [val for pair in DEFAULT_LINE_DETECTION_THRESHOLDS for val in pair]),
     'line_detected': multiprocessing.Array('b', [False] * LINE_SENSOR_COUNT),
     'line_calibration_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
     'line_calibration_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
@@ -161,6 +161,11 @@ def camera_process(stop_event):
         pass
     except Exception as e:
         camera_logger.error(f"{e}")
+        try:
+            black_frame = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
+            set_camera_frame(camera.FrameData(frame=black_frame, timestamp=time.time()))
+        except Exception | KeyboardInterrupt:
+            pass
 
 def set_camera_frame(frame: camera.FrameData | None):
     if frame is None:
@@ -1054,17 +1059,13 @@ def main():
     load_calibration_data()
 
     for logger_name in ('werkzeug',):
-        l = logging.getLogger(logger_name)
-        l.setLevel(logging.INFO)
-        l.addFilter(Suppress200Filter())
-        
-        buffer_handler = BufferedLogHandler(
-            shared_data['logs_buffer'],
-            shared_data['locks']['logs_buffer'],
-            shared_data['next_log_id']
+        l = setup_logger(
+            logger_name, level=logging.INFO if LOGGING_LEVEL < logging.INFO else LOGGING_LEVEL,
+            logs_dict=shared_data['logs_buffer'],
+            logs_lock=shared_data['locks']['logs_buffer'],
+            next_log_id=shared_data['next_log_id']
         )
-        buffer_handler.setLevel(logging.INFO)
-        l.addHandler(buffer_handler)
+        l.addFilter(Suppress200Filter())
     
     stop_event = multiprocessing.Event()
 

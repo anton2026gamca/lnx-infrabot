@@ -448,7 +448,7 @@ def compute_hsv_from_region():
     if frame is None:
         return jsonify({"error": "No camera frame available"}), 503
     
-    frame_height, frame_width = frame.shape[:2]
+    frame_height, frame_width = frame.shape[:2] # pyright: ignore[reportGeneralTypeIssues]
     
     x = max(0, min(x, frame_width - 1))
     y = max(0, min(y, frame_height - 1))
@@ -592,6 +592,15 @@ def get_goal_distance_calibration_status_api():
     status = goal_distance_calibration_status_getter()
     return jsonify(status)
 
+@app.route('/')
+def get_index_html():
+    logger.warning("Accessed root endpoint, which serves index.html. In production, this should be served by nginx directly. This may indicate a misconfiguration.")
+    try:
+        with open('web_server/site/index.html', 'r', encoding='utf-8') as f:
+            index_html = f.read()
+            return index_html
+    except Exception as e:
+        return "", 404
 
 def start(host: str = API_HOST, port: int = API_PORT):
     server = make_server(host=host, port=port, app=app, threaded=True)
