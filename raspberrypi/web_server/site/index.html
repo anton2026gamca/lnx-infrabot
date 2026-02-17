@@ -1062,25 +1062,25 @@
           <div class="modal-section active">
             <div class="modal-section-title">Interactive Calibration</div>
             <div class="modal-section-description">
-              Draw a rectangle around the goal in the camera feed to automatically compute HSV color ranges. Click "Use Selection" to apply the computed values.
+              Draw a rectangle around the goal in the camera feed. Click "Add Region" to compute and apply HSV color ranges.
             </div>
             
             <div style="background: #0a0a0a; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
               <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
-                <button class="btn btn-action" id="calibrate-from-yellow-btn">Calibrate Yellow Goal</button>
-                <button class="btn btn-action" id="calibrate-from-blue-btn">Calibrate Blue Goal</button>
+                <button class="toggle-btn" id="calibrate-from-yellow-btn">Calibrate Yellow Goal</button>
+                <button class="toggle-btn" id="calibrate-from-blue-btn">Calibrate Blue Goal</button>
                 <span id="calibration-instructions" style="font-size: 0.85em; color: #aaa; flex: 1;"></span>
               </div>
               
               <div style="position: relative; width: 100%; background: black; border-radius: 5px; overflow: hidden; display: none;" id="goal-calibration-canvas-container">
                 <img id="goal-calibration-image" src="/api/video_feed" style="width: 100%; height: auto; display: block;">
                 <canvas id="goal-calibration-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair;"></canvas>
-                <div style="position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 8px; border-radius: 5px; font-size: 0.85em; color: white;">
+                <div style="position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 3px 6px; border-radius: 5px; font-size: 0.85em; color: white;">
                   Click and drag to select the goal area
                 </div>
                 <div style="position: absolute; bottom: 10px; right: 10px; display: flex; gap: 5px;">
-                  <button class="btn btn-action" id="use-selection-btn" style="font-size: 0.85em; padding: 5px 10px;">Use Selection</button>
-                  <button class="btn" id="cancel-selection-btn" style="font-size: 0.85em; padding: 5px 10px;">Cancel</button>
+                  <button class="btn btn-action" id="add-region-btn" style="font-size: 0.85em; padding: 3px 6px; white-space: nowrap;">Add Region</button>
+                  <button class="btn btn-danger" id="delete-all-regions-btn" style="font-size: 0.85em; padding: 3px 6px; white-space: nowrap;">Delete All Regions</button>
                 </div>
               </div>
             </div>
@@ -1090,16 +1090,16 @@
           <div class="modal-section active">
             <div class="modal-section-title">Manual HSV Adjustment</div>
             <div class="modal-section-description">
-              Or manually adjust the HSV (Hue, Saturation, Value) ranges. Lower values define the minimum threshold, upper values define the maximum.
+              Or manually adjust the HSV (Hue, Saturation, Value) ranges. Values inside the specified ranges will be detected as goals.
             </div>
             
             <!-- Yellow Goal Calibration -->
             <div style="background: #0a0a0a; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
               <div style="font-weight: bold; margin-bottom: 10px; color: #ffd700;">Yellow Goal</div>
               <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: center;">
-                <span style="font-size: 0.85em; color: #888;">Hue (0-179):</span>
-                <input type="number" id="yellow-h-min" class="threshold-input" min="0" max="179" placeholder="Lower">
-                <input type="number" id="yellow-h-max" class="threshold-input" min="0" max="179" placeholder="Upper">
+                <span style="font-size: 0.85em; color: #888;">Hue (0-360):</span>
+                <input type="number" id="yellow-h-min" class="threshold-input" min="0" max="360" placeholder="Lower">
+                <input type="number" id="yellow-h-max" class="threshold-input" min="0" max="360" placeholder="Upper">
                 
                 <span style="font-size: 0.85em; color: #888;">Saturation (0-255):</span>
                 <input type="number" id="yellow-s-min" class="threshold-input" min="0" max="255" placeholder="Lower">
@@ -1115,9 +1115,9 @@
             <div style="background: #0a0a0a; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
               <div style="font-weight: bold; margin-bottom: 10px; color: #2196F3;">Blue Goal</div>
               <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: center;">
-                <span style="font-size: 0.85em; color: #888;">Hue (0-179):</span>
-                <input type="number" id="blue-h-min" class="threshold-input" min="0" max="179" placeholder="Lower">
-                <input type="number" id="blue-h-max" class="threshold-input" min="0" max="179" placeholder="Upper">
+                <span style="font-size: 0.85em; color: #888;">Hue (0-360):</span>
+                <input type="number" id="blue-h-min" class="threshold-input" min="0" max="360" placeholder="Lower">
+                <input type="number" id="blue-h-max" class="threshold-input" min="0" max="360" placeholder="Upper">
                 
                 <span style="font-size: 0.85em; color: #888;">Saturation (0-255):</span>
                 <input type="number" id="blue-s-min" class="threshold-input" min="0" max="255" placeholder="Lower">
@@ -1129,10 +1129,10 @@
               </div>
             </div>
 
-            <div class="modal-buttons">
-              <button class="btn btn-action" id="apply-goal-calibration">Apply & Close</button>
-              <button class="btn" id="reset-goal-calibration">Reset to Defaults</button>
-            </div>
+          </div>
+          <div class="modal-buttons">
+            <button class="btn btn-action" id="apply-goal-calibration">Apply & Close</button>
+            <button class="btn" id="load-current-goal-calibration">Load current calibrated values</button>
           </div>
 
         </div>
@@ -2052,7 +2052,7 @@
       const goalCalibrationModal = document.getElementById('goal-calibration-modal');
       const closeGoalCalibrationModalBtn = document.getElementById('close-goal-calibration-modal');
       const applyGoalCalibrationBtn = document.getElementById('apply-goal-calibration');
-      const resetGoalCalibrationBtn = document.getElementById('reset-goal-calibration');
+      const loadCurrentGoalCalibrationBtn = document.getElementById('load-current-goal-calibration');
 
       let currentGoalColor = 'yellow';
       let goalCalibration = {
@@ -2234,8 +2234,8 @@
       const goalCalibrationImage = document.getElementById('goal-calibration-image');
       const calibrateFromYellowBtn = document.getElementById('calibrate-from-yellow-btn');
       const calibrateFromBlueBtn = document.getElementById('calibrate-from-blue-btn');
-      const useSelectionBtn = document.getElementById('use-selection-btn');
-      const cancelSelectionBtn = document.getElementById('cancel-selection-btn');
+      const addRegionBtn = document.getElementById('add-region-btn');
+      const deleteAllRegionsBtn = document.getElementById('delete-all-regions-btn');
       const calibrationInstructions = document.getElementById('calibration-instructions');
       
       let isDrawing = false;
@@ -2243,72 +2243,82 @@
       let startY = 0;
       let currentX = 0;
       let currentY = 0;
+      let blueRegions = [];
+      let yellowRegions = [];
+      let visibleRegions = [];
       let currentTargetColor = null;
-      let selectionRect = null;
-      let canvasRedrawInterval = null;
-      
-      function drawCurrentRectangle() {
-        if (!goalCalibrationCanvasContainer || goalCalibrationCanvasContainer.style.display === 'none') {
-          return;
-        }
-        
-        const ctx = goalCalibrationCanvas.getContext('2d');
-        ctx.clearRect(0, 0, goalCalibrationCanvas.width, goalCalibrationCanvas.height);
-        
-        if (isDrawing || (startX !== 0 && startY !== 0 && currentX !== 0 && currentY !== 0)) {
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 3;
-          ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
-          
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-          ctx.fillRect(startX, startY, currentX - startX, currentY - startY);
-        }
-      }
       
       if (calibrateGoalBtn) {
         calibrateGoalBtn.addEventListener('click', () => {
           createGoalCalibrationInputs();
           goalCalibrationModal.classList.add('active');
-          resetCanvasSelection();
         });
       }
 
       if (closeGoalCalibrationModalBtn) {
         closeGoalCalibrationModalBtn.addEventListener('click', () => {
           goalCalibrationModal.classList.remove('active');
-          resetCanvasSelection();
         });
       }
       
-      if (calibrateFromYellowBtn) {
+      if (calibrateFromYellowBtn && calibrateFromBlueBtn) {
         calibrateFromYellowBtn.addEventListener('click', () => {
           currentTargetColor = 'yellow';
           goalCalibrationCanvasContainer.style.display = 'block';
           calibrationInstructions.textContent = 'Calibrating Yellow Goal';
           setupCanvas();
+          resetRegionSelection();
+          visibleRegions = yellowRegions;
+          drawRegions();
+          calibrateFromYellowBtn.classList.add('selected');
+          calibrateFromBlueBtn.classList.remove('selected');
         });
-      }
-      
-      if (calibrateFromBlueBtn) {
+
         calibrateFromBlueBtn.addEventListener('click', () => {
           currentTargetColor = 'blue';
           goalCalibrationCanvasContainer.style.display = 'block';
           calibrationInstructions.textContent = 'Calibrating Blue Goal';
           setupCanvas();
+          resetRegionSelection();
+          visibleRegions = blueRegions;
+          drawRegions();
+          calibrateFromBlueBtn.classList.add('selected');
+          calibrateFromYellowBtn.classList.remove('selected');
         });
       }
       
-      if (cancelSelectionBtn) {
-        cancelSelectionBtn.addEventListener('click', () => {
-          resetCanvasSelection();
-        });
-      }
-      
-      if (useSelectionBtn) {
-        useSelectionBtn.addEventListener('click', async () => {
-          if (selectionRect && currentTargetColor) {
-            await computeAndApplyHSV(selectionRect, currentTargetColor);
+      if (deleteAllRegionsBtn) {
+        deleteAllRegionsBtn.addEventListener('click', () => {
+          if (currentTargetColor === 'yellow') {
+            yellowRegions = [];
+            document.getElementById('yellow-h-min').value = '';
+            document.getElementById('yellow-s-min').value = '';
+            document.getElementById('yellow-v-min').value = '';
+            document.getElementById('yellow-h-max').value = '';
+            document.getElementById('yellow-s-max').value = '';
+            document.getElementById('yellow-v-max').value = '';
+          } else if (currentTargetColor === 'blue') {
+            blueRegions = [];
+            document.getElementById('blue-h-min').value = '';
+            document.getElementById('blue-s-min').value = '';
+            document.getElementById('blue-v-min').value = '';
+            document.getElementById('blue-h-max').value = '';
+            document.getElementById('blue-s-max').value = '';
+            document.getElementById('blue-v-max').value = '';
           }
+          resetRegionSelection();
+        });
+      }
+      
+      if (addRegionBtn) {
+        addRegionBtn.addEventListener('click', async () => {
+          await addRegion(startX, startY, currentX - startX, currentY - startY);
+          startX = 0;
+          startY = 0;
+          currentX = 0;
+          currentY = 0;
+          isDrawing = false;
+          drawRegions();
         });
       }
       
@@ -2325,14 +2335,41 @@
         };
       }
       
-      function resetCanvasSelection() {
-        goalCalibrationCanvasContainer.style.display = 'none';
+      function resetRegionSelection() {
         calibrationInstructions.textContent = '';
-        currentTargetColor = null;
         isDrawing = false;
-        selectionRect = null;
+        visibleRegions = [];
+        drawRegions();
+      }
+
+      function drawRegions() {
+        if (!goalCalibrationCanvasContainer || goalCalibrationCanvasContainer.style.display === 'none') {
+          return;
+        }
+
         const ctx = goalCalibrationCanvas.getContext('2d');
         ctx.clearRect(0, 0, goalCalibrationCanvas.width, goalCalibrationCanvas.height);
+
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+        visibleRegions.forEach(rect => {
+          ctx.fillRect(rect.canvas.x, rect.canvas.y, rect.canvas.width, rect.canvas.height);
+        });
+        if (isDrawing || (startX !== 0 && startY !== 0 && currentX !== 0 && currentY !== 0)) {
+          ctx.fillRect(startX, startY, currentX - startX, currentY - startY);
+        }
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        visibleRegions.forEach(rect => {
+          ctx.strokeRect(rect.canvas.x, rect.canvas.y, rect.canvas.width, rect.canvas.height);
+        });
+        if (isDrawing || (startX !== 0 && startY !== 0 && currentX !== 0 && currentY !== 0)) {
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#4CAF50';
+          ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+        }
       }
       
       if (goalCalibrationCanvas) {
@@ -2350,7 +2387,7 @@
           currentX = e.clientX - rect.left;
           currentY = e.clientY - rect.top;
 
-          drawCurrentRectangle();
+          drawRegions();
         });
         
         goalCalibrationCanvas.addEventListener('mouseup', (e) => {
@@ -2363,16 +2400,6 @@
           
           currentX = endX;
           currentY = endY;
-          
-          const scaleX = goalCalibrationImage.naturalWidth / goalCalibrationImage.clientWidth;
-          const scaleY = goalCalibrationImage.naturalHeight / goalCalibrationImage.clientHeight;
-          
-          selectionRect = {
-            x: Math.round(Math.min(startX, endX) * scaleX),
-            y: Math.round(Math.min(startY, endY) * scaleY),
-            width: Math.round(Math.abs(endX - startX) * scaleX),
-            height: Math.round(Math.abs(endY - startY) * scaleY)
-          };
         });
         
         goalCalibrationCanvas.addEventListener('mouseleave', () => {
@@ -2380,46 +2407,74 @@
         });
       }
       
-      async function computeAndApplyHSV(rect, color) {
+      async function addRegion(x, y, width, height) {
         try {
-          const response = await fetch('/api/compute_hsv_from_region', {
+          if (width < 0) {
+            x += width;
+            width = Math.abs(width);
+          }
+          if (height < 0) {
+            y += height;
+            height = Math.abs(height);
+          }
+          
+          const scaleX = goalCalibrationImage.naturalWidth / goalCalibrationImage.clientWidth;
+          const scaleY = goalCalibrationImage.naturalHeight / goalCalibrationImage.clientHeight;
+
+          region = {
+            canvas: {
+              x: x,
+              y: y,
+              width: width,
+              height: height
+            },
+            x: Math.round(x * scaleX),
+            y: Math.round(y * scaleY),
+            width: Math.round(width * scaleX),
+            height: Math.round(height * scaleY)
+          };
+
+          const response = await fetch('/api/compute_hsv_from_regions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(rect)
+            body: JSON.stringify({"regions": [region]})
           });
           
           if (!response.ok) {
-            console.error('Failed to compute HSV from region');
+            console.error('Failed to add region');
             return;
           }
           
           const data = await response.json();
           const [h_min, s_min, v_min] = data.lower;
           const [h_max, s_max, v_max] = data.upper;
-          
-          if (color === 'yellow') {
-            document.getElementById('yellow-h-min').value = h_min;
-            document.getElementById('yellow-s-min').value = s_min;
-            document.getElementById('yellow-v-min').value = v_min;
-            document.getElementById('yellow-h-max').value = h_max;
-            document.getElementById('yellow-s-max').value = s_max;
-            document.getElementById('yellow-v-max').value = v_max;
-          } else if (color === 'blue') {
-            document.getElementById('blue-h-min').value = h_min;
-            document.getElementById('blue-s-min').value = s_min;
-            document.getElementById('blue-v-min').value = v_min;
-            document.getElementById('blue-h-max').value = h_max;
-            document.getElementById('blue-s-max').value = s_max;
-            document.getElementById('blue-v-max').value = v_max;
+
+          visibleRegions.push(region);
+          drawRegions();
+
+          if (currentTargetColor === 'yellow') {
+            yellowRegions.push(region);
+            document.getElementById('yellow-h-min').value = Math.min(h_min, parseInt(document.getElementById('yellow-h-min').value) || 359);
+            document.getElementById('yellow-s-min').value = Math.min(s_min, parseInt(document.getElementById('yellow-s-min').value) || 255);
+            document.getElementById('yellow-v-min').value = Math.min(v_min, parseInt(document.getElementById('yellow-v-min').value) || 255);
+            document.getElementById('yellow-h-max').value = Math.max(h_max, parseInt(document.getElementById('yellow-h-max').value) || 0);
+            document.getElementById('yellow-s-max').value = Math.max(s_max, parseInt(document.getElementById('yellow-s-max').value) || 0);
+            document.getElementById('yellow-v-max').value = Math.max(v_max, parseInt(document.getElementById('yellow-v-max').value) || 0);
+          } else if (currentTargetColor === 'blue') {
+            blueRegions.push(region);
+            document.getElementById('blue-h-min').value = Math.min(h_min, parseInt(document.getElementById('blue-h-min').value) || 179);
+            document.getElementById('blue-s-min').value = Math.min(s_min, parseInt(document.getElementById('blue-s-min').value) || 255);
+            document.getElementById('blue-v-min').value = Math.min(v_min, parseInt(document.getElementById('blue-v-min').value) || 255);
+            document.getElementById('blue-h-max').value = Math.max(h_max, parseInt(document.getElementById('blue-h-max').value) || 0);
+            document.getElementById('blue-s-max').value = Math.max(s_max, parseInt(document.getElementById('blue-s-max').value) || 0);
+            document.getElementById('blue-v-max').value = Math.max(v_max, parseInt(document.getElementById('blue-v-max').value) || 0);
           }
           
-          calibrationInstructions.textContent = `✓ Computed HSV ranges for ${color} goal`;
+          calibrationInstructions.textContent = `Computed HSV ranges for ${currentTargetColor} goal`;
           calibrationInstructions.style.color = '#4CAF50';
-          
-          resetCanvasSelection();
         } catch (e) {
           console.error('Error computing HSV:', e);
-          calibrationInstructions.textContent = '✗ Failed to compute HSV ranges';
+          calibrationInstructions.textContent = 'Failed to compute HSV ranges';
           calibrationInstructions.style.color = '#f44336';
         }
       }
@@ -2427,24 +2482,24 @@
       if (applyGoalCalibrationBtn) {
         applyGoalCalibrationBtn.addEventListener('click', async () => {
           const yellowLower = [
-            parseInt(document.getElementById('yellow-h-min').value) || 0,
-            parseInt(document.getElementById('yellow-s-min').value) || 0,
-            parseInt(document.getElementById('yellow-v-min').value) || 0
+            parseInt(document.getElementById('yellow-h-min').value) || null,
+            parseInt(document.getElementById('yellow-s-min').value) || null,
+            parseInt(document.getElementById('yellow-v-min').value) || null
           ];
           const yellowUpper = [
-            parseInt(document.getElementById('yellow-h-max').value) || 179,
-            parseInt(document.getElementById('yellow-s-max').value) || 255,
-            parseInt(document.getElementById('yellow-v-max').value) || 255
+            parseInt(document.getElementById('yellow-h-max').value) || null,
+            parseInt(document.getElementById('yellow-s-max').value) || null,
+            parseInt(document.getElementById('yellow-v-max').value) || null
           ];
           const blueLower = [
-            parseInt(document.getElementById('blue-h-min').value) || 0,
-            parseInt(document.getElementById('blue-s-min').value) || 0,
-            parseInt(document.getElementById('blue-v-min').value) || 0
+            parseInt(document.getElementById('blue-h-min').value) || null,
+            parseInt(document.getElementById('blue-s-min').value) || null,
+            parseInt(document.getElementById('blue-v-min').value) || null
           ];
           const blueUpper = [
-            parseInt(document.getElementById('blue-h-max').value) || 179,
-            parseInt(document.getElementById('blue-s-max').value) || 255,
-            parseInt(document.getElementById('blue-v-max').value) || 255
+            parseInt(document.getElementById('blue-h-max').value) || null,
+            parseInt(document.getElementById('blue-s-max').value) || null,
+            parseInt(document.getElementById('blue-v-max').value) || null
           ];
 
           try {
@@ -2453,8 +2508,14 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 calibration: {
-                  yellow: { lower: yellowLower, upper: yellowUpper },
-                  blue: { lower: blueLower, upper: blueUpper }
+                  yellow: {
+                    lower: yellowLower.every(v => v !== null) ? yellowLower : null,
+                    upper: yellowUpper.every(v => v !== null) ? yellowUpper : null
+                  },
+                  blue: {
+                    lower: blueLower.every(v => v !== null) ? blueLower : null,
+                    upper: blueUpper.every(v => v !== null) ? blueUpper : null
+                  }
                 }
               })
             });
@@ -2468,43 +2529,38 @@
         });
       }
 
-      if (resetGoalCalibrationBtn) {
-        resetGoalCalibrationBtn.addEventListener('click', async () => {
-          const defaults = {
-            yellow: { lower: [20, 100, 100], upper: [30, 255, 255] },
-            blue: { lower: [100, 100, 100], upper: [130, 255, 255] }
-          };
-          
-          try {
-            const response = await fetch('/api/set_goal_settings', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ calibration: defaults })
-            });
-            if (response.ok) {
-              await fetchGoalSettings();
-              createGoalCalibrationInputs();
-            }
-          } catch (e) {
-            console.error('Error resetting goal calibration:', e);
-          }
+      if (loadCurrentGoalCalibrationBtn) {
+        loadCurrentGoalCalibrationBtn.addEventListener('click', async () => {
+          await fetchGoalSettings();
+          document.getElementById('yellow-h-min').value = goalCalibration.yellow.lower[0];
+          document.getElementById('yellow-s-min').value = goalCalibration.yellow.lower[1];
+          document.getElementById('yellow-v-min').value = goalCalibration.yellow.lower[2];
+          document.getElementById('yellow-h-max').value = goalCalibration.yellow.upper[0];
+          document.getElementById('yellow-s-max').value = goalCalibration.yellow.upper[1];
+          document.getElementById('yellow-v-max').value = goalCalibration.yellow.upper[2];
+          document.getElementById('blue-h-min').value = goalCalibration.blue.lower[0];
+          document.getElementById('blue-s-min').value = goalCalibration.blue.lower[1];
+          document.getElementById('blue-v-min').value = goalCalibration.blue.lower[2];
+          document.getElementById('blue-h-max').value = goalCalibration.blue.upper[0];
+          document.getElementById('blue-s-max').value = goalCalibration.blue.upper[1];
+          document.getElementById('blue-v-max').value = goalCalibration.blue.upper[2];
         });
       }
 
       function createGoalCalibrationInputs() {
-        document.getElementById('yellow-h-min').value = goalCalibration.yellow.lower[0];
-        document.getElementById('yellow-s-min').value = goalCalibration.yellow.lower[1];
-        document.getElementById('yellow-v-min').value = goalCalibration.yellow.lower[2];
-        document.getElementById('yellow-h-max').value = goalCalibration.yellow.upper[0];
-        document.getElementById('yellow-s-max').value = goalCalibration.yellow.upper[1];
-        document.getElementById('yellow-v-max').value = goalCalibration.yellow.upper[2];
+        document.getElementById('yellow-h-min').value = '';
+        document.getElementById('yellow-s-min').value = '';
+        document.getElementById('yellow-v-min').value = '';
+        document.getElementById('yellow-h-max').value = '';
+        document.getElementById('yellow-s-max').value = '';
+        document.getElementById('yellow-v-max').value = '';
         
-        document.getElementById('blue-h-min').value = goalCalibration.blue.lower[0];
-        document.getElementById('blue-s-min').value = goalCalibration.blue.lower[1];
-        document.getElementById('blue-v-min').value = goalCalibration.blue.lower[2];
-        document.getElementById('blue-h-max').value = goalCalibration.blue.upper[0];
-        document.getElementById('blue-s-max').value = goalCalibration.blue.upper[1];
-        document.getElementById('blue-v-max').value = goalCalibration.blue.upper[2];
+        document.getElementById('blue-h-min').value = '';
+        document.getElementById('blue-s-min').value = '';
+        document.getElementById('blue-v-min').value = '';
+        document.getElementById('blue-h-max').value = '';
+        document.getElementById('blue-s-max').value = '';
+        document.getElementById('blue-v-max').value = '';
       }
 
 
