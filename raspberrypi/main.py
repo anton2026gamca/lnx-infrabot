@@ -801,18 +801,20 @@ def stop_line_calibration(cancel: bool = False) -> tuple[list[list[int]], list[f
                 if field_min != float('inf') and field_max != float('-inf'):
                     if line_min != float('inf') and line_max != float('-inf'):
                         field_center = (field_min + field_max) / 2
+                        line_center = (line_min + line_max) / 2
+
                         field_range = field_max - field_min
                         margin = max(10, field_range * 0.1)
-                        
-                        new_min = max(0, int(field_min - margin))
-                        new_max = int(field_max + margin)
-                        
-                        if line_min < field_center < line_max:
-                            pass
-                        elif line_max < field_min:
-                            new_min = max(new_min, int(line_max + 5))
-                        elif line_min > field_max:
-                            new_max = min(new_max, int(line_min - 5))
+
+                        new_min = field_min
+                        new_max = field_max
+
+                        if line_center - field_center > margin:
+                            new_min = 0
+                            new_max = (field_max + line_max) // 2
+                        elif field_center - line_center > margin:
+                            new_min = (field_min + line_min) // 2
+                            new_max = 1000
                         
                         thresholds.append([new_min, new_max])
                     else:
