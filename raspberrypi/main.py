@@ -19,7 +19,8 @@ from config import (
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT, COMMUNICATION_LOOP_PERIOD,
     LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, DEFAULT_LINE_DETECTION_THRESHOLDS,
-    CALIBRATION_FILE_PATH, DEFAULT_FOCAL_LENGTH_PIXELS, GOAL_HEIGHT_MM
+    CALIBRATION_FILE_PATH, DEFAULT_FOCAL_LENGTH_PIXELS, GOAL_HEIGHT_MM,
+    DEFAULT_LINE_AVOIDING_ENABLED, DEFAULT_ROTATION_CORRECTION_ENABLED
 )
 
 
@@ -48,8 +49,8 @@ shared_data: dict = {
     'line_calibration_phase2_min': multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT),
     'line_calibration_phase2_max': multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT),
     'running_state': manager.dict(),
-    'rotation_correction_enabled': multiprocessing.Value('b', True),
-    'line_avoiding_enabled': multiprocessing.Value('b', True),
+    'rotation_correction_enabled': multiprocessing.Value('b', DEFAULT_ROTATION_CORRECTION_ENABLED),
+    'line_avoiding_enabled': multiprocessing.Value('b', DEFAULT_LINE_AVOIDING_ENABLED),
     'goal_color': multiprocessing.Array('c', b'yellow'.ljust(10)),
     'goal_calibration_yellow': multiprocessing.Array('i', [20, 100, 100, 30, 255, 255]),
     'goal_calibration_blue': multiprocessing.Array('i', [100, 100, 100, 130, 255, 255]),

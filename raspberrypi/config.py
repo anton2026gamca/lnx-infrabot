@@ -70,3 +70,7 @@ CALIBRATION_FILE_PATH = "calibration_data.json"
 # Real-world goal height in millimeters
 GOAL_HEIGHT_MM = 100.0
 DEFAULT_FOCAL_LENGTH_PIXELS = 1000.0
+
+# ==================== LOGIC SETTINGS ====================
+DEFAULT_LINE_AVOIDING_ENABLED = False
+DEFAULT_ROTATION_CORRECTION_ENABLED = True
