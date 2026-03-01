@@ -271,16 +271,18 @@ class SmartMotorsController(MotorsController):
         self.recently_crossed_angles = []
 
     def set_motors(self, angle: float, speed: float, rotate: float):
-        self.move_x += (speed * math.cos(math.radians(angle)) - self.move_x) * self.acceleration * LOGIC_LOOP_PERIOD
-        self.move_y += (speed * math.sin(math.radians(angle)) - self.move_y) * self.acceleration * LOGIC_LOOP_PERIOD
-        self.rotate += (rotate - self.rotate) * self.acceleration * LOGIC_LOOP_PERIOD
-        move_angle = math.atan2(self.move_y, self.move_x)
-        move_speed = math.sqrt(self.move_x**2 + self.move_y**2)
-
         hardware_data = get_hardware_data()
         current_heading = hardware_data.compass.heading if hardware_data else None
 
         rotation_correction_enabled = get_rotation_correction_enabled()
+
+        absolute_angle = (angle + self.target_heading - current_heading) % 360 if rotation_correction_enabled and self.target_heading is not None and current_heading is not None else angle
+        self.move_x += (speed * math.cos(math.radians(absolute_angle)) - self.move_x) * self.acceleration * LOGIC_LOOP_PERIOD
+        self.move_y += (speed * math.sin(math.radians(absolute_angle)) - self.move_y) * self.acceleration * LOGIC_LOOP_PERIOD
+        self.rotate += (rotate - self.rotate) * self.acceleration * LOGIC_LOOP_PERIOD
+        move_angle = math.atan2(self.move_y, self.move_x)
+        move_speed = math.sqrt(self.move_x**2 + self.move_y**2)
+
         rotation_correction = 0.0
         if rotation_correction_enabled:
             if abs(self.rotate) > 0.01:
