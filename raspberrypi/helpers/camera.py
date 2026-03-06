@@ -54,6 +54,45 @@ def init_camera():
     picam.start()
 
 
+
+def detect_ball_possession(
+    frame: np.ndarray,
+    ball_lower: np.ndarray,
+    ball_upper: np.ndarray,
+    bottom_strip_height: int = 30,
+    min_orange_ratio: float = 0.03
+) -> bool:
+    """
+    Check if the robot has the ball by looking for ball-coloured pixels
+    in the bottom strip of the camera frame.
+
+    Args:
+        frame: RGB image array.
+        ball_lower: HSV lower bound for the ball colour.
+        ball_upper: HSV upper bound for the ball colour.
+        bottom_strip_height: Height (px) of the bottom strip to examine.
+        min_orange_ratio: Minimum fraction of pixels that must match to
+                          consider the ball possessed.
+
+    Returns:
+        True if the ball appears to be in the robot's front pocket.
+    """
+    if frame is None or frame.size == 0:
+        return False
+
+    h = frame.shape[0]
+    strip = frame[max(0, h - bottom_strip_height):h, :]
+
+    if strip.size == 0:
+        return False
+
+    hsv_strip = cv2.cvtColor(strip, cv2.COLOR_RGB2HSV)
+    mask = cv2.inRange(hsv_strip, ball_lower, ball_upper)
+
+    ratio = float(np.count_nonzero(mask)) / mask.size
+    return ratio >= min_orange_ratio
+
+
 def get_frame() -> FrameData:
     if picam is None:
         raise RuntimeError("Camera not initialized. Call init_camera() first.")

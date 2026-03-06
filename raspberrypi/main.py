@@ -15,12 +15,23 @@ from helpers.helpers import (
   Suppress200Filter, setup_logger
 )
 from config import (
-    LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH, CAMERA_FOV_DEG,
+    AUTO_POSITION_SLOW_MIN_SPEED, LOG_LEVEL, FRAME_SIZE_B, FRAME_HEIGHT, FRAME_WIDTH, CAMERA_FOV_DEG,
     CAMERA_MIN_FRAME_INTERVAL, LOGIC_LOOP_PERIOD, IDLE_SLEEP_DURATION,
     TEENSY_PORT, TEENSY_BAUD, TEENSY_TIMEOUT, COMMUNICATION_LOOP_PERIOD,
     LINE_SENSOR_COUNT, LINE_SENSOR_LOCATIONS, DEFAULT_LINE_DETECTION_THRESHOLDS,
     CALIBRATION_FILE_PATH, DEFAULT_FOCAL_LENGTH_PIXELS, GOAL_HEIGHT_MM,
-    DEFAULT_LINE_AVOIDING_ENABLED, DEFAULT_ROTATION_CORRECTION_ENABLED
+    DEFAULT_LINE_AVOIDING_ENABLED, DEFAULT_ROTATION_CORRECTION_ENABLED,
+    DEFAULT_POSITION_BASED_SPEED_ENABLED,
+    AUTO_SPEED_MULTIPLIER, AUTO_BALL_ANGLE_OFFSET_DEG,
+    AUTO_BALL_CLOSE_THRESHOLD, AUTO_APPROACH_SPEED,
+    AUTO_BALL_TO_ROBOT_ANGLE_TIMES_DISTANCE_RATIO, AUTO_BALL_FRONT_THRESHOLD_DEG,
+    AUTO_PUSH_SPEED, AUTO_GOAL_SCORED_DISTANCE_MM, AUTO_LINE_REVERSE_DURATION,
+    AUTO_LINE_REVERSE_SPEED, AUTO_POSITION_SLOW_START_DISTANCE_X_MM,
+    AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM, AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM,
+    AUTO_POSITION_SLOW_END_DISTANCE_MM,
+    AUTO_BALL_BOTTOM_STRIP_HEIGHT, AUTO_BALL_POSSESSION_MIN_RATIO,
+    DEFAULT_BALL_CALIBRATION_HSV, AUTO_GOAL_TRACK_ROTATE_GAIN,
+    AUTO_GOAL_SEARCH_ROTATE_SPEED,
 )
 
 
@@ -51,13 +62,17 @@ shared_data: dict = {
     'running_state': manager.dict(),
     'rotation_correction_enabled': multiprocessing.Value('b', DEFAULT_ROTATION_CORRECTION_ENABLED),
     'line_avoiding_enabled': multiprocessing.Value('b', DEFAULT_LINE_AVOIDING_ENABLED),
+    'position_based_speed_enabled': multiprocessing.Value('b', DEFAULT_POSITION_BASED_SPEED_ENABLED),
     'goal_color': multiprocessing.Array('c', b'yellow'.ljust(10)),
     'goal_calibration_yellow': multiprocessing.Array('i', [20, 100, 100, 30, 255, 255]),
     'goal_calibration_blue': multiprocessing.Array('i', [100, 100, 100, 130, 255, 255]),
+    'ball_calibration_hsv': multiprocessing.Array('i', DEFAULT_BALL_CALIBRATION_HSV),
+    'ball_possession': multiprocessing.Value('b', False),
     'goal_detection_result': manager.dict(),
     'goal_focal_length': multiprocessing.Value('d', DEFAULT_FOCAL_LENGTH_PIXELS),
     'goal_distance_calibration_active': multiprocessing.Value('b', False),
     'goal_distance_calibration_data': manager.dict(),
+    'autonomous_state': manager.dict(),
     'locks': {
         'frame': multiprocessing.Lock(),
         'hardware_data': multiprocessing.Lock(),
@@ -68,6 +83,7 @@ shared_data: dict = {
         'calibration_storage': multiprocessing.Lock(),
         'goal_detection': multiprocessing.Lock(),
         'goal_distance_calibration': multiprocessing.Lock(),
+        'autonomous_state': multiprocessing.Lock(),
     }
 }
 
@@ -151,6 +167,16 @@ def camera_process(stop_event):
             set_goal_detection_result(result)
             update_goal_distance_calibration(result)
 
+            ball_lower, ball_upper = get_ball_calibration()
+            ball_possessed = camera.detect_ball_possession(
+                frame.frame,
+                np.array(ball_lower),
+                np.array(ball_upper),
+                bottom_strip_height=AUTO_BALL_BOTTOM_STRIP_HEIGHT,
+                min_orange_ratio=AUTO_BALL_POSSESSION_MIN_RATIO
+            )
+            shared_data['ball_possession'].value = ball_possessed
+
             frames_processed += 1
             
             if current_time > time_start + 1:
@@ -207,6 +233,7 @@ logic_logger = setup_logger(
 def logic_process(stop_event):
     try:
         motors_controller = SmartMotorsController()
+        autonomous_controller = AutonomousController()
 
         while not stop_event.is_set():
             start_time = time.time()
@@ -214,13 +241,15 @@ def logic_process(stop_event):
             mode = get_robot_mode()
             if mode == RobotMode.IDLE:
                 motors_controller.reset()
+                autonomous_controller.reset()
                 time.sleep(IDLE_SLEEP_DURATION)
                 continue
             elif mode == RobotMode.MANUAL:
+                autonomous_controller.reset()
                 control = get_manual_control()
                 motors_controller.set_motors(control.move_angle, control.move_speed, control.rotate)
             elif mode == RobotMode.AUTONOMOUS:
-                pass
+                autonomous_controller.tick(motors_controller)
 
             elapsed = time.time() - start_time
             sleep_duration = max(0.0, LOGIC_LOOP_PERIOD - elapsed - 0.001)
@@ -307,6 +336,8 @@ class SmartMotorsController(MotorsController):
         
         if line_avoiding_enabled:
             lines_detected = get_line_detected()
+            if any(lines_detected):
+                logic_logger.info(f"Line detected: {lines_detected}")
             detected_angles = []
             for i, detected in enumerate(lines_detected):
                 if detected and i < len(LINE_SENSOR_LOCATIONS):
@@ -377,6 +408,295 @@ class SmartMotorsController(MotorsController):
         self.recently_crossed_angles = []
 
 
+# ==================== AUTONOMOUS CONTROLLER ====================
+
+class AutoState:
+    IDLE          = "idle"          # no ball visible - hold position
+    APPROACH      = "approach"      # drive toward ball, rotate to keep goal centred
+    PUSH          = "push"          # ball possessed - drive forward, keep goal centred
+    LINE_REVERSE  = "line_reverse"  # emergency back-off from line
+
+
+class AutonomousController:
+    """
+    Autonomous soccer behaviour.
+
+    State flow:
+      IDLE         - ball not visible; hold still.
+      APPROACH     - ball visible; drive toward the ball (using ball angle from IR).
+                     While driving, rotate continuously so the goal stays centred in
+                     the camera frame - this means the robot naturally positions itself
+                     between the ball and the goal ready to push.
+                     Transitions to PUSH when ball possession is confirmed.
+      PUSH         - ball is possessed (in front pocket); drive forward while keeping
+                     the goal centred via rotation.  If the ball is lost, go back to
+                     APPROACH.  If scored (goal too close), return to IDLE.
+      LINE_REVERSE - emergency: a line sensor fired; back away briefly then IDLE.
+
+    Ball possession is confirmed by:
+      1. IR ball angle very close to 0 deg (ball directly in front) AND
+         IR distance below AUTO_BALL_CLOSE_THRESHOLD, OR
+      2. Camera detects ball-coloured (orange) pixels in the bottom strip of the frame.
+
+    No kicker - ball is pushed with the front cutout.
+    """
+
+    def __init__(self):
+        self.state: str = AutoState.IDLE
+        self.prev_state: str = ""
+        self.state_start_time: float = time.time()
+        self._line_reverse_dir_rad: float = 0.0
+        # Hysteresis: require possession for N consecutive ticks before transitioning
+        self._possession_ticks: int = 0
+        self._POSSESSION_CONFIRM_TICKS: int = 3
+        # Loss hysteresis: require ball absent for N ticks before declaring lost
+        self._ball_lost_ticks: int = 0
+        self._BALL_LOST_CONFIRM_TICKS: int = 5
+
+    # ------------------------------------------------------------------
+    # Public tick - called every logic loop iteration
+    # ------------------------------------------------------------------
+    def tick(self, motors: SmartMotorsController) -> None:
+        goal    = get_goal_detection_result()
+        hw      = get_hardware_data()
+        lines   = get_line_detected()
+
+        heading       = hw.compass.heading if hw else None
+        ball_angle    = AutonomousController._normalize_angle(hw.ir.angle + AUTO_BALL_ANGLE_OFFSET_DEG) if hw else 999
+        ball_distance = hw.ir.distance if hw else 999
+        ball_visible  = (ball_angle != 999 and ball_distance != 999)
+        goal_visible  = (goal is not None and goal.goal_detected)
+        cam_possession = get_ball_possession()
+
+        # Possession: IR close + centred, OR camera sees ball at bottom
+        ir_possession = (
+            ball_visible
+            and abs(ball_angle) < AUTO_BALL_FRONT_THRESHOLD_DEG
+            and ball_distance > AUTO_BALL_CLOSE_THRESHOLD
+        )
+        have_ball_raw = ir_possession# or cam_possession
+
+        # Hysteresis: only confirm possession after several consecutive ticks
+        if have_ball_raw:
+            self._possession_ticks = min(self._possession_ticks + 1, self._POSSESSION_CONFIRM_TICKS)
+        else:
+            self._possession_ticks = max(self._possession_ticks - 1, 0)
+        have_ball = (self._possession_ticks >= self._POSSESSION_CONFIRM_TICKS)
+
+        # Ball-lost hysteresis
+        if not ball_visible:
+            self._ball_lost_ticks = min(self._ball_lost_ticks + 1, self._BALL_LOST_CONFIRM_TICKS)
+        else:
+            self._ball_lost_ticks = 0
+        ball_truly_lost = (self._ball_lost_ticks >= self._BALL_LOST_CONFIRM_TICKS)
+
+        # ---- Hard line-avoidance override (highest priority) ----------
+        if any(lines):
+            if self.state != AutoState.LINE_REVERSE:
+                self._enter_line_reverse(lines, motors)
+            else:
+                self._tick_line_reverse(motors)
+            self._publish_state(ball_angle, ball_distance, goal, have_ball)
+            return
+
+        # Finished reversing - return to normal flow
+        if self.state == AutoState.LINE_REVERSE:
+            if time.time() - self.state_start_time >= AUTO_LINE_REVERSE_DURATION:
+                self._transition(AutoState.IDLE)
+
+        # ---- State machine --------------------------------------------
+        if self.state == AutoState.IDLE:
+            self._tick_idle(motors, ball_visible)
+
+        elif self.state == AutoState.APPROACH:
+            self._tick_approach(motors, heading, ball_truly_lost, ball_angle,
+                                ball_distance, goal, goal_visible, have_ball)
+
+        elif self.state == AutoState.PUSH:
+            self._tick_push(motors, heading, ball_truly_lost, goal, goal_visible)
+
+        self._publish_state(ball_angle, ball_distance, goal, have_ball)
+
+    # ------------------------------------------------------------------
+    # State: IDLE
+    # No ball visible - hold still.
+    # ------------------------------------------------------------------
+    def _tick_idle(self, motors, ball_visible):
+        if ball_visible:
+            self._transition(AutoState.APPROACH)
+            return
+        motors.set_motors(angle=0, speed=0, rotate=0)
+
+    # ------------------------------------------------------------------
+    # State: APPROACH
+    # Drive toward the ball while rotating to keep the goal centred.
+    #
+    # Movement: drive in the direction of ball_angle (ball-relative angle
+    # is relative to the robot, so angle=0 is straight ahead).
+    # Rotation: use goal camera alignment to rotate the whole robot so
+    # the goal stays centred.  This naturally puts the robot between
+    # the ball and goal when it arrives.
+    # Transition to PUSH once possession is confirmed.
+    # ------------------------------------------------------------------
+    def _tick_approach(self, motors, heading, ball_truly_lost, ball_angle, ball_distance, goal, goal_visible, have_ball):
+        if ball_truly_lost:
+            self._transition(AutoState.IDLE)
+            return
+
+        if have_ball:
+            self._transition(AutoState.PUSH)
+            return
+
+        # Drive toward ball: move in ball_angle direction so that we approach the ball from behind.
+        angle_rad = math.radians(self._normalize_angle(ball_angle + heading) * AUTO_BALL_TO_ROBOT_ANGLE_TIMES_DISTANCE_RATIO * ball_distance)
+        angle_rad = max(-math.radians(180), min(math.radians(180), angle_rad))
+        fwd  = math.cos(angle_rad) * AUTO_APPROACH_SPEED
+        side = math.sin(angle_rad) * AUTO_APPROACH_SPEED
+        move_angle_deg = math.degrees(math.atan2(side, fwd)) - heading
+        pos_factor = self._position_speed_factor()
+        move_speed = min(1.0, math.sqrt(fwd**2 + side**2)) * AUTO_SPEED_MULTIPLIER * pos_factor
+
+        # Rotation: keep goal centred in camera frame.
+        rotate = self._goal_track_rotation(goal, goal_visible)
+
+        motors.set_motors(angle=move_angle_deg, speed=move_speed, rotate=rotate)
+        # Disable compass heading lock - we steer via goal alignment instead
+        motors.target_heading = None
+
+    # ------------------------------------------------------------------
+    # State: PUSH
+    # Ball is in the front pocket.  Drive straight forward while keeping
+    # the goal centred via rotation.  If the ball is lost, re-approach.
+    # ------------------------------------------------------------------
+    def _tick_push(self, motors, heading, ball_truly_lost, goal, goal_visible):
+        if ball_truly_lost:
+            logic_logger.info("Autonomous: lost ball during push, re-approaching.")
+            self._possession_ticks = 0
+            self._transition(AutoState.APPROACH)
+            return
+
+        # Check for goal scored
+        if goal_visible and goal.distance_mm is not None and goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
+            logic_logger.info("Autonomous: goal scored! Returning to IDLE.")
+            self._transition(AutoState.IDLE)
+            return
+
+        rotate = self._goal_track_rotation(goal, goal_visible)
+        pos_factor = self._position_speed_factor()
+        move_speed = AUTO_PUSH_SPEED * AUTO_SPEED_MULTIPLIER * pos_factor
+
+        motors.set_motors(angle=0, speed=move_speed, rotate=rotate)
+        motors.target_heading = None
+
+    # ------------------------------------------------------------------
+    # State: LINE_REVERSE - back away from the line
+    # ------------------------------------------------------------------
+    def _enter_line_reverse(self, lines, motors):
+        triggered = [
+            LINE_SENSOR_LOCATIONS[i] for i, d in enumerate(lines)
+            if d and i < len(LINE_SENSOR_LOCATIONS)
+        ]
+        if triggered:
+            angles_rad = [math.radians(a) for a in triggered]
+            vx = sum(math.cos(a) for a in angles_rad)
+            vy = sum(math.sin(a) for a in angles_rad)
+            line_dir_deg = math.degrees(math.atan2(vy, vx))
+        else:
+            line_dir_deg = 180.0
+
+        self._line_reverse_dir_rad = math.radians((line_dir_deg + 180) % 360)
+        self._transition(AutoState.LINE_REVERSE)
+        logic_logger.warning(
+            f"Autonomous: LINE detected! Reversing toward "
+            f"{math.degrees(self._line_reverse_dir_rad):.0f} deg"
+        )
+        motors.set_motors(
+            angle=math.degrees(self._line_reverse_dir_rad),
+            speed=AUTO_LINE_REVERSE_SPEED * AUTO_SPEED_MULTIPLIER,
+            rotate=0
+        )
+
+    def _tick_line_reverse(self, motors):
+        if time.time() - self.state_start_time < AUTO_LINE_REVERSE_DURATION:
+            motors.set_motors(
+                angle=math.degrees(self._line_reverse_dir_rad),
+                speed=AUTO_LINE_REVERSE_SPEED * AUTO_SPEED_MULTIPLIER,
+                rotate=0
+            )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _goal_track_rotation(self, goal, goal_visible: bool) -> float:
+        """Compute rotation command to keep goal centred in camera frame.
+
+        alignment > 0 => goal to the right => rotate clockwise (positive).
+        If goal not visible, rotate slowly to search for it.
+        Returns a value in [-1, 1].
+        """
+        if goal_visible:
+            rotate = goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
+        else:
+            rotate = AUTO_GOAL_SEARCH_ROTATE_SPEED * AUTO_SPEED_MULTIPLIER
+        return max(-1.0, min(1.0, rotate))
+
+    @staticmethod
+    def _normalize_angle(angle: float) -> float:
+        """Normalize angle to range [-180, 180)."""
+        return ((angle + 180) % 360) - 180
+
+    def _position_speed_factor(self) -> float:
+        """Get a speed multiplier based on the position on field to avoid lines/drive slower near them."""
+        if not get_position_based_speed_enabled():
+            return 1.0
+        pos = get_position_estimate()
+        if pos is None:
+            return 1.0
+        distances = [
+            pos.x_mm - AUTO_POSITION_SLOW_START_DISTANCE_X_MM,
+            AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM - pos.y_mm,
+            pos.y_mm - AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM
+        ]
+        highest = max(*distances)
+        highest = max(0.0, min(AUTO_POSITION_SLOW_END_DISTANCE_MM, highest))
+        return 1.0 - (highest / AUTO_POSITION_SLOW_END_DISTANCE_MM) * AUTO_POSITION_SLOW_MIN_SPEED
+
+
+    def _transition(self, new_state: str):
+        if new_state != self.state:
+            logic_logger.info(f"Autonomous: {self.state} -> {new_state}")
+            self.prev_state = self.state
+            self.state = new_state
+            self.state_start_time = time.time()
+
+    def _publish_state(self, ball_angle, ball_distance, goal, have_ball: bool):
+        state_info = {
+            'state': self.state,
+            'ball_angle': int(ball_angle) if ball_angle != 999 else None,
+            'ball_distance': int(ball_distance) if ball_distance != 999 else None,
+            'have_ball': have_ball,
+            'goal_detected': goal.goal_detected if goal else False,
+            'goal_alignment': round(goal.alignment, 3) if goal else None,
+            'goal_distance_mm': int(round(goal.distance_mm)) if goal and goal.distance_mm else None,
+        }
+        with shared_data['locks']['autonomous_state']:
+            shared_data['autonomous_state'].clear()
+            shared_data['autonomous_state'].update(state_info)
+
+    def reset(self):
+        self._possession_ticks = 0
+        self._ball_lost_ticks = 0
+        self._transition(AutoState.IDLE)
+        with shared_data['locks']['autonomous_state']:
+            shared_data['autonomous_state'].clear()
+
+
+
+def get_autonomous_state() -> dict:
+    with shared_data['locks']['autonomous_state']:
+        return dict(shared_data['autonomous_state'])
+
+
 def set_motor_speeds(speeds: list[int]):
     for i in range(min(4, len(speeds))):
         shared_data['motor_speeds'][i] = speeds[i]
@@ -438,6 +758,13 @@ def set_line_avoiding_enabled(enabled: bool) -> None:
 def get_line_avoiding_enabled() -> bool:
     return shared_data['line_avoiding_enabled'].value
 
+def set_position_based_speed_enabled(enabled: bool) -> None:
+    shared_data['position_based_speed_enabled'].value = enabled
+
+def get_position_based_speed_enabled() -> bool:
+    return shared_data['position_based_speed_enabled'].value
+
+
 def set_goal_color(color: str) -> None:
     with shared_data['locks']['goal_detection']:
         color_bytes = color.encode()[:10].ljust(10)
@@ -470,6 +797,21 @@ def get_goal_calibration(color: str) -> tuple[list[int], list[int]]:
             arr = list(shared_data['goal_calibration_blue'])
             return arr[:3], arr[3:]
         return [0, 0, 0], [0, 0, 0]
+
+def set_ball_calibration(lower: list[int], upper: list[int]) -> None:
+    with shared_data['locks']['goal_detection']:
+        for i in range(3):
+            shared_data['ball_calibration_hsv'][i] = lower[i]
+            shared_data['ball_calibration_hsv'][i + 3] = upper[i]
+    save_calibration_data()
+
+def get_ball_calibration() -> tuple[list[int], list[int]]:
+    with shared_data['locks']['goal_detection']:
+        arr = list(shared_data['ball_calibration_hsv'])
+        return arr[:3], arr[3:]
+
+def get_ball_possession() -> bool:
+    return bool(shared_data['ball_possession'].value)
 
 def set_goal_detection_result(result: camera.GoalDetectionResult | None) -> None:
     with shared_data['locks']['goal_detection']:
@@ -811,12 +1153,12 @@ def stop_line_calibration(cancel: bool = False) -> tuple[list[list[int]], list[f
 
                         if line_center - field_center > margin:
                             new_min = 0
-                            new_max = (field_max + line_max) // 2
+                            new_max = int(field_max + line_max) // 2
                         elif field_center - line_center > margin:
-                            new_min = (field_min + line_min) // 2
+                            new_min = int(field_min + line_min) // 2
                             new_max = 1000
                         
-                        thresholds.append([new_min, new_max])
+                        thresholds.append([int(new_min), int(new_max)])
                     else:
                         thresholds.append([int(field_min), int(field_max)])
                 else:
@@ -885,6 +1227,7 @@ def _create_calibration_data() -> dict:
         goal_color = bytes(shared_data['goal_color'][:]).decode().strip()
         yellow_cal = list(shared_data['goal_calibration_yellow'])
         blue_cal = list(shared_data['goal_calibration_blue'])
+        ball_cal = list(shared_data['ball_calibration_hsv'])
         
         return {
             "version": CALIBRATION_SCHEMA_VERSION,
@@ -899,6 +1242,10 @@ def _create_calibration_data() -> dict:
                     "blue_lower": blue_cal[:3],
                     "blue_upper": blue_cal[3:],
                     "focal_length_pixels": shared_data['goal_focal_length'].value,
+                },
+                "ball_detection": {
+                    "ball_lower": ball_cal[:3],
+                    "ball_upper": ball_cal[3:],
                 }
             }
         }
@@ -971,6 +1318,16 @@ def load_calibration_data() -> None:
             if focal_length is not None and isinstance(focal_length, (int, float)) and focal_length > 0:
                 shared_data['goal_focal_length'].value = float(focal_length)
 
+        ball_data = calibrations.get("ball_detection", {}) if isinstance(calibrations, dict) else {}
+        if ball_data:
+            ball_lower = ball_data.get("ball_lower")
+            ball_upper = ball_data.get("ball_upper")
+            if ball_lower and ball_upper and len(ball_lower) == 3 and len(ball_upper) == 3:
+                with shared_data['locks']['goal_detection']:
+                    for i in range(3):
+                        shared_data['ball_calibration_hsv'][i] = int(ball_lower[i])
+                        shared_data['ball_calibration_hsv'][i + 3] = int(ball_upper[i])
+
         hardware_logger.info("Calibration data loaded")
     except Exception as e:
         hardware_logger.warning(f"Invalid calibration data format: {e}")
@@ -1038,10 +1395,14 @@ def init_api():
     api.rotation_correction_enabled_setter = set_rotation_correction_enabled
     api.line_avoiding_enabled_getter = get_line_avoiding_enabled
     api.line_avoiding_enabled_setter = set_line_avoiding_enabled
+    api.position_based_speed_enabled_getter = get_position_based_speed_enabled
+    api.position_based_speed_enabled_setter = set_position_based_speed_enabled
     api.goal_color_getter = get_goal_color
     api.goal_color_setter = set_goal_color
     api.goal_calibration_getter = get_goal_calibration
     api.goal_calibration_setter = set_goal_calibration
+    api.ball_calibration_getter = get_ball_calibration
+    api.ball_calibration_setter = set_ball_calibration
     api.goal_detection_result_getter = get_goal_detection_result
     api.goal_focal_length_getter = get_goal_focal_length
     api.goal_focal_length_setter = set_goal_focal_length
@@ -1050,6 +1411,7 @@ def init_api():
     api.goal_distance_calibration_canceler = cancel_goal_distance_calibration
     api.goal_distance_calibration_status_getter = get_goal_distance_calibration_status
     api.position_estimate_getter = get_position_estimate
+    api.autonomous_state_getter = get_autonomous_state
 
 def api_get_camera_frame():
     data = get_camera_frame()

@@ -39,11 +39,16 @@ rotation_correction_enabled_getter = None
 rotation_correction_enabled_setter = None
 line_avoiding_enabled_getter = None
 line_avoiding_enabled_setter = None
+position_based_speed_enabled_getter = None
+position_based_speed_enabled_setter = None
+
 
 goal_color_getter = None
 goal_color_setter = None
 goal_calibration_getter = None
 goal_calibration_setter = None
+ball_calibration_getter = None
+ball_calibration_setter = None
 goal_detection_result_getter = None
 goal_focal_length_getter = None
 goal_focal_length_setter = None
@@ -52,6 +57,8 @@ goal_distance_calibration_stopper = None
 goal_distance_calibration_canceler = None
 goal_distance_calibration_status_getter = None
 position_estimate_getter = None
+
+autonomous_state_getter = None
 
 logger = logging.getLogger("API Process")
 
@@ -96,7 +103,7 @@ def video_feed():
         response.headers['Expires'] = '0'
         return response
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -141,7 +148,7 @@ def get_sensor_data():
         }
         return jsonify(response)
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -160,7 +167,7 @@ def get_logs():
         items, last_id = logs_getter(since_id) # pyright: ignore[reportGeneralTypeIssues]
         return jsonify({"logs": items, "last_id": last_id})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -173,7 +180,7 @@ def get_mode():
         mode = robot_mode_getter()
         return jsonify({"mode": mode})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 @app.route('/api/set_mode', methods=['POST'])
@@ -189,7 +196,7 @@ def set_mode():
         robot_mode_setter(mode)
         return jsonify({"status": "ok"})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -217,7 +224,7 @@ def set_manual_control():
         manual_control_setter(control)
         return jsonify({"status": "ok"})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -230,7 +237,7 @@ def reset_compass():
         compass_reset_requester()
         return jsonify({"status": "ok"})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -254,7 +261,7 @@ def start_line_calibration():
             "message": f"Phase {phase} started"
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -282,7 +289,7 @@ def stop_line_calibration():
             "can_start_phase2": can_start_phase2
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -309,7 +316,7 @@ def cancel_line_calibration():
             "message": "Calibration cancelled."
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -322,7 +329,7 @@ def get_line_calibration_status():
         status = line_calibration_status_getter()
         return jsonify(status)
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -354,7 +361,7 @@ def set_line_thresholds():
         except (ValueError, TypeError) as e:
             return jsonify({"error": f"Invalid threshold values: {e}"}) , 400
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -368,10 +375,11 @@ def get_motor_settings():
         
         return jsonify({
             "rotation_correction_enabled": rotation_correction_enabled_getter(),
-            "line_avoiding_enabled": line_avoiding_enabled_getter()
+            "line_avoiding_enabled": line_avoiding_enabled_getter(),
+            "position_based_speed_enabled": position_based_speed_enabled_getter() if position_based_speed_enabled_getter else True,
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -399,9 +407,16 @@ def set_motor_settings():
             line_avoiding_enabled_setter(data['line_avoiding_enabled'])
             logger.info(f"Line avoiding {'enabled' if data['line_avoiding_enabled'] else 'disabled'}")
         
+        if 'position_based_speed_enabled' in data:
+            if not isinstance(data['position_based_speed_enabled'], bool):
+                return jsonify({"error": "position_based_speed_enabled must be a boolean"}), 400
+            if position_based_speed_enabled_setter:
+                position_based_speed_enabled_setter(data['position_based_speed_enabled'])
+                logger.info(f"Position-based speed {'enabled' if data['position_based_speed_enabled'] else 'disabled'}")
+        
         return jsonify({"status": "ok"})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -431,7 +446,7 @@ def get_goal_settings():
             }
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -471,7 +486,7 @@ def set_goal_settings():
         
         return jsonify({"status": "ok"})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -499,7 +514,7 @@ def get_goal_detection():
             "goal_height_pixels": result.goal_height_pixels
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -579,7 +594,7 @@ def compute_hsv_from_regions():
             "upper": [h_max, s_max, v_max]
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -603,7 +618,7 @@ def get_position_estimate():
             "confidence": position.confidence
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -616,7 +631,7 @@ def get_goal_focal_length_api():
         focal_length = goal_focal_length_getter()
         return jsonify({"focal_length_pixels": focal_length})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -638,7 +653,7 @@ def set_goal_focal_length_api():
         logger.info(f"Goal focal length set to {focal_length}")
         return jsonify({"status": "ok", "focal_length_pixels": focal_length})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -665,7 +680,7 @@ def start_goal_distance_calibration_api():
             "message": "Drive the robot toward the enemy goal until it detects the line, then stop calibration"
         })
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
 
@@ -683,8 +698,8 @@ def stop_goal_distance_calibration_api():
         logger.info(f"Goal distance calibration completed: focal_length={result['focal_length_pixels']:.2f} pixels")
         return jsonify(result)
     except Exception as e:
-        logger.error(e)
-        return "", 500
+        logger.error(f"Error: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route('/api/goal_distance_calibration/cancel', methods=['POST'])
@@ -697,7 +712,7 @@ def cancel_goal_distance_calibration_api():
         logger.info("Goal distance calibration cancelled")
         return jsonify({"status": "ok", "message": "Calibration cancelled"})
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
 
 
@@ -710,8 +725,52 @@ def get_goal_distance_calibration_status_api():
         status = goal_distance_calibration_status_getter()
         return jsonify(status)
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/get_autonomous_state')
+def get_autonomous_state_api():
+    try:
+        if autonomous_state_getter is None:
+            return jsonify({'state': 'unavailable'})
+        state = autonomous_state_getter()
+        return jsonify(state if state else {'state': 'idle'})
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/get_ball_calibration')
+def get_ball_calibration_api():
+    try:
+        if ball_calibration_getter is None:
+            raise RuntimeError("api.ball_calibration_getter is None")
+        lower, upper = ball_calibration_getter()
+        return jsonify({"lower": lower, "upper": upper})
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        return "", 500
+
+
+@app.route('/api/set_ball_calibration', methods=['POST'])
+def set_ball_calibration_api():
+    try:
+        if ball_calibration_setter is None:
+            raise RuntimeError("api.ball_calibration_setter is None")
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Missing request body"}), 400
+        lower = data.get('lower')
+        upper = data.get('upper')
+        if not lower or not upper or len(lower) != 3 or len(upper) != 3:
+            return jsonify({"error": "'lower' and 'upper' must be lists of 3 values"}), 400
+        ball_calibration_setter([int(v) for v in lower], [int(v) for v in upper])
+        logger.info(f"Ball calibration set: lower={lower} upper={upper}")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        return "", 500
+
 
 @app.route('/')
 def get_index_html():
