@@ -1128,6 +1128,9 @@ def stop_line_calibration(cancel: bool = False) -> tuple[list[list[int]], list[f
                     existing_min = shared_data['line_detection_thresholds'][i * 2]
                     existing_max = shared_data['line_detection_thresholds'][i * 2 + 1]
                     thresholds.append([existing_min, existing_max])
+                shared_data['line_calibration_phase1_min'][i] = shared_data['line_calibration_min'][i]
+                shared_data['line_calibration_phase1_max'][i] = shared_data['line_calibration_max'][i]
+
             shared_data['line_calibration_phase'].value = 0
         elif phase == 2:
             for i in range(LINE_SENSOR_COUNT):
@@ -1191,6 +1194,9 @@ def get_line_calibration_status() -> dict:
         
         calibration_min = list(shared_data['line_calibration_min']) if phase > 0 else None
         calibration_max = list(shared_data['line_calibration_max']) if phase > 0 else None
+
+        phase1_complete = list(shared_data['line_calibration_phase1_min'])[0] != float('inf')
+        phase2_complete = list(shared_data['line_calibration_phase2_min'])[0] != float('inf')
         
         return {
             'active': phase > 0,
@@ -1198,9 +1204,12 @@ def get_line_calibration_status() -> dict:
             'current_thresholds': current_thresholds,
             'calibration_min': sanitize_values(calibration_min),
             'calibration_max': sanitize_values(calibration_max),
-            'phase1_complete': list(shared_data['line_calibration_phase1_min'])[0] != float('inf'),
-            'phase1_min': sanitize_values(list(shared_data['line_calibration_phase1_min'])) if list(shared_data['line_calibration_phase1_min'])[0] != float('inf') else None,
-            'phase1_max': sanitize_values(list(shared_data['line_calibration_phase1_max'])) if list(shared_data['line_calibration_phase1_max'])[0] != float('inf') else None,
+            'phase1_complete': phase1_complete,
+            'phase1_min': sanitize_values(list(shared_data['line_calibration_phase1_min'])) if phase1_complete else None,
+            'phase1_max': sanitize_values(list(shared_data['line_calibration_phase1_max'])) if phase1_complete else None,
+            'phase2_complete': phase2_complete,
+            'phase2_min': sanitize_values(list(shared_data['line_calibration_phase2_min'])) if phase2_complete else None,
+            'phase2_max': sanitize_values(list(shared_data['line_calibration_phase2_max'])) if phase2_complete else None,
         }
 
 def update_line_calibration(data: teensy_communication.ParsedTeensyData):

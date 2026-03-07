@@ -668,10 +668,9 @@
 
       .threshold-editor {
         display: grid;
-        grid-template-columns: auto 1fr 1fr;
+        grid-template-columns: auto 2fr 2fr 1fr 1fr 1fr;
         gap: 8px;
         align-items: center;
-        max-height: 200px;
         overflow-y: auto;
         padding: 8px;
         background: #0a0a0a;
@@ -691,11 +690,65 @@
         color: white;
         font-size: 0.9em;
         width: 100%;
+        height: 100%;
       }
 
       .threshold-input:focus {
         outline: none;
         border-color: #ffd700;
+      }
+
+      .threshold-phase-range {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        grid-template-columns: 1fr 1fr;
+        border: 1px solid #555;
+        border-radius: 4px;
+        margin: 0 2px;
+        min-width: 70px;
+        background: #222;
+        font-size: 0.8em;
+        box-shadow: 0 1px 2px #111 inset;
+        overflow: hidden;
+      }
+      .threshold-phase-range .min {
+        grid-row: 2;
+        grid-column: 1;
+        background: #444;
+        border-bottom: 1px solid #333;
+        border-right: 1px solid #333;
+        padding: 2px 0;
+        color: #ffd700;
+        font-weight: bold;
+      }
+      .threshold-phase-range .max {
+        grid-row: 2;
+        grid-column: 2;
+        background: #333;
+        border-right: 1px solid #333;
+        padding: 2px 0;
+        color: #4CAF50;
+        font-weight: bold;
+      }
+      .threshold-phase-range .label {
+        grid-column: 1 / span 2;
+        grid-row: 1;
+        background: #222;
+        color: #aaa;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75em;
+        border-left: 1px solid #333;
+        font-weight: normal;
+        user-select: none;
+      }
+      .threshold-phase-range {
+        margin-bottom: 2px;
+      }
+      .threshold-phase-range div {
+        text-align: center;
+        width: 100%;
       }
 
       .modal-close-btn {
@@ -755,8 +808,15 @@
         <!-- Camera Panel -->
         <div class="panel shrink">
           <!-- <div class="panel-header">Camera Feed</div> -->
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+            <button id="video-toggle-btn" class="toggle-btn selected" style="min-width: 60px;">Video: ON</button>
+            <span style="color: #aaa; font-size: 0.95em;">FPS:</span>
+            <button class="toggle-btn fps-btn selected" data-fps="5">5</button>
+            <button class="toggle-btn fps-btn" data-fps="15">15</button>
+            <button class="toggle-btn fps-btn" data-fps="30">30</button>
+          </div>
           <div class="img-container">
-            <img id="camera" src="/api/video_feed" alt="Camera Feed">
+            <img id="camera" src="/api/video_feed?fps=5" alt="Camera Feed">
           </div>
         </div>
 
@@ -1098,10 +1158,10 @@
       </div>
     </div>
 
-    <!-- Calibration Modal -->
-    <div class="modal-overlay" id="calibration-modal">
+    <!-- Line Calibration Modal -->
+    <div class="modal-overlay" id="line-calibration-modal">
       <div class="modal-dialog" style="position: relative;">
-        <button class="modal-close-btn" id="close-calibration-modal">&times;</button>
+        <button class="modal-close-btn" id="close-line-calibration-modal">&times;</button>
         <div class="modal-header">Line Sensor Calibration</div>
         <div class="modal-content">
 
@@ -1172,6 +1232,14 @@
             <div class="modal-buttons" style="margin-top: 16px;">
               <button class="btn btn-action" id="apply-thresholds">Apply & Close</button>
               <button class="btn btn-danger" id="reset-thresholds">Cancel</button>
+            </div>
+          </div>
+
+          <!-- Open Manual Adjustment -->
+          <div class="modal-section" id="open-manual-adjustment-section">
+            <div class="modal-section-title">Or Edit Manually</div>
+            <div style="display: flex; justify-content: center;">
+              <button class="btn" id="open-manual-adjustment-btn">Open Manual Adjustment</button>
             </div>
           </div>
 
@@ -1405,6 +1473,44 @@
     </div>
 
     <script>
+      // ========== Video Feed Controls ==========
+      const cameraImg = document.getElementById('camera');
+      const videoToggleBtn = document.getElementById('video-toggle-btn');
+      const fpsBtns = document.querySelectorAll('.fps-btn');
+      let videoOn = true;
+      let currentFps = 5;
+
+      function updateCameraSrc() {
+        if (videoOn) {
+          cameraImg.src = `/api/video_feed?fps=${currentFps}`;
+        } else {
+          cameraImg.src = '';
+        }
+      }
+
+      if (videoToggleBtn) {
+        videoToggleBtn.addEventListener('click', () => {
+          videoOn = !videoOn;
+          if (videoOn) {
+            videoToggleBtn.classList.add('selected');
+            videoToggleBtn.textContent = 'Video: ON';
+          } else {
+            videoToggleBtn.classList.remove('selected');
+            videoToggleBtn.textContent = 'Video: OFF';
+          }
+          updateCameraSrc();
+        });
+      }
+
+      fpsBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          fpsBtns.forEach(b => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          currentFps = parseInt(btn.getAttribute('data-fps'));
+          if (videoOn) updateCameraSrc();
+        });
+      });
+
       // ========== Logs ==========
       const logsElement = document.getElementById('logs');
       const logToggles = {
@@ -1977,16 +2083,18 @@
       }
 
       
-      // ========== Line Calibration Modal ==========
+    // ========== Line Calibration Modal ==========
       const calibrateLineBtn = document.getElementById('calibrate-line');
-      const calibrationModal = document.getElementById('calibration-modal');
-      const closeModalBtn = document.getElementById('close-calibration-modal');
+      const calibrationModal = document.getElementById('line-calibration-modal');
+      const closeModalBtn = document.getElementById('close-line-calibration-modal');
 
       const lineManualControlBox = document.getElementById('line-manual-control-box');
       
       const phase1Section = document.getElementById('phase1-section');
       const phase2Section = document.getElementById('phase2-section');
       const manualSection = document.getElementById('manual-section');
+      const openManualAdjustmentBtn = document.getElementById('open-manual-adjustment-btn');
+      const openManualAdjustmentSection = document.getElementById('open-manual-adjustment-section');
       
       const phase1Status = document.getElementById('phase1-status');
       const phase2Status = document.getElementById('phase2-status');
@@ -2006,6 +2114,14 @@
       
       let currentPhase = 0;
       let calibrationThresholds = [];
+
+      if (openManualAdjustmentBtn) {
+        openManualAdjustmentBtn.addEventListener('click', () => {
+          showManualAdjustment();
+          if (openManualAdjustmentSection) openManualAdjustmentSection.style.display = 'none';
+        });
+      }
+
 
       // Open/close modal
       if (calibrateLineBtn) {
@@ -2170,6 +2286,7 @@
         startPhase1Btn.style.display = '';
         stopPhase1Btn.style.display = 'none';
         cancelPhase1Btn.style.display = 'none';
+        phase1Status.textContent = 'Status: Not started';
 
         phase2Section.style.display = 'none';
         phase2Section.classList.remove('completed', 'active');
@@ -2177,9 +2294,11 @@
         skipPhase2Btn.style.display = '';
         stopPhase2Btn.style.display = 'none';
         cancelPhase2Btn.style.display = 'none';
+        phase2Status.textContent = 'Status: Not started';
         
         manualSection.style.display = 'none';
         manualSection.classList.remove('active');
+        openManualAdjustmentSection.style.display = '';
         
         currentPhase = 0;
       }
@@ -2197,7 +2316,7 @@
         cancelPhase2Btn.style.display = 'none';
       }
 
-      function showManualAdjustment(thresholds) {
+      function showManualAdjustment() {
         phase1Section.classList.remove('active');
         phase1Section.classList.add('completed');
         phase2Section.classList.remove('active');
@@ -2205,18 +2324,47 @@
         phase2Section.style.display = '';
         manualSection.style.display = '';
         manualSection.classList.add('active');
-        populateThresholdEditor(thresholds || calibrationThresholds);
+        populateThresholdEditor();
       }
 
-      function populateThresholdEditor(thresholds) {
+      async function populateThresholdEditor() {
+        const response = await fetch('/api/line_calibration/status');
+        if (!response.ok) {
+          console.error('Failed to fetch calibration status:', response.status);
+          return;
+        }
+
+        const status = await response.json();
+        console.log('Calibration status:', status);
+
+        const thresholds = status.current_thresholds || calibrationThresholds || [];
+
+        const phase1Min = status.phase1_min || [];
+        const phase1Max = status.phase1_max || [];
+        
+        const phase2Min = status.phase2_min || [];
+        const phase2Max = status.phase2_max || [];
+
         thresholdEditor.innerHTML = '';
+        // Add table headers
+        const headerRow = document.createElement('div');
+        headerRow.style.display = 'contents';
+        headerRow.innerHTML = `
+          <div></div>
+          <div style="text-align:center; font-weight:bold; color:#ccc;">Min</div>
+          <div style="text-align:center; font-weight:bold; color:#ccc;">Max</div>
+          <div style="text-align:center; font-weight:bold; color:#ffd700;">Phase 1</div>
+          <div style="text-align:center; font-weight:bold; color:#2196F3;">Phase 2</div>
+          <div style="text-align:center; font-weight:bold; color:#4CAF50;">Diff</div>
+        `;
+        thresholdEditor.appendChild(headerRow);
         for (let i = 0; i < 12; i++) {
           const min = thresholds[i] ? thresholds[i][0] : 400;
           const max = thresholds[i] ? thresholds[i][1] : 600;
           
           const label = document.createElement('div');
           label.className = 'threshold-label';
-          label.textContent = `Sensor ${i}:`;
+          label.textContent = `${i}`;
           
           const minInput = document.createElement('input');
           minInput.type = 'number';
@@ -2231,10 +2379,37 @@
           maxInput.id = `threshold-${i}-max`;
           maxInput.value = max;
           maxInput.placeholder = 'Max';
-          
+
+          const phase1Range = document.createElement('div');
+          phase1Range.className = 'threshold-phase-range';
+          phase1Range.innerHTML = `
+            <div class="min">${phase1Min[i] !== undefined ? Math.round(phase1Min[i]) : '---'}</div>
+            <div class="max">${phase1Max[i] !== undefined ? Math.round(phase1Max[i]) : '---'}</div>
+            <div class="label">Min Max</div>
+          `;
+
+          const phase2Range = document.createElement('div');
+          phase2Range.className = 'threshold-phase-range';
+          phase2Range.innerHTML = `
+            <div class="min">${phase2Min[i] !== undefined ? Math.round(phase2Min[i]) : '---'}</div>
+            <div class="max">${phase2Max[i] !== undefined ? Math.round(phase2Max[i]) : '---'}</div>
+            <div class="label">Min Max</div>
+          `;
+
+          const diffRange = document.createElement('div');
+          diffRange.className = 'threshold-phase-range';
+          diffRange.innerHTML = `
+            <div class="min">${phase2Min[i] !== undefined && phase1Min[i] !== undefined ? Math.round(phase2Min[i] - phase1Min[i]) : '---'}</div>
+            <div class="max">${phase2Max[i] !== undefined && phase1Max[i] !== undefined ? Math.round(phase2Max[i] - phase1Max[i]) : '---'}</div>
+            <div class="label">ΔMin ΔMax</div>
+          `;
+
           thresholdEditor.appendChild(label);
           thresholdEditor.appendChild(minInput);
           thresholdEditor.appendChild(maxInput);
+          thresholdEditor.appendChild(phase1Range);
+          thresholdEditor.appendChild(phase2Range);
+          thresholdEditor.appendChild(diffRange);
         }
       }
 
@@ -2302,6 +2477,12 @@
             stopPhase1Btn.style.display = 'none';
             cancelPhase1Btn.style.display = 'none';
             phase1Status.innerHTML = 'Status: Not started';
+          }
+
+          if (phase1Section.classList.contains('active') || phase2Section.classList.contains('active') || manualSection.classList.contains('active')) {
+            openManualAdjustmentSection.style.display = 'none';
+          } else {
+            openManualAdjustmentSection.style.display = '';
           }
         } catch (e) {
           console.error('Error updating calibration state:', e);

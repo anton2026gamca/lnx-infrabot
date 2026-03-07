@@ -63,8 +63,17 @@ autonomous_state_getter = None
 logger = logging.getLogger("API Process")
 
 
-def gen_frames():
-    sleep_time = 1.0 / API_VIDEO_TARGET_FPS if API_VIDEO_TARGET_FPS > 0 else 0
+def gen_frames(fps=None):
+    if fps is not None:
+        try:
+            fps = float(fps)
+            if fps <= 0:
+                fps = API_VIDEO_TARGET_FPS
+        except Exception:
+            fps = API_VIDEO_TARGET_FPS
+    else:
+        fps = API_VIDEO_TARGET_FPS
+    sleep_time = 1.0 / fps if fps > 0 else 0
     last_frame_data = None
     frame_count = 0
     
@@ -97,7 +106,8 @@ def gen_frames():
 @app.route('/api/video_feed')
 def video_feed():
     try:
-        response = Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+        fps = request.args.get('fps', None)
+        response = Response(gen_frames(fps=fps), mimetype='multipart/x-mixed-replace; boundary=frame')
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
