@@ -133,4 +133,11 @@ def calculate_motors_speeds(move_angle_rad: float, move_speed: float, rotate: fl
         motor_speed = move_speed * math.cos(move_angle_rad - motor_rad) + rotate
         speeds.append(int(motor_speed))
     return speeds
-    
+ 
+
+# ==================== OTHER HELPERS ====================
+
+def normalize_angle(angle: float) -> float:
+    """Normalize angle to range [-180, 180)."""
+    return ((angle + 180) % 360) - 180
+

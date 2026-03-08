@@ -88,8 +88,8 @@ def parse_sensor_data_line(line: str) -> ParsedTeensyData:
             line,
             time.time(),
         )
-        parsed.ir.angle = (parsed.ir.angle * -1 + 360) % 360
-        # parsed.ir.distance = 3000 - parsed.ir.distance
+        if (parsed.ir.angle != 999):
+            parsed.ir.angle = (parsed.ir.angle * -1 + 360) % 360
     except (ValueError, IndexError) as e:
         raise ValueError(f"Failed to parse numeric fields: {e}")
 

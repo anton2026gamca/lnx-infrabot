@@ -1,11 +1,13 @@
 import cv2
 import json
 import logging
+import math
 import time
 from flask import Flask, Response, request, jsonify
 from werkzeug.serving import make_server
 
 from helpers.helpers import RobotMode, RobotManualControl, PositionEstimate
+from helpers.detection_visualizer import draw_detections_on_frame, DetectedObject
 from config import API_VIDEO_JPEG_QUALITY, API_VIDEO_TARGET_FPS, API_HOST, API_PORT, LINE_SENSOR_COUNT
 
 
@@ -42,6 +44,10 @@ line_avoiding_enabled_setter = None
 position_based_speed_enabled_getter = None
 position_based_speed_enabled_setter = None
 
+camera_ball_usage_enabled_getter = None
+camera_ball_usage_enabled_setter = None
+always_facing_goal_enabled_getter = None
+always_facing_goal_enabled_setter = None
 
 goal_color_getter = None
 goal_color_setter = None
@@ -59,11 +65,18 @@ goal_distance_calibration_status_getter = None
 position_estimate_getter = None
 
 autonomous_state_getter = None
+detections_getter = None
+
+camera_ball_detected_getter = None
+camera_ball_angle_getter = None
+camera_ball_distance_getter = None
+camera_ball_area_pixels_getter = None
+camera_ball_calibration_constant_setter = None
 
 logger = logging.getLogger("API Process")
 
 
-def gen_frames(fps=None):
+def gen_frames(fps=None, show_detections=True):
     if fps is not None:
         try:
             fps = float(fps)
@@ -92,6 +105,33 @@ def gen_frames(fps=None):
                 yield last_frame_data
             continue
         
+        if show_detections and detections_getter is not None:
+            try:
+                detections = detections_getter()
+                if not isinstance(detections, list):
+                    detections = []
+
+                detected_objects = []
+                for det in detections:
+                    if isinstance(det, dict):
+                        color = tuple(det.get('color', (255, 255, 255))) if det.get('color') else (255, 255, 255)
+                        detected_objects.append(DetectedObject(
+                            object_type=det.get('object_type', 'unknown'),
+                            x=det.get('x', 0),
+                            y=det.get('y', 0),
+                            width=det.get('width', 0),
+                            height=det.get('height', 0),
+                            confidence=det.get('confidence', 0.0),
+                            color=color
+                        ))
+                    else:
+                        detected_objects.append(det)
+                
+                if detected_objects:
+                    frame = draw_detections_on_frame(frame, detected_objects, draw_labels=True)
+            except Exception as e:
+                logger.debug(f"Error drawing detections: {e}")
+        
         ret, buffer = cv2.imencode('.jpg', frame, encode_params)
         if not ret:
             continue
@@ -107,7 +147,8 @@ def gen_frames(fps=None):
 def video_feed():
     try:
         fps = request.args.get('fps', None)
-        response = Response(gen_frames(fps=fps), mimetype='multipart/x-mixed-replace; boundary=frame')
+        show_detections = request.args.get('show_detections', 'true').lower() in ('true', '1', 'yes')
+        response = Response(gen_frames(fps=fps, show_detections=show_detections), mimetype='multipart/x-mixed-replace; boundary=frame')
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -115,6 +156,29 @@ def video_feed():
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
         return "", 500
+
+
+@app.route('/api/camera_ball_distance_calibration', methods=['POST'])
+def camera_ball_distance_calibration():
+    try:
+        if camera_ball_area_pixels_getter is None or camera_ball_detected_getter is None or camera_ball_calibration_constant_setter is None:
+            raise RuntimeError("Camera ball calibration helpers not set")
+        data = request.get_json()
+        if not data or 'known_distance_mm' not in data:
+            return jsonify({'error': 'Missing known_distance_mm'}), 400
+        known_distance = float(data['known_distance_mm'])
+        camera_ball_detected = camera_ball_detected_getter()
+        if not camera_ball_detected:
+            return jsonify({'error': 'No ball detected by camera'}), 400
+        area = camera_ball_area_pixels_getter()
+        if area <= 0:
+            return jsonify({'error': 'No area info'}), 400
+        calibration_constant = known_distance * math.sqrt(area)
+        camera_ball_calibration_constant_setter(calibration_constant)
+        return jsonify({'status': 'ok', 'calibration_constant': calibration_constant})
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        return '', 500
 
 
 @app.route('/api/get_sensor_data')
@@ -129,6 +193,13 @@ def get_sensor_data():
         
         running_state = running_state_getter() if running_state_getter else None
         
+        if camera_ball_angle_getter is None or camera_ball_distance_getter is None or camera_ball_detected_getter is None:
+            raise RuntimeError("Camera ball getters not set")
+        camera_ball_angle = camera_ball_angle_getter()
+        camera_ball_distance = camera_ball_distance_getter()
+        camera_ball_detected = camera_ball_detected_getter()
+
+
         response = {
             "compass": {
                 "heading": data.compass.heading,
@@ -140,6 +211,11 @@ def get_sensor_data():
                 "distance": data.ir.distance,
                 "sensors": data.ir.sensors,
                 "status": data.ir.status
+            },
+            "camera_ball": {
+                "angle": camera_ball_angle,
+                "distance": camera_ball_distance,
+                "detected": camera_ball_detected
             },
             "line": {
                 "raw": data.line,
@@ -387,6 +463,8 @@ def get_motor_settings():
             "rotation_correction_enabled": rotation_correction_enabled_getter(),
             "line_avoiding_enabled": line_avoiding_enabled_getter(),
             "position_based_speed_enabled": position_based_speed_enabled_getter() if position_based_speed_enabled_getter else True,
+            "camera_ball_usage_enabled": camera_ball_usage_enabled_getter() if camera_ball_usage_enabled_getter else True,
+            "always_facing_goal_enabled": always_facing_goal_enabled_getter() if always_facing_goal_enabled_getter else True,
         })
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -423,6 +501,20 @@ def set_motor_settings():
             if position_based_speed_enabled_setter:
                 position_based_speed_enabled_setter(data['position_based_speed_enabled'])
                 logger.info(f"Position-based speed {'enabled' if data['position_based_speed_enabled'] else 'disabled'}")
+        
+        if 'camera_ball_usage_enabled' in data:
+            if not isinstance(data['camera_ball_usage_enabled'], bool):
+                return jsonify({"error": "camera_ball_usage_enabled must be a boolean"}), 400
+            if camera_ball_usage_enabled_setter:
+                camera_ball_usage_enabled_setter(data['camera_ball_usage_enabled'])
+                logger.info(f"Camera ball usage {'enabled' if data['camera_ball_usage_enabled'] else 'disabled'}")
+        
+        if 'always_facing_goal_enabled' in data:
+            if not isinstance(data['always_facing_goal_enabled'], bool):
+                return jsonify({"error": "always_facing_goal_enabled must be a boolean"}), 400
+            if always_facing_goal_enabled_setter:
+                always_facing_goal_enabled_setter(data['always_facing_goal_enabled'])
+                logger.info(f"Always facing goal {'enabled' if data['always_facing_goal_enabled'] else 'disabled'}")
         
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -749,6 +841,36 @@ def get_autonomous_state_api():
         logger.error(f"Error: {e}", exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
 
+
+@app.route('/api/get_detections')
+def get_detections():
+    try:
+        if detections_getter is None:
+            return jsonify({"detections": []})
+        
+        detections = detections_getter()
+        if not isinstance(detections, list):
+            detections = []
+        
+        detection_list = []
+        for det in detections:
+            if isinstance(det, dict):
+                detection_list.append(det)
+            else:
+                detection_list.append({
+                    "object_type": det.object_type,
+                    "x": det.x,
+                    "y": det.y,
+                    "width": det.width,
+                    "height": det.height,
+                    "confidence": det.confidence,
+                    "color": getattr(det, 'color', (255, 255, 255))
+                })
+        
+        return jsonify({"detections": detection_list})
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/get_ball_calibration')
 def get_ball_calibration_api():

@@ -98,6 +98,7 @@
         padding: 4px;
         display: flex;
         flex-direction: column;
+        justify-content: space-evenly;
         align-items: center;
         border: 1px solid #333;
         min-height: 0;
@@ -844,7 +845,7 @@
         <div class="panel shrink">
           <!-- <div class="panel-header">Sensors</div> -->
           <div class="sensors-grid">
-            
+
             <!-- Compass (BNO055) -->
             <div class="sensor-card grid-span-2 position-relative">
               <div class="sensor-label">Compass (BNO055)</div>
@@ -863,7 +864,7 @@
               <div class="corner-btn" style="top: 3px; right: 3px;" id="reset-compass">Reset Compass Position</div>
             </div>
             
-            <!-- IR Ball Detection -->
+            <!-- Ball Angle (IR & Camera) -->
             <div class="sensor-card">
               <div class="sensor-label">Ball Angle</div>
               <div class="sensor-value" id="ir-angle">---</div>
@@ -872,17 +873,30 @@
                   <div class="ball-direction-arrow" id="ball-arrow"></div>
                 </div>
               </div>
+              <div class="sensor-visual ball-direction-container">
+                <div class="ball-direction-circle">
+                  <div class="ball-direction-arrow" id="camera-ball-arrow"></div>
+                </div>
+              </div>
+              <div class="sensor-value" id="camera-ball-angle">---</div>
             </div>
             
-            <!-- IR Ball Distance -->
-            <div class="sensor-card">
+            <!-- Ball Distance (IR & Camera) -->
+            <div class="sensor-card position-relative">
               <div class="sensor-label">Ball Distance</div>
-              <div class="sensor-value" id="ir-distance">--- cm</div>
+              <div class="sensor-value" id="ir-distance">---</div>
               <div class="sensor-visual">
                 <div class="ir-bar">
                   <div class="ir-bar-fill" id="ir-bar"></div>
                 </div>
               </div>
+              <div class="sensor-visual">
+                <div class="ir-bar">
+                  <div class="ir-bar-fill" id="camera-ball-bar"></div>
+                </div>
+              </div>
+              <div class="sensor-value" id="camera-ball-distance">--- mm</div>
+              <div class="corner-btn" style="bottom: 3px; top: auto; right: 3px;" id="calibrate-camera-ball-distance">Calibrate</div>
             </div>
 
             <!-- Line Sensors -->
@@ -923,43 +937,6 @@
                 <div class="line-sensor line-sensor-compact" id="ir-sensor-11"></div>
               </div>
               <div class="line-sensor-status">Status: <span id="ir-status">0</span></div>
-            </div>
-
-            <!-- Autonomous State -->
-            <div class="sensor-card grid-span-4" id="autonomous-state-card" style="display:none;">
-              <div class="sensor-label">Autonomous State</div>
-              <div style="display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:4px;">
-                <div style="text-align:center; min-width:80px;">
-                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">State</div>
-                  <div class="sensor-value" id="auto-state" style="font-size:1.1em; text-transform:uppercase; letter-spacing:1px;">---</div>
-                </div>
-                <div style="text-align:center; min-width:70px;">
-                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">Have Ball</div>
-                  <div class="sensor-value" id="auto-have-ball" style="font-size:1.1em;">---</div>
-                </div>
-                <div style="text-align:center; min-width:70px;">
-                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">Goal</div>
-                  <div class="sensor-value" id="auto-goal-detected" style="font-size:1.1em;">---</div>
-                </div>
-                <div style="text-align:center; min-width:70px;">
-                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">Alignment</div>
-                  <div class="sensor-value" id="auto-goal-alignment" style="font-size:1.1em;">---</div>
-                </div>
-                <div style="text-align:center; min-width:80px;">
-                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">Goal Dist</div>
-                  <div class="sensor-value" id="auto-goal-dist" style="font-size:1.1em;">---</div>
-                </div>
-              </div>
-              <!-- State progress bar / pipeline -->
-              <div style="display:flex; gap:3px; margin-top:8px; align-items:stretch;">
-                <div class="auto-step" id="auto-step-idle"     data-state="idle">IDLE</div>
-                <div style="color:#555;align-self:center;">&#9654;</div>
-                <div class="auto-step" id="auto-step-approach" data-state="approach">APPROACH</div>
-                <div style="color:#555;align-self:center;">&#9654;</div>
-                <div class="auto-step" id="auto-step-push"     data-state="push">PUSH &#9917;</div>
-                <div style="flex:1;"></div>
-                <div class="auto-step" id="auto-step-line"     data-state="line_reverse" style="background:#4a1a1a; color:#f66;">LINE!</div>
-              </div>
             </div>
 
             <!-- Running State -->
@@ -1128,10 +1105,62 @@
                   <div class="manual-control-hint">Click to focus, press keys to control</div>
                 </div>
               </div>
+              <div class="manual-speed-slider" style="display: flex; align-items: center; gap: 8px; margin: 6px 0 0 0; justify-content: center;">
+                <span style="color: #aaa; font-size: 0.95em;">Speed:</span>
+                <input type="range" min="0.2" max="1.0" step="0.01" value="1" class="manual-speed-range" style="flex: 1;">
+                <span class="manual-speed-value" style="color: #ffd700; min-width: 38px; text-align: left;">1.00x</span>
+              </div>
               <div style="display: flex; gap: 8px;">
                 <button class="toggle-btn rotation-correction-toggle">Rotation Correction</button>
                 <button class="toggle-btn line-avoiding-toggle">Line Avoiding</button>
                 <button class="toggle-btn position-speed-toggle">Position Speed</button>
+              </div>
+            </div>
+
+            <div class="control-group" id="autonomous-controls" style="display: none;">
+              <div class="control-group-label">Autonomous Behavior</div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="toggle-btn camera-ball-usage-toggle">Camera Ball: OFF</button>
+                <button class="toggle-btn always-facing-goal-toggle">Face: Goal</button>
+                <button class="toggle-btn line-avoiding-toggle">Line Avoiding</button>
+                <button class="toggle-btn position-speed-toggle">Position Speed</button>
+              </div>
+            </div>
+
+            <!-- Autonomous State -->
+            <div class="sensor-card grid-span-4" id="autonomous-state-card" style="display:none;">
+              <div class="sensor-label">Autonomous State</div>
+              <div style="display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:4px;">
+                <div style="text-align:center; min-width:80px;">
+                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">State</div>
+                  <div class="sensor-value" id="auto-state" style="font-size:1.1em; text-transform:uppercase; letter-spacing:1px;">---</div>
+                </div>
+                <div style="text-align:center; min-width:70px;">
+                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">Have Ball</div>
+                  <div class="sensor-value" id="auto-have-ball" style="font-size:1.1em;">---</div>
+                </div>
+                <div style="text-align:center; min-width:70px;">
+                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">Goal</div>
+                  <div class="sensor-value" id="auto-goal-detected" style="font-size:1.1em;">---</div>
+                </div>
+                <div style="text-align:center; min-width:70px;">
+                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">Alignment</div>
+                  <div class="sensor-value" id="auto-goal-alignment" style="font-size:1.1em;">---</div>
+                </div>
+                <div style="text-align:center; min-width:80px;">
+                  <div style="font-size:0.7em; color:#888; margin-bottom:2px;">Goal Dist</div>
+                  <div class="sensor-value" id="auto-goal-dist" style="font-size:1.1em;">---</div>
+                </div>
+              </div>
+              <!-- State progress bar / pipeline -->
+              <div style="display:flex; gap:3px; margin-top:8px; align-items:stretch;">
+                <div class="auto-step" id="auto-step-idle"     data-state="idle">IDLE</div>
+                <div style="color:#555;align-self:center;">&#9654;</div>
+                <div class="auto-step" id="auto-step-approach" data-state="approach">APPROACH</div>
+                <div style="color:#555;align-self:center;">&#9654;</div>
+                <div class="auto-step" id="auto-step-push"     data-state="push">PUSH &#9917;</div>
+                <div style="flex:1;"></div>
+                <div class="auto-step" id="auto-step-line"     data-state="line_reverse" style="background:#4a1a1a; color:#f66;">LINE!</div>
               </div>
             </div>
 
@@ -1152,7 +1181,7 @@
                 </div>
               </div>
             </div>
-            
+
           </div>
         </div>
       </div>
@@ -1182,6 +1211,11 @@
                   <div>Use <strong class="manual-control-keys">W/A/S/D</strong> to move, <strong class="manual-control-keys">← →</strong> to rotate</div>
                   <div class="manual-control-hint">Click to focus, press keys to control</div>
                 </div>
+              </div>
+              <div class="manual-speed-slider" style="display: flex; align-items: center; gap: 8px; margin: 6px 0 0 0; justify-content: center;">
+                <span style="color: #aaa; font-size: 0.95em;">Speed:</span>
+                <input type="range" min="0.2" max="1.0" step="0.01" value="1" class="manual-speed-range" style="flex: 1;">
+                <span class="manual-speed-value" style="color: #ffd700; min-width: 38px; text-align: left;">1.00x</span>
               </div>
               <div style="display: flex; gap: 8px;">
                 <button class="toggle-btn rotation-correction-toggle">Rotation Correction</button>
@@ -1335,6 +1369,26 @@
       </div>
     </div>
 
+    <!-- Camera Ball Distance Calibration Modal -->
+    <div class="modal-overlay" id="camera-ball-distance-calibration-modal">
+      <div class="modal-dialog" style="position: relative; max-width: 500px;">
+        <button class="modal-close-btn" id="close-camera-ball-distance-calibration-modal">&times;</button>
+        <div class="modal-header">Camera Ball Distance Calibration</div>
+        <div class="modal-content">
+          <div class="modal-section">
+            <p>Place the ball at a known distance from the camera (in mm), enter the value below, and click Calibrate. The system will use the current ball detection to calibrate the distance estimation.</p>
+            <label style="display: block; color: #aaa; margin-bottom: 5px; font-size: 0.9em;">Known Distance (mm):</label>
+            <input type="number" id="camera-ball-known-distance-input" value="500" min="50" max="3000" step="1" style="width: 100%; padding: 8px; background: #333; border: 1px solid #555; color: #fff; border-radius: 4px; font-size: 1em;">
+            <div style="color: #666; font-size: 0.8em; margin-top: 3px;">Distance from camera to center of ball</div>
+          </div>
+          <div class="modal-buttons">
+            <button class="btn btn-action" id="start-camera-ball-distance-calibration">Calibrate</button>
+          </div>
+          <div class="modal-status" id="camera-ball-distance-calibration-status" style="display: none; color: #4CAF50; margin-top: 10px;"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Goal Distance Calibration Modal -->
     <div class="modal-overlay" id="goal-distance-calibration-modal">
       <div class="modal-dialog" style="position: relative;">
@@ -1382,6 +1436,11 @@
                   <div>Use <strong class="manual-control-keys">W/A/S/D</strong> to move, <strong class="manual-control-keys">← →</strong> to rotate</div>
                   <div class="manual-control-hint">Click to focus, press keys to control</div>
                 </div>
+              </div>
+              <div class="manual-speed-slider" style="display: flex; align-items: center; gap: 8px; margin: 6px 0 0 0; justify-content: center;">
+                <span style="color: #aaa; font-size: 0.95em;">Speed:</span>
+                <input type="range" min="0.2" max="2" step="0.01" value="1" class="manual-speed-range" style="width: 90px;">
+                <span class="manual-speed-value" style="color: #ffd700; min-width: 38px; text-align: left;">1.00x</span>
               </div>
               <div style="display: flex; gap: 8px;">
                 <button class="toggle-btn rotation-correction-toggle">Rotation Correction</button>
@@ -1634,6 +1693,29 @@
       const mainManualControlBox = document.getElementById('main-manual-control-box');
       const pressedKeys = new Set();
 
+      const manualSpeedSettings = new Map();
+      manualControlBoxes.forEach(box => {
+        manualSpeedSettings.set(box, 1);
+      });
+
+      document.querySelectorAll('.manual-speed-slider').forEach(sliderRow => {
+        let box = sliderRow.previousElementSibling;
+        if (!box || !box.classList.contains('manual-control-box')) {
+          box = sliderRow.parentElement.querySelector('.manual-control-box');
+        }
+        const slider = sliderRow.querySelector('.manual-speed-range');
+        const valueLabel = sliderRow.querySelector('.manual-speed-value');
+        if (slider && valueLabel && box) {
+          slider.addEventListener('input', () => {
+            const speed = parseFloat(slider.value);
+            manualSpeedSettings.set(box, speed);
+            valueLabel.textContent = speed.toFixed(2) + 'x';
+          });
+        }
+      });
+
+      const autonomousControlGroup = document.getElementById('autonomous-controls');
+
       let activeManualControlBox = mainManualControlBox;
       let selectedMode = null;
 
@@ -1691,10 +1773,14 @@
       const rotationCorrectionToggles = document.querySelectorAll('.toggle-btn.rotation-correction-toggle');
       const lineAvoidingToggles = document.querySelectorAll('.toggle-btn.line-avoiding-toggle');
       const positionSpeedToggles = document.querySelectorAll('.toggle-btn.position-speed-toggle');
+      const cameraBallUsageToggles = document.querySelectorAll('.toggle-btn.camera-ball-usage-toggle');
+      const alwaysFacingGoalToggles = document.querySelectorAll('.toggle-btn.always-facing-goal-toggle');
       
       let rotationCorrectionEnabled = true;
       let lineAvoidingEnabled = true;
       let positionBasedSpeedEnabled = true;
+      let cameraBallUsageEnabled = true;
+      let alwaysFacingGoalEnabled = true;
 
       async function updateMotorSettings(settings) {
         try {
@@ -1719,6 +1805,8 @@
             rotationCorrectionEnabled = data.rotation_correction_enabled;
             lineAvoidingEnabled = data.line_avoiding_enabled;
             positionBasedSpeedEnabled = data.position_based_speed_enabled ?? true;
+            cameraBallUsageEnabled = data.camera_ball_usage_enabled ?? true;
+            alwaysFacingGoalEnabled = data.always_facing_goal_enabled ?? true;
             updateMotorSettingsUI();
           }
         } catch (e) {
@@ -1748,6 +1836,24 @@
             toggle.classList.remove('selected');
           }
         });
+        cameraBallUsageToggles.forEach(toggle => {
+          if (cameraBallUsageEnabled) {
+            toggle.classList.add('selected');
+            toggle.textContent = 'Camera Ball: ON';
+          } else {
+            toggle.classList.remove('selected');
+            toggle.textContent = 'Camera Ball: OFF';
+          }
+        });
+        alwaysFacingGoalToggles.forEach(toggle => {
+          if (alwaysFacingGoalEnabled) {
+            toggle.classList.add('selected');
+            toggle.textContent = 'Face: Goal';
+          } else {
+            toggle.classList.remove('selected');
+            toggle.textContent = 'Face: North';
+          }
+        });
       }
 
       rotationCorrectionToggles.forEach(toggle => {
@@ -1774,8 +1880,24 @@
         });
       });
 
+      cameraBallUsageToggles.forEach(toggle => {
+        toggle.addEventListener('click', async () => {
+          cameraBallUsageEnabled = !cameraBallUsageEnabled;
+          updateMotorSettingsUI();
+          await updateMotorSettings({ camera_ball_usage_enabled: cameraBallUsageEnabled });
+        });
+      });
 
-      function computeCommandFromKeys(keys) {
+      alwaysFacingGoalToggles.forEach(toggle => {
+        toggle.addEventListener('click', async () => {
+          alwaysFacingGoalEnabled = !alwaysFacingGoalEnabled;
+          updateMotorSettingsUI();
+          await updateMotorSettings({ always_facing_goal_enabled: alwaysFacingGoalEnabled });
+        });
+      });
+
+
+      function computeCommandFromKeys(keys, box) {
         let dy = 0, dx = 0;
         if (keys.has('w')) dy += 1;
         if (keys.has('s')) dy -= 1;
@@ -1783,6 +1905,8 @@
         if (keys.has('a')) dx -= 1;
 
         const mag = Math.hypot(dx, dy);
+        // Get speed from slider for this box
+        const speed = manualSpeedSettings.get(box) || 1;
         if (mag === 0) {
           const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
           return { move: { angle: 0, speed: 0 }, rotate: Math.max(-1, Math.min(1, rotate)) };
@@ -1792,14 +1916,15 @@
         let angleDeg = angleRad * (180 / Math.PI);
         angleDeg = ((angleDeg % 360) + 360) % 360;
 
-        const move = { angle: Number(angleDeg.toFixed(1)), speed: 1 };
+        const move = { angle: Number(angleDeg.toFixed(1)), speed: speed };
 
         const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
         return { move, rotate: Math.max(-1, Math.min(1, rotate)) };
       }
 
-      function sendCurrentKeysCommand() {
-        const { move, rotate } = computeCommandFromKeys(pressedKeys);
+
+      function sendCurrentKeysCommand(box = activeManualControlBox) {
+        const { move, rotate } = computeCommandFromKeys(pressedKeys, box);
         if (!move && (!rotate || rotate === 0)) {
           sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 });
         } else {
@@ -1813,7 +1938,7 @@
         if (!allowed.includes(k)) return;
         if (!pressedKeys.has(k)) {
           pressedKeys.add(k);
-          sendCurrentKeysCommand();
+          sendCurrentKeysCommand(e.currentTarget);
         }
         e.preventDefault();
       }
@@ -1823,7 +1948,7 @@
         const allowed = ["w","a","s","d","arrowleft","arrowright"];
         if (!allowed.includes(k)) return;
         if (pressedKeys.has(k)) pressedKeys.delete(k);
-        sendCurrentKeysCommand();
+        sendCurrentKeysCommand(e.currentTarget);
         e.preventDefault();
       }
 
@@ -1849,6 +1974,7 @@
             group.style.display = 'none';
           }
         });
+        autonomousControlGroup.style.display = (mode === 'autonomous') ? '' : 'none';
         setTimeout(() => activeManualControlBox && activeManualControlBox.focus(), 40);
       }
       
@@ -1907,6 +2033,10 @@
       const positionConfidenceDisplay = document.getElementById('position-confidence-display');
       const positionRobotMarker = document.getElementById('position-robot-marker');
       const positionRobotHeading = document.getElementById('position-robot-heading');
+      const camBallAngleEl = document.getElementById('camera-ball-angle');
+      const camBallDistanceEl = document.getElementById('camera-ball-distance');
+      const camBallArrow = document.getElementById('camera-ball-arrow');
+      const camBallBar = document.getElementById('camera-ball-bar');
 
       async function updateSensorData() {
         const response = await fetch('/api/get_sensor_data');
@@ -1930,19 +2060,44 @@
         const ballAngle = data.ir.angle;
         const ballDistance = data.ir.distance;
         const ballDetected = ballAngle !== 999 && ballDistance !== 999;
-        
+        // Camera Ball Detection
+        const camBall = data.camera_ball || {};
+        const camBallAngle = camBall.angle;
+        const camBallDistance = camBall.distance;
+        const camBallDetected = camBall.detected;
+        // Normalized values for display
+        const normIrAngle = (ballAngle === 999) ? null : (ballAngle / 90);
+        const normCamBallAngle = (camBallAngle === 999) ? null : (camBallAngle / 90);
+
         if (ballDetected) {
-          irAngle.textContent = `${Math.round(ballAngle)}°`;
-          irDistance.textContent = `${Math.round(ballDistance)} cm`;
+          irAngle.textContent = `${Math.round(ballAngle)}° (${normIrAngle !== null ? normIrAngle.toFixed(2) : '---'})`;
+          irDistance.textContent = `${Math.round(ballDistance)}`;
           ballArrow.style.transform = `translate(-50%, -100%) rotate(${ballAngle}deg)`;
           ballArrow.style.background = '#4CAF50';
           irBar.style.width = `${Math.min((ballDistance / 200) * 100, 100)}%`;
         } else {
           irAngle.textContent = '---';
-          irDistance.textContent = '--- cm';
+          irDistance.textContent = '---';
           ballArrow.style.background = '#555';
           irBar.style.width = '0%';
         }
+
+        // Camera Ball Sensor Card
+        if (camBallAngleEl && camBallDistanceEl && camBallArrow && camBallBar) {
+          if (camBallDetected) {
+            camBallAngleEl.textContent = `${Math.round(camBallAngle)}° (${normCamBallAngle !== null ? normCamBallAngle.toFixed(2) : '---'})`;
+            camBallDistanceEl.textContent = `${Math.round(camBallDistance)} mm`;
+            camBallArrow.style.transform = `translate(-50%, -100%) rotate(${camBallAngle}deg)`;
+            camBallArrow.style.background = '#4CAF50';
+            camBallBar.style.width = `${Math.min((camBallDistance / 2000) * 100, 100)}%`;
+          } else {
+            camBallAngleEl.textContent = '---';
+            camBallDistanceEl.textContent = '--- mm';
+            camBallArrow.style.background = '#555';
+            camBallBar.style.width = '0%';
+          }
+        }
+
 
         // IR Sensors
         const irMax = 256;
@@ -3013,6 +3168,52 @@
         document.getElementById('blue-v-max').value = '';
       }
 
+
+      // ========== Camera Ball Distance Calibration ==========
+      const calibrateCameraBallDistanceBtn = document.getElementById('calibrate-camera-ball-distance');
+      const cameraBallDistanceCalibrationModal = document.getElementById('camera-ball-distance-calibration-modal');
+      const closeCameraBallDistanceCalibrationModalBtn = document.getElementById('close-camera-ball-distance-calibration-modal');
+      const startCameraBallDistanceCalibrationBtn = document.getElementById('start-camera-ball-distance-calibration');
+      const cameraBallKnownDistanceInput = document.getElementById('camera-ball-known-distance-input');
+      const cameraBallDistanceCalibrationStatus = document.getElementById('camera-ball-distance-calibration-status');
+
+      if (calibrateCameraBallDistanceBtn) {
+        calibrateCameraBallDistanceBtn.addEventListener('click', () => {
+          cameraBallDistanceCalibrationModal.classList.add('active');
+        });
+      }
+      if (closeCameraBallDistanceCalibrationModalBtn) {
+        closeCameraBallDistanceCalibrationModalBtn.addEventListener('click', () => {
+          cameraBallDistanceCalibrationModal.classList.remove('active');
+          cameraBallDistanceCalibrationStatus.style.display = 'none';
+        });
+      }
+      if (startCameraBallDistanceCalibrationBtn) {
+        startCameraBallDistanceCalibrationBtn.addEventListener('click', async () => {
+          const knownDistance = parseFloat(cameraBallKnownDistanceInput.value);
+          if (isNaN(knownDistance) || knownDistance <= 0) {
+            alert('Please enter a valid distance in mm.');
+            return;
+          }
+          try {
+            const resp = await fetch('/api/camera_ball_distance_calibration', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ known_distance_mm: knownDistance })
+            });
+            if (resp.ok) {
+              cameraBallDistanceCalibrationStatus.textContent = 'Calibration successful!';
+              cameraBallDistanceCalibrationStatus.style.display = 'block';
+            } else {
+              cameraBallDistanceCalibrationStatus.textContent = 'Calibration failed.';
+              cameraBallDistanceCalibrationStatus.style.display = 'block';
+            }
+          } catch (e) {
+            cameraBallDistanceCalibrationStatus.textContent = 'Calibration failed.';
+            cameraBallDistanceCalibrationStatus.style.display = 'block';
+          }
+        });
+      }
 
       // ========== Goal Distance Calibration ==========
       const calibrateGoalDistanceBtn = document.getElementById('calibrate-goal-distance-btn');
