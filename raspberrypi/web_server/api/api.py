@@ -2,6 +2,7 @@ import cv2
 import json
 import logging
 import math
+import numpy as np
 import time
 from flask import Flask, Response, request, jsonify
 from werkzeug.serving import make_server
@@ -662,8 +663,6 @@ def compute_hsv_from_regions():
             if region.size == 0:
                 return jsonify({"error": "Empty region"}), 400
             
-            import cv2
-            import numpy as np
             hsv_region = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
             
             h_values = hsv_region[:, :, 0].flatten()

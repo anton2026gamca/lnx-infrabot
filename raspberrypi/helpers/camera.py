@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import List
 from picamera2 import Picamera2 # pyright: ignore[reportMissingImports]
 
-from config import FRAME_WIDTH, FRAME_HEIGHT, CAMERA_BUFFER_COUNT
+from config import CAMERA_MAX_FPS, FRAME_WIDTH, FRAME_HEIGHT, CAMERA_BUFFER_COUNT
 from helpers.detection_visualizer import DetectedObject
 
 
@@ -24,18 +24,6 @@ class GoalColorCalibration:
     blue_lower: np.ndarray = field(default_factory=lambda: np.array([100, 100, 100]))
     blue_upper: np.ndarray = field(default_factory=lambda: np.array([130, 255, 255]))
 
-
-@dataclass
-class BallPossessionArea:
-    """Represents the ball possession detection area and status."""
-    x: int                  # Top-left x coordinate
-    y: int                  # Top-left y coordinate
-    width: int              # Area width in pixels
-    height: int             # Area height in pixels
-    possessed: bool         # Whether ball is possessed (enough orange pixels detected)
-    orange_ratio: float     # Ratio of orange pixels in area (0.0 to 1.0)
-
-
 @dataclass
 class GoalDetectionResult:
     alignment: float            # -1.0 (too far left) to 1.0 (too far right), 0.0 is centered
@@ -44,6 +32,7 @@ class GoalDetectionResult:
     goal_area: float            # Area of detected goal in pixels
     distance_mm: float | None   # Distance to goal in millimeters
     goal_height_pixels: float   # Height of detected goal in pixels
+    _rect: tuple[int, int, int, int] | None = None  # Cached bounding rect (x, y, w, h) for visualization
 
 
 picam = None
@@ -56,29 +45,41 @@ def init_camera():
     global picam
     picam = Picamera2()
     camera_config = picam.create_preview_configuration(
-        main = {"format": "RGB888", "size": (FRAME_WIDTH, FRAME_HEIGHT)},
-        # buffer_count = CAMERA_BUFFER_COUNT,
-        controls={
-            "FrameDurationLimits": (8333, 8333),  # 120 fps
-            "ExposureTime": 8000
-        }
+        main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "YUV420"},
+        lores={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "YUV420"},
+        raw={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "SRGGB10_CSI2P"},
+        controls={"FrameRate": CAMERA_MAX_FPS},
+        buffer_count = CAMERA_BUFFER_COUNT,
+        queue = False,
     )
     picam.configure(camera_config)
     picam.start()
 
+def get_frame() -> FrameData:
+    if picam is None:
+        raise RuntimeError("Camera not initialized. Call init_camera() first.")
+    
+    frame_yuv = picam.capture_array("lores")
+    frame_rgb = yuv420_to_rgb(frame_yuv, FRAME_WIDTH, FRAME_HEIGHT)
+    return FrameData(frame=frame_rgb, timestamp=time.time())
+
+def yuv420_to_rgb(yuv_frame, width, height):
+    yuv = yuv_frame.reshape((height * 3 // 2, width))
+    rgb = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+    return rgb
 
 
-def detect_ball_position(
-    frame: np.ndarray,
+def detect_ball(
+    hsv_frame: np.ndarray,
     ball_lower: np.ndarray,
     ball_upper: np.ndarray,
     min_area: int = 50
 ) -> tuple[List[DetectedObject], bool]:
     """
-    Detect the ball's position and return bounding rectangles.
+    Detect the ball and return bounding rectangles.
     
     Args:
-        frame: RGB image array.
+        hsv_frame: HSV image array.
         ball_lower: HSV lower bound for the ball color.
         ball_upper: HSV upper bound for the ball color.
         min_area: Minimum area to consider as a valid ball detection.
@@ -86,21 +87,19 @@ def detect_ball_position(
     Returns:
         Tuple of (list of DetectedObject instances, confidence_score)
     """
-    if frame is None or frame.size == 0:
+    if hsv_frame is None or hsv_frame.size == 0:
         return [], False
     
-    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
-    mask = cv2.inRange(hsv, ball_lower, ball_upper)
+    mask = cv2.inRange(hsv_frame, ball_lower, ball_upper)
     
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     detections = []
     if contours:
-        # Find the largest contour (most likely to be the ball)
         largest_contour = max(contours, key=cv2.contourArea)
         area = cv2.contourArea(largest_contour)
         
@@ -119,93 +118,22 @@ def detect_ball_position(
     return detections, len(detections) > 0
 
 
-def detect_ball_possession(
-    frame: np.ndarray,
-    ball_lower: np.ndarray,
-    ball_upper: np.ndarray,
-    area_width_percent: float = 40.0,
-    area_height_percent: float = 25.0,
-    min_orange_ratio: float = 0.03
-) -> tuple[bool, 'BallPossessionArea']:
-    """
-    Check if the robot has the ball by looking for ball-colored pixels
-    in the possession area (centered horizontally, bottom of frame).
-
-    Args:
-        frame: RGB image array.
-        ball_lower: HSV lower bound for the ball color.
-        ball_upper: HSV upper bound for the ball color.
-        area_width_percent: Width of possession area as % of frame width (centered).
-        area_height_percent: Height of possession area as % of frame height (from bottom).
-        min_orange_ratio: Minimum fraction of pixels that must match to
-                          consider the ball possessed.
-
-    Returns:
-        Tuple of (ball_possessed: bool, possession_area: BallPossessionArea)
-    """
-    if frame is None or frame.size == 0:
-        return False, BallPossessionArea(x=0, y=0, width=0, height=0, possessed=False, orange_ratio=0.0)
-
-    frame_height, frame_width = frame.shape[:2]
-    
-    # Calculate possession area dimensions
-    area_width = int(frame_width * (area_width_percent / 100.0))
-    area_height = int(frame_height * (area_height_percent / 100.0))
-    
-    # Position: centered horizontally, at bottom of frame
-    area_x = (frame_width - area_width) // 2
-    area_y = frame_height - area_height
-    
-    # Extract possession area
-    possession_region = frame[area_y:frame_height, area_x:area_x + area_width]
-    
-    if possession_region.size == 0:
-        return False, BallPossessionArea(
-            x=area_x, y=area_y, width=area_width, height=area_height,
-            possessed=False, orange_ratio=0.0
-        )
-    
-    # Convert to HSV and find orange pixels
-    hsv_region = cv2.cvtColor(possession_region, cv2.COLOR_RGB2HSV)
-    mask = cv2.inRange(hsv_region, ball_lower, ball_upper)
-    
-    # Calculate ratio of orange pixels
-    orange_ratio = float(np.count_nonzero(mask)) / mask.size
-    possessed = orange_ratio >= min_orange_ratio
-    
-    return possessed, BallPossessionArea(
-        x=area_x, y=area_y, width=area_width, height=area_height,
-        possessed=possessed, orange_ratio=orange_ratio
-    )
-
-
-def get_frame() -> FrameData:
-    if picam is None:
-        raise RuntimeError("Camera not initialized. Call init_camera() first.")
-    return FrameData(frame=picam.capture_array(), timestamp=time.time())
-
-
 def detect_goal_alignment_with_rect(
-    frame: np.ndarray,
+    hsv_frame: np.ndarray,
     goal_color: str = "yellow",
     calibration: GoalColorCalibration | None = None,
     min_area: int = 500,
     focal_length_pixels: float | None = None,
     real_goal_height_mm: float = 100.0
 ) -> tuple[GoalDetectionResult, List[DetectedObject]]:
-    """
-    Detect goal alignment and return both the result and detection rectangles.
-
-    Returns:
-        Tuple of (GoalDetectionResult, List[DetectedObject])
-    """
+    """Detect goal alignment and return both the result and detection rectangles."""
     result = _detect_goal_alignment_internal(
-        frame, goal_color, calibration, min_area, focal_length_pixels, real_goal_height_mm
+        hsv_frame, goal_color, calibration, min_area, focal_length_pixels, real_goal_height_mm
     )
     
     detections = []
     if result.goal_detected and result.goal_center_x is not None:
-        x, y, w, h = _get_goal_bounding_rect(frame, goal_color, calibration, min_area)
+        x, y, w, h = result._rect if result._rect is not None else _get_goal_bounding_rect(hsv_frame, goal_color, calibration, min_area)
         if w > 0 and h > 0:
             object_type = f"goal_{goal_color.lower()}"
             detections.append(DetectedObject(
@@ -221,7 +149,7 @@ def detect_goal_alignment_with_rect(
 
 
 def _detect_goal_alignment_internal(
-    frame: np.ndarray,
+    hsv_frame: np.ndarray,
     goal_color: str = "yellow",
     calibration: GoalColorCalibration | None = None,
     min_area: int = 500,
@@ -230,27 +158,15 @@ def _detect_goal_alignment_internal(
 ) -> GoalDetectionResult:
     if calibration is None:
         calibration = GoalColorCalibration()
-    
-    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
-    
-    if goal_color.lower() == "yellow":
-        lower = calibration.yellow_lower
-        upper = calibration.yellow_upper
-    elif goal_color.lower() == "blue":
-        lower = calibration.blue_lower
-        upper = calibration.blue_upper
-    else:
-        raise ValueError(f"Invalid goal_color: {goal_color}. Must be 'yellow' or 'blue'")
-    
-    mask = cv2.inRange(hsv, lower, upper)
-    
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if not contours:
+
+    x, y, w, h = _get_goal_bounding_rect(
+        hsv_frame=hsv_frame,
+        goal_color=goal_color,
+        calibration=calibration,
+        min_area=min_area
+    )
+
+    if (x, y, w, h) == (0, 0, 0, 0):
         return GoalDetectionResult(
             alignment=0.0,
             goal_detected=False,
@@ -259,46 +175,23 @@ def _detect_goal_alignment_internal(
             distance_mm=None,
             goal_height_pixels=0.0
         )
-    
-    largest_contour = max(contours, key=cv2.contourArea)
-    goal_area = cv2.contourArea(largest_contour)
-    
-    if goal_area < min_area:
-        return GoalDetectionResult(
-            alignment=0.0,
-            goal_detected=False,
-            goal_center_x=None,
-            goal_area=goal_area,
-            distance_mm=None,
-            goal_height_pixels=0.0
-        )
-    
-    M = cv2.moments(largest_contour)
-    if M["m00"] == 0:
-        return GoalDetectionResult(
-            alignment=0.0,
-            goal_detected=False,
-            goal_center_x=None,
-            goal_area=goal_area,
-            distance_mm=None,
-            goal_height_pixels=0.0
-        )
-    
-    goal_center_x = int(M["m10"] / M["m00"])
-    
-    _, _, _, goal_height_pixels = cv2.boundingRect(largest_contour)
-    
+
+    goal_area = w * h
+
+    goal_center_x = x + w // 2
+    goal_height_pixels = h
+
     distance_mm = None
     if focal_length_pixels is not None and goal_height_pixels > 0:
         distance_mm = (real_goal_height_mm * focal_length_pixels) / goal_height_pixels
-    
-    frame_center_x = frame.shape[1] // 2
-    max_offset = frame.shape[1] // 2
+
+    frame_center_x = hsv_frame.shape[1] // 2
+    max_offset = hsv_frame.shape[1] // 2
     alignment = (goal_center_x - frame_center_x) / max_offset
-    
+
     alignment = max(-1.0, min(1.0, alignment))
-    
-    return GoalDetectionResult(
+
+    result = GoalDetectionResult(
         alignment=alignment,
         goal_detected=True,
         goal_center_x=goal_center_x,
@@ -306,24 +199,26 @@ def _detect_goal_alignment_internal(
         distance_mm=distance_mm,
         goal_height_pixels=float(goal_height_pixels)
     )
+    result._rect = (x, y, w, h)
+    return result
 
 
 def _get_goal_bounding_rect(
-    frame: np.ndarray,
+    hsv_frame: np.ndarray,
     goal_color: str = "yellow",
     calibration: GoalColorCalibration | None = None,
     min_area: int = 500
 ) -> tuple[int, int, int, int]:
     """
     Get the bounding rectangle for a detected goal.
+    NOTE: This function is typically called from detect_goal_alignment_with_rect
+    which caches the result. Use the cached value from GoalDetectionResult._rect when available.
 
     Returns:
         Tuple of (x, y, width, height) or (0, 0, 0, 0) if not detected
     """
     if calibration is None:
         calibration = GoalColorCalibration()
-    
-    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
     
     if goal_color.lower() == "yellow":
         lower = calibration.yellow_lower
@@ -334,10 +229,10 @@ def _get_goal_bounding_rect(
     else:
         return 0, 0, 0, 0
     
-    mask = cv2.inRange(hsv, lower, upper)
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask = cv2.inRange(hsv_frame, lower, upper)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
     
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
@@ -363,4 +258,5 @@ def detect_goal_alignment(
     real_goal_height_mm: float = 100.0
 ) -> GoalDetectionResult:
     """Legacy function - use detect_goal_alignment_with_rect for visualizations."""
-    return _detect_goal_alignment_internal(frame, goal_color, calibration, min_area, focal_length_pixels, real_goal_height_mm)
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+    return _detect_goal_alignment_internal(hsv_frame, goal_color, calibration, min_area, focal_length_pixels, real_goal_height_mm)

@@ -6,12 +6,12 @@ CAMERA_FOV_DEG = 120
 
 # Camera performance
 CAMERA_BUFFER_COUNT = 2
-CAMERA_MAX_FPS = 120
+CAMERA_MAX_FPS = 60
 CAMERA_MIN_FRAME_INTERVAL = 1.0 / CAMERA_MAX_FPS
 
 # Frame size calculations
-FRAME_HEIGHT = CAMERA_SENSOR_HEIGHT // 3
-FRAME_WIDTH  = CAMERA_SENSOR_WIDTH // 3
+FRAME_WIDTH  = 1536
+FRAME_HEIGHT = 864
 FRAME_SIZE_B = FRAME_HEIGHT * FRAME_WIDTH * 3  # RGB888
 
 # ==================== SERIAL COMMUNICATION ====================
@@ -33,7 +33,7 @@ IDLE_SLEEP_DURATION = 0.1
 
 # ==================== API SERVER SETTINGS ====================
 # Video streaming
-API_VIDEO_JPEG_QUALITY = 60  # 0-100
+API_VIDEO_JPEG_QUALITY = 70  # 0-100
 API_VIDEO_TARGET_FPS = 30
 
 # Server settings
@@ -56,7 +56,7 @@ MOTOR_SPEED_MIN = -9999
 MOTOR_SPEED_MAX = 9999
 
 # Motor acceleration (logic loops required to go from 0 to max speed)
-MOTOR_ACCELERATION_LOGIC_LOOPS = 8
+MOTOR_ACCELERATION_LOGIC_LOOPS = 2
 
 # ==================== LINE SENSOR SETTINGS ====================
 LINE_SENSOR_COUNT = 12
@@ -67,6 +67,13 @@ DEFAULT_LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT # Array of 
 
 # ==================== CALIBRATION STORAGE ====================
 CALIBRATION_FILE_PATH = "calibration_data.json"
+
+# ==================== OBJECT DETECTION SETTINGS ====================
+# Scale factor for processing frames (0.5 means half resolution)
+DETECTION_FRAME_SIZE_SCALE = 0.5
+DETECTION_FRAME_WIDTH = int(FRAME_WIDTH * DETECTION_FRAME_SIZE_SCALE)
+DETECTION_FRAME_HEIGHT = int(FRAME_HEIGHT * DETECTION_FRAME_SIZE_SCALE)
+
 
 # ==================== GOAL DETECTION SETTINGS ====================
 # Real-world goal height in millimeters
@@ -88,8 +95,17 @@ IR_BALL_ANGLE_OFFSET_DEG = -10.0
 # --- Approach ---
 # Forward speed component while approaching the ball
 AUTO_APPROACH_SPEED = 0.7
-# The ratio between the ball angle and the angle that the robot should move in while approaching the ball.
-AUTO_BALL_TO_ROBOT_ANGLE_TIMES_DISTANCE_RATIO = 2.5 / 2500.0
+# The ratio between the ball angle & distance and the angle that the robot should move in
+# while approaching the ball. This value is multiplied with the IR ball angle and distance to
+# calculate the movement angle for approaching. A higher value means the robot will move
+# more sideways to approach the ball from the front.
+# NOTE: The ir ball distance is reverted: 3000 means the ball is the closest, <3000 means
+#       it's farther. This means that the robot will approach the ball more from behind
+#       when it's closer.
+AUTO_IR_BALL_APPROACH_ANGLE_RATIO = 0.001
+# Similar ratio for camera-based ball tracking, using the camera ball angle instead of IR.
+# The distance is ignored in this ratio
+AUTO_CAM_BALL_APPROACH_ANGLE_RATIO = 1.3
 # The threshold distance to consider the ball "close enough" to initiate pushing (3000 being the nearest, 0 the farthest)
 AUTO_BALL_CLOSE_THRESHOLD = 2500
 # Angular window around 0° where ball is considered "in front" of the robot
@@ -98,8 +114,10 @@ AUTO_BALL_FRONT_THRESHOLD_DEG = 15.0
 # --- Pushing ---
 # Speed when pushing the ball toward the goal
 AUTO_PUSH_SPEED = 1.0
+# Maximum angle to apply for steering while pushing (degrees, when the ball is right at the edge of the possession area).
+AUTO_PUSH_STEERING_MAX_ANGLE_DEG = 45.0
 # Distance at which we consider the goal "scored" (stop pushing)
-AUTO_GOAL_SCORED_DISTANCE_MM = 1000.0
+AUTO_GOAL_SCORED_DISTANCE_MM = 600.0
 
 # --- Position-based speed scaling ---
 # When enabled, the robot uses goal distance to slow down near the enemy line
@@ -117,9 +135,10 @@ AUTO_POSITION_SLOW_END_DISTANCE_MM = 200.0
 # --- Ball possession camera check ---
 # Ball possession area as percentage of frame dimensions
 # % of frame width (centered horizontally)
-AUTO_BALL_POSSESSION_AREA_WIDTH_PERCENT = 20.0
+AUTO_BALL_POSSESSION_AREA_WIDTH_PERCENT = 30.0
+AUTO_BALL_POSSESSION_AREA_WIDTH_DEG = CAMERA_FOV_DEG * AUTO_BALL_POSSESSION_AREA_WIDTH_PERCENT / 100.0
 # % of frame height (from bottom)
-AUTO_BALL_POSSESSION_AREA_HEIGHT_PERCENT = 30.0
+AUTO_BALL_POSSESSION_AREA_HEIGHT_PERCENT = 40.0
 # Minimum fraction of orange pixels in possession area to consider the ball possessed
 AUTO_BALL_POSSESSION_MIN_RATIO = 0.02
 # Default HSV calibration for the ball (orange)
@@ -133,7 +152,7 @@ AUTO_CAMERA_BALL_TRACKING_ENABLED = True
 # Use camera detection as primary up to this distance (mm), then fall back to IR
 AUTO_CAMERA_BALL_TRACKING_MAX_DISTANCE_MM = 1000.0
 # Max allowed angle difference between camera and IR ball angles to use camera tracking
-AUTO_CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG = 30.0
+AUTO_CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG = 45.0
 
 # --- Goal-tracking rotation ---
 # Gain applied to goal alignment error to produce rotation command while approaching/pushing

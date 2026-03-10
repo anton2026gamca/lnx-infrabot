@@ -815,9 +815,11 @@
             <button class="toggle-btn fps-btn selected" data-fps="5">5</button>
             <button class="toggle-btn fps-btn" data-fps="15">15</button>
             <button class="toggle-btn fps-btn" data-fps="30">30</button>
+            <button class="toggle-btn fps-btn" data-fps="60">60</button>
+            <button class="toggle-btn fps-btn" data-fps="120">120</button>
           </div>
           <div class="img-container">
-            <img id="camera" src="/api/video_feed?fps=5" alt="Camera Feed">
+            <img id="camera" class="video_feed" src="/api/video_feed?fps=5" alt="Camera Feed">
           </div>
         </div>
 
@@ -1303,7 +1305,7 @@
               </div>
               
               <div style="position: relative; width: 100%; background: black; border-radius: 5px; overflow: hidden; display: none;" id="goal-calibration-canvas-container">
-                <img id="goal-calibration-image" src="/api/video_feed" style="width: 100%; height: auto; display: block;">
+                <img id="goal-calibration-image" class="video_feed" src="/api/video_feed" style="width: 100%; height: auto; display: block;">
                 <canvas id="goal-calibration-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair;"></canvas>
                 <div style="position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 3px 6px; border-radius: 5px; font-size: 0.85em; color: white;">
                   Click and drag to select the goal area
@@ -1327,7 +1329,7 @@
             <div style="background: #0a0a0a; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
               <div style="font-weight: bold; margin-bottom: 10px; color: #ffd700;">Yellow Goal</div>
               <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: center;">
-                <span style="font-size: 0.85em; color: #888;">Hue (0-360):</span>
+                <span style="font-size: 0.85em; color: #888;">Hue (0-179):</span>
                 <input type="number" id="yellow-h-min" class="threshold-input" min="0" max="360" placeholder="Lower">
                 <input type="number" id="yellow-h-max" class="threshold-input" min="0" max="360" placeholder="Upper">
                 
@@ -1345,7 +1347,7 @@
             <div style="background: #0a0a0a; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
               <div style="font-weight: bold; margin-bottom: 10px; color: #2196F3;">Blue Goal</div>
               <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: center;">
-                <span style="font-size: 0.85em; color: #888;">Hue (0-360):</span>
+                <span style="font-size: 0.85em; color: #888;">Hue (0-179):</span>
                 <input type="number" id="blue-h-min" class="threshold-input" min="0" max="360" placeholder="Lower">
                 <input type="number" id="blue-h-max" class="threshold-input" min="0" max="360" placeholder="Upper">
                 
@@ -1488,7 +1490,7 @@
                 <span id="ball-calibration-instructions" style="font-size: 0.85em; color: #aaa; flex: 1;"></span>
               </div>
               <div style="position: relative; width: 100%; background: black; border-radius: 5px; overflow: hidden; display: none;" id="ball-calibration-canvas-container">
-                <img id="ball-calibration-image" src="/api/video_feed" style="width: 100%; height: auto; display: block;">
+                <img id="ball-calibration-image" class="video_feed" src="/api/video_feed" style="width: 100%; height: auto; display: block;">
                 <canvas id="ball-calibration-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair;"></canvas>
                 <div style="position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 3px 6px; border-radius: 5px; font-size: 0.85em; color: white;">
                   Click and drag to select the ball
@@ -1533,19 +1535,22 @@
 
     <script>
       // ========== Video Feed Controls ==========
-      const cameraImg = document.getElementById('camera');
+      const cameraImgs = document.querySelectorAll('.video_feed');
       const videoToggleBtn = document.getElementById('video-toggle-btn');
       const fpsBtns = document.querySelectorAll('.fps-btn');
       let videoOn = true;
       let currentFps = 5;
 
       function updateCameraSrc() {
-        if (videoOn) {
-          cameraImg.src = `/api/video_feed?fps=${currentFps}`;
-        } else {
-          cameraImg.src = '';
-        }
+        cameraImgs.forEach(img => {
+          if (videoOn) {
+            img.src = `/api/video_feed?fps=${currentFps}`;
+          } else {
+            img.src = '';
+          }
+        });
       }
+      updateCameraSrc();
 
       if (videoToggleBtn) {
         videoToggleBtn.addEventListener('click', () => {

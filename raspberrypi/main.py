@@ -1,3 +1,4 @@
+import cv2
 import json
 import logging
 import math
@@ -6,6 +7,7 @@ import multiprocessing.shared_memory
 import numpy as np
 import os
 import time
+from dataclasses import dataclass
 
 import helpers.camera as camera
 import helpers.teensy_communication as teensy_communication
@@ -104,128 +106,46 @@ logger = setup_logger(
 )
 
 
-#region Camera
+#region Camera Capture
 
-camera_logger = setup_logger(
-    "Camera Process", level=LOGGING_LEVEL, 
+camera_capture_logger = setup_logger(
+    "Camera Capture Process", level=LOGGING_LEVEL, 
     logs_dict=shared_data['logs_buffer'], 
     logs_lock=shared_data['locks']['logs_buffer'], 
     next_log_id=shared_data['next_log_id']
 )
 
-def camera_process(stop_event):
+def camera_capture_process(stop_event):
     try:
         if LOGGING_LEVEL == logging.DEBUG:
             logging.getLogger("picamera2.picamera2").setLevel(logging.INFO)
 
-        frames = 0
-        frames_processed = 0
+        captured_frames = 0
         last_debug_msg_time = time.time()
+        last_capture_time = time.time()
 
-        camera_logger.info("Initializing camera...")
+        camera_capture_logger.info("Initializing camera...")
         camera.init_camera()
-        camera_logger.info("Camera initialized successfully")
+        camera_capture_logger.info("Camera initialized successfully")
         
         while not stop_event.is_set():
-            camera_logger.debug(f"1: {frames} - {time.time()}")
-            frame = camera.get_frame()
-            camera_logger.debug(f"2: {frames} - {time.time()}")
-            frames += 1
-            set_camera_frame(frame)
-
-            goal_color = get_goal_color()
-            lower, upper = get_goal_calibration(goal_color)
-            calibration = camera.GoalColorCalibration(
-                yellow_lower=np.array(lower) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_lower,
-                yellow_upper=np.array(upper) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_upper,
-                blue_lower=np.array(lower) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_lower,
-                blue_upper=np.array(upper) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_upper
-            )
-            focal_length = get_goal_focal_length()
-            [result, detections] = camera.detect_goal_alignment_with_rect(
-                frame.frame,
-                goal_color,
-                calibration,
-                focal_length_pixels=focal_length,
-                real_goal_height_mm=GOAL_HEIGHT_MM
-            )
-            set_goal_detection_result(result)
-            update_goal_distance_calibration(result)
-            
-            ball_lower, ball_upper = get_ball_calibration()
-            ball_detections, ball_visible = camera.detect_ball_position(
-                frame.frame,
-                np.array(ball_lower),
-                np.array(ball_upper)
-            )
-
-            camera_ball_angle = 999.0
-            camera_ball_distance = 999.0
-            camera_ball_detected = False
-            camera_ball_area = 0.0
-            if ball_detections:
-                det = ball_detections[0]
-                ball_center_x = det.x + det.width / 2.0
-                frame_center_x = FRAME_WIDTH / 2.0
-                pixel_offset = ball_center_x - frame_center_x
-                angle_fraction = pixel_offset / frame_center_x  # -1.0 to 1.0
-                camera_ball_angle = angle_fraction * (CAMERA_FOV_DEG / 2.0)
-                ball_area_pixels = det.width * det.height
-                camera_ball_area = ball_area_pixels
-                calibration_constant = shared_data.get('camera_ball_distance_calibration_constant', None)
-                if calibration_constant is not None:
-                    calibration_constant = calibration_constant.value if hasattr(calibration_constant, 'value') else calibration_constant
-                else:
-                    calibration_constant = 10000.0
-                camera_ball_distance = calibration_constant / math.sqrt(max(ball_area_pixels, 1.0))
-                camera_ball_detected = True
-            shared_data['camera_ball_angle'].value = camera_ball_angle
-            shared_data['camera_ball_distance'].value = camera_ball_distance
-            shared_data['camera_ball_detected'].value = camera_ball_detected
-            shared_data['camera_ball_area_pixels'].value = camera_ball_area
-
-
-            ball_possessed, possession_area = camera.detect_ball_possession(
-                frame.frame,
-                np.array(ball_lower),
-                np.array(ball_upper),
-                area_width_percent=AUTO_BALL_POSSESSION_AREA_WIDTH_PERCENT,
-                area_height_percent=AUTO_BALL_POSSESSION_AREA_HEIGHT_PERCENT,
-                min_orange_ratio=AUTO_BALL_POSSESSION_MIN_RATIO
-            )
-            shared_data['ball_possession'].value = ball_possessed
-            
-            all_detections = detections + ball_detections
-            
-            possession_area_color = (0, 255, 0) if ball_possessed else (0, 0, 255)
-            possession_detection = detection_visualizer.DetectedObject(
-                object_type="ball_possession_area",
-                x=possession_area.x,
-                y=possession_area.y,
-                width=possession_area.width,
-                height=possession_area.height,
-                confidence=possession_area.orange_ratio,
-                color=possession_area_color
-            )
-            all_detections.append(possession_detection)
-            
-            if ball_possessed and ball_detections:
-                for ball_det in ball_detections:
-                    ball_det.color = (0, 255, 0)
-            
-            set_detections(all_detections)
-
-            frames_processed += 1
+            try:
+                frame = camera.get_frame()
+                set_camera_frame(frame)
+                captured_frames += 1
+            except Exception as e:
+                camera_capture_logger.error(f"Error capturing frame: {e}", exc_info=True)
+                time.sleep(0.001)
+                continue
             
             if time.time() > last_debug_msg_time + 1:
-                camera_logger.debug(f"Camera FPS: {frames} (processed: {frames_processed})")
-                frames = 0
-                frames_processed = 0
+                camera_capture_logger.debug(f"Camera Capture FPS: {captured_frames}")
+                captured_frames = 0
                 last_debug_msg_time += 1
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        camera_logger.error(f"{e}", exc_info=True)
+        camera_capture_logger.error(f"{e}", exc_info=True)
         try:
             black_frame = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
             set_camera_frame(camera.FrameData(frame=black_frame, timestamp=time.time()))
@@ -257,6 +177,223 @@ def get_camera_frame() -> camera.FrameData | None:
         )
     except Exception:
         return None
+
+#endregion
+#region Camera Processing
+
+camera_processing_logger = setup_logger(
+    "Camera Processing Process", level=LOGGING_LEVEL, 
+    logs_dict=shared_data['logs_buffer'], 
+    logs_lock=shared_data['locks']['logs_buffer'], 
+    next_log_id=shared_data['next_log_id']
+)
+
+def camera_processing_process(stop_event):
+    try:
+        frames_processed = 0
+        last_debug_msg_time = time.time()
+        last_frame_timestamp = None
+        frame_skip_count = 0
+        
+        target_period = 1.0 / CAMERA_MAX_FPS
+        last_process_time = time.time()
+
+        while not stop_event.is_set():
+            elapsed = time.time() - last_process_time
+            if elapsed < target_period * 0.95:
+                time.sleep(max(0.0, target_period - elapsed - 0.0005))
+                continue
+            
+            last_process_time = time.time()
+
+            frame = get_camera_frame()
+            if frame is None:
+                time.sleep(0.001)
+                continue
+            
+            if last_frame_timestamp is not None and frame.timestamp == last_frame_timestamp:
+                frame_skip_count += 1
+                if frame_skip_count > 2:
+                    time.sleep(0.001)
+                    continue
+            else:
+                frame_skip_count = 0
+            
+            last_frame_timestamp = frame.timestamp
+            
+            hsv_frame = cv2.resize(frame.frame, (DETECTION_FRAME_WIDTH, DETECTION_FRAME_HEIGHT))
+            hsv_frame = cv2.cvtColor(hsv_frame, cv2.COLOR_RGB2HSV)
+
+            goal_color = get_goal_color()
+            lower, upper = get_goal_calibration(goal_color)
+            calibration = camera.GoalColorCalibration(
+                yellow_lower=np.array(lower) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_lower,
+                yellow_upper=np.array(upper) if goal_color.lower() == 'yellow' else camera.GoalColorCalibration().yellow_upper,
+                blue_lower=np.array(lower) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_lower,
+                blue_upper=np.array(upper) if goal_color.lower() == 'blue' else camera.GoalColorCalibration().blue_upper
+            )
+            focal_length = get_goal_focal_length()
+            [result, goal_detections] = camera.detect_goal_alignment_with_rect(
+                hsv_frame,
+                goal_color,
+                calibration,
+                focal_length_pixels=focal_length,
+                real_goal_height_mm=GOAL_HEIGHT_MM
+            )
+            set_goal_detection_result(result)
+            update_goal_distance_calibration(result)
+
+            ball_lower, ball_upper = get_ball_calibration()
+            ball_detections, _ = camera.detect_ball(hsv_frame, np.array(ball_lower), np.array(ball_upper))
+
+            ball_data = calculate_ball_position(ball_detections, DETECTION_FRAME_WIDTH, CAMERA_FOV_DEG, get_camera_ball_calibration_constant())
+            shared_data['camera_ball_angle'].value = ball_data.angle
+            shared_data['camera_ball_distance'].value = ball_data.distance
+            shared_data['camera_ball_detected'].value = ball_data.detected
+            shared_data['camera_ball_area_pixels'].value = ball_data.area_pixels
+
+            ball_center_x = ball_detections[0].x + ball_detections[0].width / 2 if ball_detections else None
+            ball_center_y = ball_detections[0].y + ball_detections[0].height / 2 if ball_detections else None
+
+            ball_possessed, possession_area = detect_ball_possession(
+                ball_center_x, ball_center_y,
+                DETECTION_FRAME_WIDTH, DETECTION_FRAME_HEIGHT,
+                AUTO_BALL_POSSESSION_AREA_WIDTH_PERCENT,
+                AUTO_BALL_POSSESSION_AREA_HEIGHT_PERCENT,
+            )
+            shared_data['ball_possession'].value = ball_possessed
+
+            all_detections = goal_detections + ball_detections
+            possession_area_color = (0, 255, 0) if ball_possessed else (0, 0, 255)
+            possession_detection = detection_visualizer.DetectedObject(
+                object_type="ball_possession_area",
+                x=possession_area.x,
+                y=possession_area.y,
+                width=possession_area.width,
+                height=possession_area.height,
+                color=possession_area_color
+            )
+            all_detections.append(possession_detection)
+
+            for det in all_detections:
+                det.x = int(det.x / DETECTION_FRAME_SIZE_SCALE)
+                det.y = int(det.y / DETECTION_FRAME_SIZE_SCALE)
+                det.width = int(det.width / DETECTION_FRAME_SIZE_SCALE)
+                det.height = int(det.height / DETECTION_FRAME_SIZE_SCALE)
+
+            if ball_possessed and ball_detections:
+                for ball_det in ball_detections:
+                    ball_det.color = (0, 255, 0)
+
+            set_detections(all_detections)
+
+            frames_processed += 1
+            
+            if time.time() > last_debug_msg_time + 1:
+                camera_capture_logger.debug(f"Camera Processing FPS: {frames_processed}")
+                frames_processed = 0
+                last_debug_msg_time += 1
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        camera_capture_logger.error(f"{e}", exc_info=True)
+        try:
+            black_frame = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
+            set_camera_frame(camera.FrameData(frame=black_frame, timestamp=time.time()))
+        except Exception | KeyboardInterrupt:
+            pass
+
+
+@dataclass
+class CameraBallPosition:
+    angle: float
+    distance: float
+    detected: bool
+    area_pixels: float
+
+def calculate_ball_position(ball_detections, frame_width: float, camera_fov: float, calibration_constant: float) -> CameraBallPosition:
+    camera_ball_angle = 999.0
+    camera_ball_distance = 0.0
+    camera_ball_detected = False
+    camera_ball_area = 0.0
+
+    if ball_detections:
+        det = ball_detections[0]
+        det_center_x = det.x + det.width / 2.0
+        frame_center_x = frame_width / 2.0
+        pixel_offset = det_center_x - frame_center_x
+        angle_fraction = pixel_offset / frame_center_x  # -1.0 to 1.0
+        camera_ball_angle = angle_fraction * (camera_fov / 2.0)
+        ball_area_pixels = det.width * det.height
+        camera_ball_area = ball_area_pixels
+
+        camera_ball_distance = (calibration_constant if calibration_constant is not None else 10000.0) / math.sqrt(max(ball_area_pixels, 1.0))
+        camera_ball_detected = True
+
+    return CameraBallPosition(
+        camera_ball_angle,
+        camera_ball_distance,
+        camera_ball_detected,
+        camera_ball_area,
+    )
+
+
+@dataclass
+class BallPossessionArea:
+    """Represents the ball possession detection area and status."""
+    x: int                  # Top-left x coordinate
+    y: int                  # Top-left y coordinate
+    width: int              # Area width in pixels
+    height: int             # Area height in pixels
+    possessed: bool         # Whether ball is possessed (enough orange pixels detected)
+
+def detect_ball_possession(
+    ball_center_x: float | None,
+    ball_center_y: float | None,
+    frame_width: int,
+    frame_height: int,
+    area_width_percent: float = 40.0,
+    area_height_percent: float = 25.0,
+) -> tuple[bool, BallPossessionArea]:
+    """
+    Detect if the ball is possessed based on its position in the frame.
+
+    Args:
+        ball_center_x: X coordinate of the ball center in the frame (or None if not detected)
+        ball_center_y: Y coordinate of the ball center in the frame (or None if not detected)
+        frame_width: Width of the camera frame
+        frame_height: Height of the camera frame
+        area_width_percent: Width of the possession area as a percentage of frame width
+        area_height_percent: Height of the possession area as a percentage of frame height
+
+    Returns:
+        Tuple of (possessed: bool, BallPossessionArea)
+    """
+    if frame_width <= 0 or frame_height <= 0:
+        return False, BallPossessionArea(x=0, y=0, width=0, height=0, possessed=False)
+
+    area_width = int(frame_width * (area_width_percent / 100.0))
+    area_height = int(frame_height * (area_height_percent / 100.0))
+
+    area_x = (frame_width - area_width) // 2
+    area_y = frame_height - area_height
+
+    if ball_center_x is None or ball_center_y is None:
+        return False, BallPossessionArea(
+            x=area_x, y=area_y, width=area_width, height=area_height,
+            possessed=False
+        )
+
+    possessed = (
+        area_x <= ball_center_x <= area_x + area_width and
+        area_y <= ball_center_y <= area_y + area_height
+    )
+
+    return possessed, BallPossessionArea(
+        x=area_x, y=area_y, width=area_width, height=area_height,
+        possessed=possessed
+    )
+
 
 #endregion
 #region Logic
@@ -460,6 +597,7 @@ class AutoState:
     IDLE          = "idle"          # no ball visible - hold position
     APPROACH      = "approach"      # drive toward ball, rotate to keep goal centred
     PUSH          = "push"          # ball possessed - drive forward, keep goal centred
+    GOAL_SCORED   = "goal_scored"   # goal scored - wait until the ball isn't in the goal anymore
     LINE_REVERSE  = "line_reverse"  # emergency back-off from line
 
 
@@ -515,8 +653,11 @@ class AutonomousController:
         cam_ball_detected = get_camera_ball_detected()
         cam_possession    = get_ball_camera_possession()
 
-        cam_data_valid    = cam_ball_distance <= AUTO_CAMERA_BALL_TRACKING_MAX_DISTANCE_MM and abs(ir_ball_angle - cam_ball_angle) < AUTO_CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG
-        use_cam_data      = get_camera_ball_usage_enabled() and cam_ball_detected and cam_data_valid
+        cam_data_valid    = (
+            cam_ball_detected and cam_ball_distance <= AUTO_CAMERA_BALL_TRACKING_MAX_DISTANCE_MM and
+            (abs(ir_ball_angle - cam_ball_angle) < AUTO_CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG or not ir_ball_detected)
+        )
+        use_cam_data      = get_camera_ball_usage_enabled() and cam_data_valid
 
         if cam_possession: self._cam_possession_elapsed_ticks = 0
         else:              self._cam_possession_elapsed_ticks += 1
@@ -540,23 +681,20 @@ class AutonomousController:
         if not ir_ball_detected or abs(ir_ball_angle) >= AUTO_BALL_INSIDE_ROBOT_IR_ANGLE_RANGE_DEG:
             self._ball_likely_inside_robot = False
 
-        if not ir_ball_detected and not cam_ball_detected:
-            self._ball_lost_ticks = min(self._ball_lost_ticks + 1, self._BALL_LOST_CONFIRM_TICKS)
-        else:
-            self._ball_lost_ticks = 0
-        ball_truly_lost = (self._ball_lost_ticks >= self._BALL_LOST_CONFIRM_TICKS)
-
         # ---- State machine --------------------------------------------
         if self.state == AutoState.IDLE:
-            self._tick_idle(motors, ir_ball_detected, cam_ball_detected)
+            self._tick_idle(motors, ir_ball_detected, use_cam_data, self._ball_likely_inside_robot)
 
         elif self.state == AutoState.APPROACH:
-            self._tick_approach(motors, heading, ball_truly_lost, ir_ball_angle, ir_ball_distance,
+            self._tick_approach(motors, heading, ir_ball_detected, ir_ball_angle, ir_ball_distance,
                                 use_cam_data, cam_ball_angle, cam_ball_distance,
                                 goal, goal_visible, have_ball, self._ball_likely_inside_robot)
 
         elif self.state == AutoState.PUSH:
-            self._tick_push(motors, ball_truly_lost, have_ball, self._ball_likely_inside_robot, goal, goal_visible)
+            self._tick_push(motors, have_ball, self._ball_likely_inside_robot, goal, goal_visible, cam_data_valid, cam_possession, cam_ball_angle)
+
+        elif self.state == AutoState.GOAL_SCORED:
+            self._tick_goal_scored(motors, goal, goal_visible, ir_ball_detected, ir_ball_angle, cam_ball_detected, cam_ball_angle, cam_data_valid)
 
         self._publish_state(ir_ball_angle, ir_ball_distance, goal, have_ball)
 
@@ -564,9 +702,13 @@ class AutonomousController:
     # State: IDLE
     # No ball visible - hold still.
     # ------------------------------------------------------------------
-    def _tick_idle(self, motors, ir_ball_visible, cam_ball_detected):
-        if ir_ball_visible or cam_ball_detected:
-            self._transition(AutoState.APPROACH)
+    def _tick_idle(self, motors, ir_ball_detected, use_cam_data, ball_likely_inside_robot):
+        if ir_ball_detected or use_cam_data or ball_likely_inside_robot:
+            self._transition(AutoState.APPROACH,
+                f"  - ir_ball_detected: {ir_ball_detected}",
+                f"  - use_cam_data: {use_cam_data}",
+                f"  - ball_likely_inside_robot: {ball_likely_inside_robot}",
+            )
             return
         motors.set_motors(angle=0, speed=0, rotate=0)
 
@@ -583,34 +725,61 @@ class AutonomousController:
     #           the goal stays centred.
     # ------------------------------------------------------------------
     def _tick_approach(self,
-        motors, heading, ball_truly_lost, ir_ball_angle, ir_ball_distance,
+        motors, heading, ir_ball_detected, ir_ball_angle, ir_ball_distance,
         use_cam_data, cam_ball_angle, cam_ball_distance,
         goal, goal_visible, have_ball, ball_likely_inside_robot
     ):
-        if ball_truly_lost and not ball_likely_inside_robot:
-            self._transition(AutoState.IDLE)
+        if not ir_ball_detected and not use_cam_data and not ball_likely_inside_robot:
+            self._transition(AutoState.IDLE,
+                f"  - ir_ball_detected: {ir_ball_detected}",
+                f"  - use_cam_data: {use_cam_data}",
+                f"  - ball_likely_inside_robot: {ball_likely_inside_robot}",
+            )
             return
 
         if have_ball or ball_likely_inside_robot:
-            print(have_ball, ball_likely_inside_robot, self._possession_ticks, self._cam_possession_elapsed_ticks)
-            self._transition(AutoState.PUSH)
+            self._transition(AutoState.PUSH,
+                f"  - have_ball: {have_ball}",
+                f"  - use_cam_data: {use_cam_data}",
+                f"  - ball_likely_inside_robot: {ball_likely_inside_robot}",
+            )
             return
 
-        selected_ball_angle = ir_ball_angle
-        selected_ball_distance = ir_ball_distance
+        fwd  = 0.0
+        side = 0.0
+
         if use_cam_data:
-            selected_ball_angle = cam_ball_angle
-
-        if selected_ball_distance is None or selected_ball_distance == 0 or selected_ball_angle is None or selected_ball_angle == 999:
-            self._transition(AutoState.IDLE)
-            return
-        else:
-            approach_speed = AUTO_APPROACH_SPEED
-            angle_rad = math.radians(normalize_angle(selected_ball_angle + heading) * AUTO_BALL_TO_ROBOT_ANGLE_TIMES_DISTANCE_RATIO * selected_ball_distance)
+            if cam_ball_distance is None or cam_ball_distance == 0 or cam_ball_angle is None or cam_ball_angle == 999:
+                self._transition(AutoState.IDLE,
+                    f"Invalid camera data:",
+                    f"  - cam_ball_distance: {cam_ball_distance}",
+                    f"  - cam_ball_angle: {cam_ball_angle}",
+                )
+                return
+            angle_rad = 0.0
+            if abs(cam_ball_angle) > AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:
+                angle_rad = math.radians(cam_ball_angle * AUTO_CAM_BALL_APPROACH_ANGLE_RATIO)
+            # elif abs(cam_ball_angle) > AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0 * 0.5:
+            #     angle_rad = math.radians(-cam_ball_angle * AUTO_CAM_BALL_APPROACH_ANGLE_RATIO)
             angle_rad = max(math.radians(-180), min(math.radians(180), angle_rad))
-            fwd = math.cos(angle_rad) * approach_speed
-            side = math.sin(angle_rad) * approach_speed
-        
+            speed = AUTO_APPROACH_SPEED
+
+            fwd = math.cos(angle_rad) * speed
+            side = math.sin(angle_rad) * speed
+        else:
+            if ir_ball_distance is None or ir_ball_distance == 0 or ir_ball_angle is None or ir_ball_angle == 999:
+                self._transition(AutoState.IDLE,
+                    f"Invalid IR data:",
+                    f"  - ir_ball_distance: {ir_ball_distance}",
+                    f"  - ir_ball_angle: {ir_ball_angle}",
+                )
+                return
+            speed = AUTO_APPROACH_SPEED
+            angle_rad = math.radians(normalize_angle(ir_ball_angle + heading) * ir_ball_distance * AUTO_IR_BALL_APPROACH_ANGLE_RATIO)
+            angle_rad = max(math.radians(-180), min(math.radians(180), angle_rad))
+            fwd = math.cos(angle_rad) * speed
+            side = math.sin(angle_rad) * speed
+    
         move_angle_deg = math.degrees(math.atan2(side, fwd)) - heading if heading else math.degrees(math.atan2(side, fwd))
         pos_factor = self._position_speed_factor()
         move_speed = min(1.0, math.sqrt(fwd**2 + side**2)) * AUTO_SPEED_MULTIPLIER * pos_factor
@@ -625,24 +794,74 @@ class AutonomousController:
     # Ball is in the front pocket. Drive straight forward while keeping
     # the goal centred via rotation. If the ball is lost, re-approach.
     # ------------------------------------------------------------------
-    def _tick_push(self, motors, ball_truly_lost, have_ball, ball_likely_inside_robot, goal, goal_visible):
-        if ball_truly_lost or not have_ball and not ball_likely_inside_robot:
-            logic_logger.info("Autonomous: lost ball during push, re-approaching.")
+    def _tick_push(self, motors, have_ball, ball_likely_inside_robot, goal, goal_visible, cam_data_valid, cam_possession, cam_ball_angle):
+        if not have_ball and not ball_likely_inside_robot:
             self._possession_ticks = 0
-            self._transition(AutoState.APPROACH)
+            self._transition(AutoState.APPROACH,
+                f"Ball lost during PUSH:",
+                f"  - have_ball: {have_ball}",
+                f"  - ball_likely_inside_robot: {ball_likely_inside_robot}",
+            )
             return
 
         if goal_visible and goal.distance_mm is not None and goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
-            logic_logger.info("Autonomous: goal scored! Returning to IDLE.")
-            self._transition(AutoState.IDLE)
+            self._transition(AutoState.GOAL_SCORED,
+                f"  - goal.distance_mm: {goal.distance_mm}",
+            )
             return
 
-        rotate = self._goal_track_rotation(goal, goal_visible)
         pos_factor = self._position_speed_factor()
         move_speed = AUTO_PUSH_SPEED * AUTO_SPEED_MULTIPLIER * pos_factor
+        move_angle = 0.0
+        rotate = self._goal_track_rotation(goal, goal_visible)
 
-        motors.set_motors(angle=0, speed=move_speed, rotate=rotate)
+        if cam_data_valid and cam_possession:
+            move_angle = -cam_ball_angle / (AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0) * AUTO_PUSH_STEERING_MAX_ANGLE_DEG
+            move_angle = max(-90, min(90, move_angle))
+
+        motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
         motors.target_heading = 0
+
+    # ------------------------------------------------------------------
+    # State: GOAL_SCORED
+    # Goal is scored - wait until the ball isn't in the goal anymore,
+    # then return to IDLE.
+    # ------------------------------------------------------------------
+    def _tick_goal_scored(self, motors, goal, goal_visible, ir_ball_detected, ir_ball_angle, cam_ball_detected, cam_ball_angle, cam_data_valid):
+        motors.set_motors(angle=0, speed=0, rotate=0)
+        if self.state_start_time is not None and time.time() - self.state_start_time <= 0.5:
+            return
+        if not goal_visible or goal.distance_mm is None or goal.distance_mm >= AUTO_GOAL_SCORED_DISTANCE_MM + 100:
+            self._transition(AutoState.IDLE,
+                f"Not in a \"goal scored\" position anymore:",
+                f"  - goal_visible: {goal_visible}",
+                f"  - goal.distance_mm: {goal.distance_mm if goal else None}",
+            )
+            return
+        if get_camera_ball_usage_enabled() and cam_data_valid:
+            if abs(cam_ball_angle) > 30:
+                self._transition(AutoState.APPROACH,
+                    f"Ball detected by camera outside of goal area:",
+                    f"  - cam_ball_detected: {cam_ball_detected}",
+                    f"  - cam_ball_angle: {cam_ball_angle}",
+                )
+                return
+        else:
+            if not ir_ball_detected:
+                self._transition(AutoState.IDLE,
+                    f"Ball not detected:",
+                    f"  - ir_ball_detected: {ir_ball_detected}",
+                    f"  - camera_ball_usage_enabled: {get_camera_ball_usage_enabled()}",
+                    f"  - cam_data_valid: {cam_data_valid}",
+                )
+                return
+            if abs(ir_ball_angle) > 30:
+                self._transition(AutoState.APPROACH,
+                    f"Ball detected by IR outside of goal area:",
+                    f"  - ir_ball_detected: {ir_ball_detected}",
+                    f"  - ir_ball_angle: {ir_ball_angle}",
+                )
+                return
 
     # ------------------------------------------------------------------
     # Helpers
@@ -676,9 +895,11 @@ class AutonomousController:
         return 1.0 - (highest / AUTO_POSITION_SLOW_END_DISTANCE_MM) * AUTO_POSITION_SLOW_MIN_SPEED
 
 
-    def _transition(self, new_state: str):
+    def _transition(self, new_state: str, *debug_messages: str):
         if new_state != self.state:
-            logic_logger.info(f"Autonomous: {self.state} -> {new_state}")
+            debug_info = "\n".join(debug_messages) if debug_messages else ""
+            debug_info_str = f"\n{debug_info}" if debug_info else ""
+            logic_logger.info(f"Autonomous: {self.state} -> {new_state}{debug_info_str}")
             self.prev_state = self.state
             self.state = new_state
             self.state_start_time = time.time()
@@ -1606,7 +1827,8 @@ def main():
     stop_event = multiprocessing.Event()
 
     processes = [
-        multiprocessing.Process(target=camera_process, args=(stop_event,), name="Camera Process"),
+        multiprocessing.Process(target=camera_capture_process, args=(stop_event,), name="Camera Capture Process"),
+        multiprocessing.Process(target=camera_processing_process, args=(stop_event,), name="Camera Processing Process"),
         multiprocessing.Process(target=logic_process, args=(stop_event,), name="Logic Process"),
         multiprocessing.Process(target=hardware_communication_process, args=(stop_event,), name="Hardware Communication Process"),
         multiprocessing.Process(target=api_process, name="API Process"),

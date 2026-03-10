@@ -12,13 +12,20 @@ class DetectedObject:
     y: int            # Top-left y coordinate
     width: int        # Bounding box width
     height: int       # Bounding box height
-    confidence: float # 0.0 to 1.0, optional confidence metric
-    color: Tuple[int, int, int] = (255, 255, 255)  # BGR color for drawing
+    confidence: float | None = None # 0.0 to 1.0, optional confidence metric
+    color: Tuple[int, int, int] = (-1, -1, -1) # BGR color for drawing
+
+@dataclass
+class ObjectTypeConfig:
+    """Configuration for a specific object type."""
+    color: Tuple[int, int, int]   # BGR color for drawing
+    label: str                    # Human-readable label
+    thickness: int                # Line thickness for rectangles
 
 
 class DetectionVisualizer:
     def __init__(self):
-        self.object_types: Dict[str, Dict] = {}
+        self.object_types: Dict[str, ObjectTypeConfig] = {}
 
     def register_object_type(
         self,
@@ -41,11 +48,11 @@ class DetectionVisualizer:
 
         color_bgr = (color[2], color[1], color[0])
 
-        self.object_types[type_name] = {
-            "color": color_bgr,
-            "label": label,
-            "thickness": thickness,
-        }
+        self.object_types[type_name] = ObjectTypeConfig(
+            color     = color_bgr,
+            label     = label,
+            thickness = thickness,
+        )
 
     def draw_detections(
         self,
@@ -76,10 +83,9 @@ class DetectionVisualizer:
                 continue
 
             obj_config = self.object_types[detection.object_type]
-            # Use detection's color if specified, otherwise use registered type color
-            color = tuple(detection.color) if detection.color != (255, 255, 255) else obj_config["color"]
-            thickness = obj_config["thickness"]
-            label = obj_config["label"]
+            color = detection.color if detection.color != (-1, -1, -1) else obj_config.color
+            thickness = obj_config.thickness
+            label = obj_config.label
 
             x1, y1 = detection.x, detection.y
             x2, y2 = detection.x + detection.width, detection.y + detection.height
@@ -138,7 +144,7 @@ class DetectionVisualizer:
         """Get list of all registered object types."""
         return list(self.object_types.keys())
 
-    def get_object_type_config(self, type_name: str) -> Optional[Dict]:
+    def get_object_type_config(self, type_name: str) -> Optional[ObjectTypeConfig]:
         """Get configuration for a specific object type."""
         return self.object_types.get(type_name)
 
@@ -179,8 +185,6 @@ def draw_detections_on_frame(
     """
     Convenience function to draw detections on a frame using global visualizer.
 
-    Example:
-        frame = draw_detections_on_frame(frame, [DetectedObject(...)])
     """
     visualizer = get_visualizer()
     return visualizer.draw_detections(frame, detections, draw_labels, alpha)
