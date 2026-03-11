@@ -5,18 +5,20 @@ import re
 import serial
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from serial.tools import list_ports
 
 
-logger = logging.getLogger("teensy_communication")
+
+logger = logging.getLogger("Teensy Communication")
+
 
 DEFAULT_TEENSY_PORT = "/dev/ttyAMA0"
-DEFAULT_TEENSY_BAUD = 38400
+DEFAULT_TEENSY_BAUD = 164000
 DEFAULT_TEENSY_TIMEOUT = 1
 
 try:
-    from config import MOTOR_COUNT, LINE_SENSOR_COUNT
+    from robot.config import MOTOR_COUNT, LINE_SENSOR_COUNT
     EXPECTED_FIELDS = 14 + LINE_SENSOR_COUNT + MOTOR_COUNT
 except ImportError:
     MOTOR_COUNT = 4
@@ -88,6 +90,8 @@ def parse_sensor_data_line(line: str) -> ParsedTeensyData:
             line,
             time.time(),
         )
+        if (parsed.ir.angle != 999):
+            parsed.ir.angle = (parsed.ir.angle * -1 + 360) % 360
     except (ValueError, IndexError) as e:
         raise ValueError(f"Failed to parse numeric fields: {e}")
 
@@ -167,7 +171,7 @@ class TeensyCommunicator:
         self.baud = baud
         self.timeout = timeout
         self.ser = None
-        self._log = logging.getLogger(f"teensy_communication.{port}")
+        self._log = logger
         self.buffer: bytearray | None = None
         if auto_connect:
             self.connect()

@@ -1,13 +1,14 @@
 import logging
-import math
 import sys
-from dataclasses import dataclass
 
-from config import MOTOR_LOCATIONS, LOG_BUFFER_MAX_ENTRIES
+import robot.multiprocessing.shared_data as shared_data
+from robot.config import *
 
 
 
-# ==================== LOGGING HELPERS ====================
+_default_logger_level = logging.DEBUG
+_known_loggers: dict[str | None, logging.Logger] = {}
+
 
 class LogFormatter(logging.Formatter):
     RESET = "\033[0m"
@@ -81,10 +82,22 @@ class BufferedLogHandler(logging.Handler):
                             del self.logs_dict[key]
                         except KeyError:
                             pass
-        except Exception:
+        except Exception as e:
             self.handleError(record)
 
-def setup_logger(name: str | None = None, level=logging.DEBUG, logs_dict=None, logs_lock=None, next_log_id=None) -> logging.Logger:
+def set_default_logger_level(level: int) -> None:
+    global _default_logger_level
+    _default_logger_level = level
+
+def get_default_logger_level() -> int:
+    return _default_logger_level
+
+def setup_logger(name: str | None = None, level=_default_logger_level) -> logging.Logger:
+    if _default_logger_level is None:
+        logger_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
+        set_default_logger_level(logger_level)
+        level = _default_logger_level
+
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
@@ -99,31 +112,28 @@ def setup_logger(name: str | None = None, level=logging.DEBUG, logs_dict=None, l
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     
-    if logs_dict is not None and logs_lock is not None and next_log_id is not None:
-        buffer_handler = BufferedLogHandler(logs_dict, logs_lock, next_log_id, max_entries=LOG_BUFFER_MAX_ENTRIES)
-        buffer_handler.setLevel(level)
-        logger.addHandler(buffer_handler)
+    buffer_handler = BufferedLogHandler(shared_data.logs_buffer, shared_data.logs_buffer_lock, shared_data.next_log_id, max_entries=LOG_BUFFER_MAX_ENTRIES)
+    buffer_handler.setLevel(level)
+    logger.addHandler(buffer_handler)
     
     return logger
 
+def get_logger(name: str | None = None, level=_default_logger_level) -> logging.Logger:
+    if name is None:
+        name = logging.getLogger().name
+    if name in _known_loggers:
+        return _known_loggers[name]
+    logger = setup_logger(name, level)
+    _known_loggers[logger.name] = logger
+    return logger
 
-# ==================== ROBOT CONTROL HELPERS ====================
+def get_logs(since_id: int = 0) -> tuple[list[dict], int]:
+    with shared_data.logs_buffer_lock:
+        items = [
+            {"id": lid, **entry}
+            for lid, entry in sorted(shared_data.logs_buffer.items())
+            if lid > since_id
+        ]
+        last_id = max(shared_data.logs_buffer.keys()) if shared_data.logs_buffer else 0
+    return items, last_id
 
-class RobotMode:
-    IDLE = "idle"
-    MANUAL = "manual"
-    AUTONOMOUS = "autonomous"
-
-@dataclass
-class RobotManualControl:
-    move_angle: float = 0.0
-    move_speed: float = 0.0
-    rotate: float = 0.0
-
-def calculate_motors_speeds(move_angle_rad: float, move_speed: float, rotate: float) -> list[int]:
-    speeds = []
-    for motor_angle in MOTOR_LOCATIONS:
-        motor_rad = math.radians(motor_angle)
-        motor_speed = move_speed * math.cos(move_angle_rad - motor_rad) + rotate
-        speeds.append(int(motor_speed))
-    return speeds
