@@ -1,4 +1,4 @@
-# ==================== CAMERA SETTINGS ====================
+# ================================ CAMERA SETTINGS =================================
 # Camera resolution
 CAMERA_SENSOR_WIDTH = 4608
 CAMERA_SENSOR_HEIGHT = 2592
@@ -12,9 +12,9 @@ CAMERA_MIN_FRAME_INTERVAL = 1.0 / CAMERA_MAX_FPS
 # Frame size calculations
 FRAME_WIDTH  = 1536
 FRAME_HEIGHT = 864
-FRAME_SIZE_B = FRAME_HEIGHT * FRAME_WIDTH * 3  # RGB888
+FRAME_SIZE_B = FRAME_HEIGHT * FRAME_WIDTH * 3  # RGB888 format (3 bytes per pixel, no alpha)
 
-# ==================== SERIAL COMMUNICATION ====================
+# =========================== SERIAL COMMUNICATION ================================
 # Teensy serial port settings
 TEENSY_PORT = "/dev/ttyAMA0"
 TEENSY_BAUD = 168000
@@ -23,7 +23,7 @@ TEENSY_TIMEOUT = 0.1
 COMMUNICATION_LOOP_FREQUENCY = 120
 COMMUNICATION_LOOP_PERIOD = 1.0 / COMMUNICATION_LOOP_FREQUENCY
 
-# ==================== CONTROL LOOP SETTINGS ====================
+# =========================== CONTROL LOOP SETTINGS ===============================
 # Logic loop timing
 LOGIC_LOOP_FREQUENCY = 120
 LOGIC_LOOP_PERIOD = 1.0 / LOGIC_LOOP_FREQUENCY
@@ -31,21 +31,21 @@ LOGIC_LOOP_PERIOD = 1.0 / LOGIC_LOOP_FREQUENCY
 # Idle mode settings
 IDLE_SLEEP_DURATION = 0.1
 
-# ==================== API SERVER SETTINGS ====================
+# ============================ API SERVER SETTINGS ================================
 # Video streaming
-API_VIDEO_JPEG_QUALITY = 70  # 0-100
+API_VIDEO_JPEG_QUALITY = 70  # JPEG quality (0-100, higher is better quality/larger size)
 API_VIDEO_TARGET_FPS = 30
 
 # Server settings
 API_HOST = '0.0.0.0'
 API_PORT = 5000
 
-# ==================== LOGGING SETTINGS ====================
-LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+# ============================= LOGGING SETTINGS ================================
+LOG_LEVEL = "DEBUG"  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Log buffer
 LOG_BUFFER_MAX_ENTRIES = 100
 
-# ==================== MOTOR CONTROL ====================
+# ============================== MOTOR CONTROL ===================================
 MOTOR_COUNT = 4
 
 # Motor angles (degrees)
@@ -58,33 +58,33 @@ MOTOR_SPEED_MAX = 9999
 # Motor acceleration (logic loops required to go from 0 to max speed)
 MOTOR_ACCELERATION_LOGIC_LOOPS = 2
 
-# ==================== LINE SENSOR SETTINGS ====================
+# =========================== LINE SENSOR SETTINGS ===============================
 LINE_SENSOR_COUNT = 12
 LINE_SENSOR_LOCATIONS = [i * (360 / LINE_SENSOR_COUNT) for i in range(LINE_SENSOR_COUNT)]
 
-# Default values, can be calibrated/changed via api
-DEFAULT_LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT # Array of [min, max] values
+# Default values, can be calibrated/changed via API
+DEFAULT_LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT  # Array of [min, max] values
 
-# ==================== CALIBRATION STORAGE ====================
+# ========================== CALIBRATION STORAGE ================================
 CALIBRATION_FILE_PATH = "calibration_data.json"
 
-# ==================== OBJECT DETECTION SETTINGS ====================
+# ======================== OBJECT DETECTION SETTINGS ============================
 # Scale factor for processing frames (0.5 means half resolution)
 DETECTION_FRAME_SIZE_SCALE = 0.5
 DETECTION_FRAME_WIDTH = int(FRAME_WIDTH * DETECTION_FRAME_SIZE_SCALE)
 DETECTION_FRAME_HEIGHT = int(FRAME_HEIGHT * DETECTION_FRAME_SIZE_SCALE)
 
 
-# ==================== GOAL DETECTION SETTINGS ====================
+# ========================= GOAL DETECTION SETTINGS =============================
 # Real-world goal height in millimeters
 GOAL_HEIGHT_MM = 100.0
 DEFAULT_FOCAL_LENGTH_PIXELS = 1000.0
 
-# ==================== LOGIC SETTINGS ====================
+# ============================== LOGIC SETTINGS =================================
 DEFAULT_LINE_AVOIDING_ENABLED = False
 DEFAULT_ROTATION_CORRECTION_ENABLED = True
 
-# ==================== AUTONOMOUS BEHAVIOUR SETTINGS ====================
+# ===================== AUTONOMOUS BEHAVIOUR SETTINGS ===========================
 
 # --- General ---
 # Global speed multiplier for all autonomous movements (reduce for debugging)
@@ -99,14 +99,14 @@ AUTO_APPROACH_SPEED = 0.7
 # while approaching the ball. This value is multiplied with the IR ball angle and distance to
 # calculate the movement angle for approaching. A higher value means the robot will move
 # more sideways to approach the ball from the front.
-# NOTE: The ir ball distance is reverted: 3000 means the ball is the closest, <3000 means
+# NOTE: The IR ball distance is reverted: 3000 means the ball is the closest, <3000 means
 #       it's farther. This means that the robot will approach the ball more from behind
 #       when it's closer.
 AUTO_IR_BALL_APPROACH_ANGLE_RATIO = 0.001
 # Similar ratio for camera-based ball tracking, using the camera ball angle instead of IR.
 # The distance is ignored in this ratio
 AUTO_CAM_BALL_APPROACH_ANGLE_RATIO = 1.3
-# The threshold distance to consider the ball "close enough" to initiate pushing (3000 being the nearest, 0 the farthest)
+# The threshold distance to consider the ball "close enough" to initiate pushing (3000 nearest, 0 farthest)
 AUTO_BALL_CLOSE_THRESHOLD = 2500
 # Angular window around 0° where ball is considered "in front" of the robot
 AUTO_BALL_FRONT_THRESHOLD_DEG = 15.0
@@ -114,7 +114,7 @@ AUTO_BALL_FRONT_THRESHOLD_DEG = 15.0
 # --- Pushing ---
 # Speed when pushing the ball toward the goal
 AUTO_PUSH_SPEED = 1.0
-# Maximum angle to apply for steering while pushing (degrees, when the ball is right at the edge of the possession area).
+# Maximum angle to apply for steering while pushing (deg, when ball is at edge of possession area)
 AUTO_PUSH_STEERING_MAX_ANGLE_DEG = 45.0
 # Distance at which we consider the goal "scored" (stop pushing)
 AUTO_GOAL_SCORED_DISTANCE_MM = 600.0
@@ -129,7 +129,7 @@ AUTO_POSITION_SLOW_START_DISTANCE_X_MM = 700.0
 # Range where slow speed isn't applied (y coordinate, mm)
 AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM = 300.0
 AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM = 1900.0
-# Apply lowest speed multiplier when distance from the nearest slow speed start is equal or greater to this (mm)
+# Apply lowest speed multiplier when distance from nearest slow speed start is >= this (mm)
 AUTO_POSITION_SLOW_END_DISTANCE_MM = 200.0
 
 # --- Ball possession camera check ---
@@ -143,7 +143,7 @@ AUTO_BALL_POSSESSION_AREA_HEIGHT_PERCENT = 40.0
 AUTO_BALL_POSSESSION_MIN_RATIO = 0.02
 # Default HSV calibration for the ball (orange)
 DEFAULT_BALL_CALIBRATION_HSV = [5, 150, 150, 25, 255, 255]  # [h_min,s_min,v_min, h_max,s_max,v_max]
-# IR angle range considered "inside" the robot if the ball was possessed by the camera in the previous frame (degrees)
+# IR angle range considered "inside" the robot if the ball was possessed by camera in previous frame (deg)
 AUTO_BALL_INSIDE_ROBOT_IR_ANGLE_RANGE_DEG = 40.0
 
 # --- Camera-based ball tracking (for approach state) ---

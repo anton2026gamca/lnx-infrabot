@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+
 
 
 @dataclass
@@ -13,24 +13,23 @@ class DetectedObject:
     width: int        # Bounding box width
     height: int       # Bounding box height
     confidence: float | None = None # 0.0 to 1.0, optional confidence metric
-    color: Tuple[int, int, int] = (-1, -1, -1) # BGR color for drawing
+    color: tuple[int, int, int] = (-1, -1, -1) # BGR color for drawing
 
 @dataclass
 class ObjectTypeConfig:
     """Configuration for a specific object type."""
-    color: Tuple[int, int, int]   # BGR color for drawing
+    color: tuple[int, int, int]   # BGR color for drawing
     label: str                    # Human-readable label
     thickness: int                # Line thickness for rectangles
 
-
 class DetectionVisualizer:
     def __init__(self):
-        self.object_types: Dict[str, ObjectTypeConfig] = {}
+        self.object_types: dict[str, ObjectTypeConfig] = {}
 
     def register_object_type(
         self,
         type_name: str,
-        color: Tuple[int, int, int],
+        color: tuple[int, int, int],
         label: str | None = None,
         thickness: int = 2
     ) -> None:
@@ -49,6 +48,7 @@ class DetectionVisualizer:
         color_bgr = (color[2], color[1], color[0])
 
         self.object_types[type_name] = ObjectTypeConfig(
+
             color     = color_bgr,
             label     = label,
             thickness = thickness,
@@ -57,7 +57,7 @@ class DetectionVisualizer:
     def draw_detections(
         self,
         frame: np.ndarray,
-        detections: List[DetectedObject],
+        detections: list[DetectedObject],
         draw_labels: bool = True,
         alpha: float = 1.0
     ) -> np.ndarray:
@@ -66,7 +66,7 @@ class DetectionVisualizer:
 
         Args:
             frame: Input frame (BGR or RGB, will be modified in-place)
-            detections: List of DetectedObject instances to draw
+            detections: list of DetectedObject instances to draw
             draw_labels: Whether to draw text labels on rectangles
             alpha: Opacity of rectangles (0.0 to 1.0). 1.0 = fully opaque
 
@@ -109,7 +109,7 @@ class DetectionVisualizer:
         label: str,
         x: int,
         y: int,
-        color: Tuple[int, int, int],
+        color: tuple[int, int, int],
         confidence: float | None = None
     ) -> None:
         font = cv2.FONT_HERSHEY_DUPLEX
@@ -140,11 +140,11 @@ class DetectionVisualizer:
             thickness
         )
 
-    def get_registered_types(self) -> List[str]:
+    def get_registered_types(self) -> list[str]:
         """Get list of all registered object types."""
         return list(self.object_types.keys())
 
-    def get_object_type_config(self, type_name: str) -> Optional[ObjectTypeConfig]:
+    def get_object_type_config(self, type_name: str) -> ObjectTypeConfig | None:
         """Get configuration for a specific object type."""
         return self.object_types.get(type_name)
 
@@ -162,7 +162,7 @@ def get_visualizer() -> DetectionVisualizer:
 
 def register_detection_type(
     type_name: str,
-    color: Tuple[int, int, int],
+    color: tuple[int, int, int],
     label: str | None = None,
     thickness: int = 2
 ) -> None:
@@ -178,7 +178,7 @@ def register_detection_type(
 
 def draw_detections_on_frame(
     frame: np.ndarray,
-    detections: List[DetectedObject],
+    detections: list[DetectedObject],
     draw_labels: bool = True,
     alpha: float = 1.0
 ) -> np.ndarray:

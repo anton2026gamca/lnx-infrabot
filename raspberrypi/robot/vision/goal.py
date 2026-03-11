@@ -1,18 +1,12 @@
-import time
-import numpy as np
 import cv2
+import math
+import numpy as np
 from dataclasses import dataclass, field
-from typing import List
-from picamera2 import Picamera2 # pyright: ignore[reportMissingImports]
 
-from config import CAMERA_MAX_FPS, FRAME_WIDTH, FRAME_HEIGHT, CAMERA_BUFFER_COUNT
-from helpers.detection_visualizer import DetectedObject
+import robot.multiprocessing.shared_data as shared_data
+from robot.config import *
+from robot.vision.visualizer import DetectedObject
 
-
-@dataclass
-class FrameData:
-    frame: np.ndarray
-    timestamp: float
 
 
 @dataclass
@@ -34,88 +28,11 @@ class GoalDetectionResult:
     goal_height_pixels: float   # Height of detected goal in pixels
     _rect: tuple[int, int, int, int] | None = None  # Cached bounding rect (x, y, w, h) for visualization
 
-
-picam = None
-
-
-def init_camera():
-    """Must be called from within the process that will use it."""
-    if Picamera2 is None:
-        raise ImportError("Picamera2 library not found.")
-    global picam
-    picam = Picamera2()
-    camera_config = picam.create_preview_configuration(
-        main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "YUV420"},
-        lores={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "YUV420"},
-        raw={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "SRGGB10_CSI2P"},
-        controls={"FrameRate": CAMERA_MAX_FPS},
-        buffer_count = CAMERA_BUFFER_COUNT,
-        queue = False,
-    )
-    picam.configure(camera_config)
-    picam.start()
-
-def get_frame() -> FrameData:
-    if picam is None:
-        raise RuntimeError("Camera not initialized. Call init_camera() first.")
-    
-    frame_yuv = picam.capture_array("lores")
-    frame_rgb = yuv420_to_rgb(frame_yuv, FRAME_WIDTH, FRAME_HEIGHT)
-    return FrameData(frame=frame_rgb, timestamp=time.time())
-
-def yuv420_to_rgb(yuv_frame, width, height):
-    yuv = yuv_frame.reshape((height * 3 // 2, width))
-    rgb = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
-    return rgb
-
-
-def detect_ball(
-    hsv_frame: np.ndarray,
-    ball_lower: np.ndarray,
-    ball_upper: np.ndarray,
-    min_area: int = 50
-) -> tuple[List[DetectedObject], bool]:
-    """
-    Detect the ball and return bounding rectangles.
-    
-    Args:
-        hsv_frame: HSV image array.
-        ball_lower: HSV lower bound for the ball color.
-        ball_upper: HSV upper bound for the ball color.
-        min_area: Minimum area to consider as a valid ball detection.
-    
-    Returns:
-        Tuple of (list of DetectedObject instances, confidence_score)
-    """
-    if hsv_frame is None or hsv_frame.size == 0:
-        return [], False
-    
-    mask = cv2.inRange(hsv_frame, ball_lower, ball_upper)
-    
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    detections = []
-    if contours:
-        largest_contour = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(largest_contour)
-        
-        if area >= min_area:
-            x, y, w, h = cv2.boundingRect(largest_contour)
-            confidence = min(1.0, area / 5000.0)
-            detections.append(DetectedObject(
-                object_type="ball",
-                x=x,
-                y=y,
-                width=w,
-                height=h,
-                confidence=confidence
-            ))
-    
-    return detections, len(detections) > 0
+@dataclass
+class PositionEstimate:
+    x_mm: float
+    y_mm: float
+    confidence: float
 
 
 def detect_goal_alignment_with_rect(
@@ -125,7 +42,7 @@ def detect_goal_alignment_with_rect(
     min_area: int = 500,
     focal_length_pixels: float | None = None,
     real_goal_height_mm: float = 100.0
-) -> tuple[GoalDetectionResult, List[DetectedObject]]:
+) -> tuple[GoalDetectionResult, list[DetectedObject]]:
     """Detect goal alignment and return both the result and detection rectangles."""
     result = _detect_goal_alignment_internal(
         hsv_frame, goal_color, calibration, min_area, focal_length_pixels, real_goal_height_mm
@@ -249,14 +166,30 @@ def _get_goal_bounding_rect(
     return x, y, w, h
 
 
-def detect_goal_alignment(
-    frame: np.ndarray,
-    goal_color: str = "yellow",
-    calibration: GoalColorCalibration | None = None,
-    min_area: int = 500,
-    focal_length_pixels: float | None = None,
-    real_goal_height_mm: float = 100.0
-) -> GoalDetectionResult:
-    """Legacy function - use detect_goal_alignment_with_rect for visualizations."""
-    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
-    return _detect_goal_alignment_internal(hsv_frame, goal_color, calibration, min_area, focal_length_pixels, real_goal_height_mm)
+def get_position_estimate() -> PositionEstimate | None:
+    goal_result = shared_data.get_goal_detection_result()
+    hardware_data = shared_data.get_hardware_data()
+    
+    if not goal_result or not goal_result.goal_detected or goal_result.distance_mm is None:
+        return None
+    
+    if not hardware_data or hardware_data.compass.heading is None:
+        return None
+    
+    distance_mm = goal_result.distance_mm
+    alignment = goal_result.alignment
+    
+    robot_heading_deg = hardware_data.compass.heading
+    angle_offset_deg = alignment * (CAMERA_FOV_DEG / 2.0)
+    angle_to_goal_deg = robot_heading_deg + angle_offset_deg
+    angle_to_goal_rad = math.radians(angle_to_goal_deg)
+    
+    x_mm = distance_mm * math.sin(angle_to_goal_rad) * -1
+    y_mm = distance_mm * math.cos(angle_to_goal_rad)
+    
+    area_confidence = min(1.0, goal_result.goal_area / 50000.0)
+    alignment_confidence = 1.0 - abs(alignment)
+    confidence = (area_confidence * 0.6) + (alignment_confidence * 0.4)
+    
+    return PositionEstimate(x_mm=x_mm, y_mm=y_mm, confidence=confidence)
+

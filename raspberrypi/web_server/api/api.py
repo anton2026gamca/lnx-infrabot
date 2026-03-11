@@ -1,80 +1,33 @@
 import cv2
 import json
-import logging
-import math
-import numpy as np
+import multiprocessing.synchronize
+import threading
 import time
-from flask import Flask, Response, request, jsonify
+import numpy as np
+from flask import Flask, Response, jsonify, request
 from werkzeug.serving import make_server
 
-from helpers.helpers import RobotMode, RobotManualControl, PositionEstimate
-from helpers.detection_visualizer import draw_detections_on_frame, DetectedObject
-from config import API_VIDEO_JPEG_QUALITY, API_VIDEO_TARGET_FPS, API_HOST, API_PORT, LINE_SENSOR_COUNT
-
+import robot.brain as brain
+import robot.calibration as calibration
+import robot.hardware.line_sensors as line_sensors
+import robot.multiprocessing.shared_data as shared_data
+import robot.utils as utils
+import robot.vision as vision
+from robot.config import *
+from robot.robot import RobotManualControl
+from robot.utils import Suppress200Filter
+from robot.vision import DetectedObject, PositionEstimate
 
 
 app = Flask(__name__)
+
 app.config.update(DEBUG=False, ENV="production")
 
-camera_frame_getter = None
-hardware_data_getter = None
-motor_speeds_getter = None
-kicker_state_getter = None
+logger = utils.get_logger("API Process")
 
-robot_mode_getter = None
-robot_mode_setter = None
-manual_control_getter = None
-manual_control_setter = None
-compass_reset_requester = None
+_werkzeug_logger = utils.get_logger("werkzeug")
+_werkzeug_logger.addFilter(Suppress200Filter())
 
-logs_getter = None
-
-line_detection_thresholds_getter = None
-line_detection_thresholds_setter = None
-line_detected_getter = None
-line_calibration_starter = None
-line_calibration_stopper = None
-line_calibration_status_getter = None
-
-running_state_getter = None
-
-rotation_correction_enabled_getter = None
-rotation_correction_enabled_setter = None
-line_avoiding_enabled_getter = None
-line_avoiding_enabled_setter = None
-position_based_speed_enabled_getter = None
-position_based_speed_enabled_setter = None
-
-camera_ball_usage_enabled_getter = None
-camera_ball_usage_enabled_setter = None
-always_facing_goal_enabled_getter = None
-always_facing_goal_enabled_setter = None
-
-goal_color_getter = None
-goal_color_setter = None
-goal_calibration_getter = None
-goal_calibration_setter = None
-ball_calibration_getter = None
-ball_calibration_setter = None
-goal_detection_result_getter = None
-goal_focal_length_getter = None
-goal_focal_length_setter = None
-goal_distance_calibration_starter = None
-goal_distance_calibration_stopper = None
-goal_distance_calibration_canceler = None
-goal_distance_calibration_status_getter = None
-position_estimate_getter = None
-
-autonomous_state_getter = None
-detections_getter = None
-
-camera_ball_detected_getter = None
-camera_ball_angle_getter = None
-camera_ball_distance_getter = None
-camera_ball_area_pixels_getter = None
-camera_ball_calibration_constant_setter = None
-
-logger = logging.getLogger("API Process")
 
 
 def gen_frames(fps=None, show_detections=True):
@@ -97,18 +50,17 @@ def gen_frames(fps=None, show_detections=True):
         if sleep_time:
             time.sleep(sleep_time)
         
-        if camera_frame_getter is None:
-            continue
-        
-        frame = camera_frame_getter()
-        if frame is None:
+        frame_data = shared_data.get_camera_frame()
+        if frame_data is None or frame_data.frame is None:
             if last_frame_data:
                 yield last_frame_data
             continue
+
+        frame = frame_data.frame
         
-        if show_detections and detections_getter is not None:
+        if show_detections:
             try:
-                detections = detections_getter()
+                detections = shared_data.get_detected_objects()
                 if not isinstance(detections, list):
                     detections = []
 
@@ -129,7 +81,7 @@ def gen_frames(fps=None, show_detections=True):
                         detected_objects.append(det)
                 
                 if detected_objects:
-                    frame = draw_detections_on_frame(frame, detected_objects, draw_labels=True)
+                    frame = vision.draw_detections_on_frame(frame, detected_objects, draw_labels=True)
             except Exception as e:
                 logger.debug(f"Error drawing detections: {e}")
         
@@ -162,20 +114,18 @@ def video_feed():
 @app.route('/api/camera_ball_distance_calibration', methods=['POST'])
 def camera_ball_distance_calibration():
     try:
-        if camera_ball_area_pixels_getter is None or camera_ball_detected_getter is None or camera_ball_calibration_constant_setter is None:
-            raise RuntimeError("Camera ball calibration helpers not set")
         data = request.get_json()
+        
         if not data or 'known_distance_mm' not in data:
-            return jsonify({'error': 'Missing known_distance_mm'}), 400
+            return jsonify({'Missing known_distance_mm'}), 400
+
         known_distance = float(data['known_distance_mm'])
-        camera_ball_detected = camera_ball_detected_getter()
-        if not camera_ball_detected:
-            return jsonify({'error': 'No ball detected by camera'}), 400
-        area = camera_ball_area_pixels_getter()
-        if area <= 0:
-            return jsonify({'error': 'No area info'}), 400
-        calibration_constant = known_distance * math.sqrt(area)
-        camera_ball_calibration_constant_setter(calibration_constant)
+        
+        if not isinstance(known_distance, (int, float)) or known_distance <= 0:
+            return jsonify({"known_distance_mm must be a positive number"}), 400
+        
+        calibration_constant = calibration.calibrate_ball_distance(known_distance)
+        
         return jsonify({'status': 'ok', 'calibration_constant': calibration_constant})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -185,20 +135,16 @@ def camera_ball_distance_calibration():
 @app.route('/api/get_sensor_data')
 def get_sensor_data():
     try:
-        if hardware_data_getter is None:
-            raise RuntimeError("api.hardware_data_getter is None")
-        
-        data = hardware_data_getter()
+        data = shared_data.get_hardware_data()
         if data is None:
             return jsonify({"error": "No data available yet"}), 503
         
-        running_state = running_state_getter() if running_state_getter else None
+        running_state = shared_data.get_running_state()
         
-        if camera_ball_angle_getter is None or camera_ball_distance_getter is None or camera_ball_detected_getter is None:
-            raise RuntimeError("Camera ball getters not set")
-        camera_ball_angle = camera_ball_angle_getter()
-        camera_ball_distance = camera_ball_distance_getter()
-        camera_ball_detected = camera_ball_detected_getter()
+        camera_ball_position = shared_data.get_camera_ball_data()
+        camera_ball_angle = camera_ball_position.angle if camera_ball_position else None
+        camera_ball_distance = camera_ball_position.distance if camera_ball_position else None
+        camera_ball_detected = camera_ball_position.detected if camera_ball_position else None
 
 
         response = {
@@ -220,11 +166,11 @@ def get_sensor_data():
             },
             "line": {
                 "raw": data.line,
-                "detected": line_detected_getter() if line_detected_getter else [False] * LINE_SENSOR_COUNT,
-                "thresholds": line_detection_thresholds_getter() if line_detection_thresholds_getter else [],
+                "detected": line_sensors.get_line_detected(),
+                "thresholds": shared_data.get_line_detection_thresholds(),
             },
-            "motors": motor_speeds_getter() if motor_speeds_getter else [0, 0, 0, 0],
-            "kicker": kicker_state_getter() if kicker_state_getter else False,
+            "motors": shared_data.get_motor_speeds(),
+            "kicker": shared_data.get_kicker_state(),
             "running_state": {
                 "running": running_state.running if running_state else False,
                 "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
@@ -242,16 +188,13 @@ def get_sensor_data():
 @app.route('/api/get_logs')
 def get_logs():
     try:
-        if logs_getter is None:
-            raise RuntimeError("api.logs_getter is None")
-        
         since = request.args.get('since', '0')
         try:
             since_id = int(since)
         except ValueError:
             since_id = 0
 
-        items, last_id = logs_getter(since_id) # pyright: ignore[reportGeneralTypeIssues]
+        items, last_id = utils.get_logs(since_id)
         return jsonify({"logs": items, "last_id": last_id})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -261,10 +204,7 @@ def get_logs():
 @app.route('/api/get_mode')
 def get_mode():
     try:
-        if robot_mode_getter is None:
-            raise RuntimeError("api.robot_mode_getter is None")
-        
-        mode = robot_mode_getter()
+        mode = shared_data.get_robot_mode()
         return jsonify({"mode": mode})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -273,14 +213,12 @@ def get_mode():
 @app.route('/api/set_mode', methods=['POST'])
 def set_mode():
     try:
-        if robot_mode_setter is None:
-            raise RuntimeError("api.robot_mode_setter is None")
         mode = request.args.get('mode', None)
         if mode is None:
-            mode = request.json.get('mode', None)
-        if mode is None or not mode in [RobotMode.IDLE, RobotMode.MANUAL, RobotMode.AUTONOMOUS]:
-            return jsonify({"error": "Invalid mode"}), 401
-        robot_mode_setter(mode)
+            mode = (request.get_json() or {}).get('mode', None)
+        if mode is None or not mode in ["idle", "manual", "autonomous"]:
+            return jsonify({"error": "Invalid mode"}), 400
+        shared_data.set_robot_mode(["idle", "manual", "autonomous"].index(mode))
         return jsonify({"status": "ok"})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -290,9 +228,6 @@ def set_mode():
 @app.route('/api/set_manual_control', methods=['POST'])
 def set_manual_control():
     try:
-        if manual_control_setter is None:
-            raise RuntimeError("api.manual_control_setter is None")
-        
         data_str = request.data
         if data_str is None:
             return jsonify({"error": f"Invalid request"}), 400
@@ -308,7 +243,7 @@ def set_manual_control():
             move_speed=data['move']['speed'],
             rotate=data['rotate']
         )
-        manual_control_setter(control)
+        shared_data.set_manual_control(control)
         return jsonify({"status": "ok"})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -318,10 +253,7 @@ def set_manual_control():
 @app.route('/api/reset_compass', methods=['POST'])
 def reset_compass():
     try:
-        if compass_reset_requester is None:
-            raise RuntimeError("api.compass_reset_requester is None")
-        
-        compass_reset_requester()
+        shared_data.request_compass_reset()
         return jsonify({"status": "ok"})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -331,17 +263,14 @@ def reset_compass():
 @app.route('/api/line_calibration/start', methods=['POST'])
 def start_line_calibration():
     try:
-        if line_calibration_starter is None:
-            raise RuntimeError("api.line_calibration_starter is None")
-        
         data = request.get_json(silent=True) or {}
         phase = data.get('phase', 1)
         
         if phase not in [1, 2]:
             return jsonify({"error": "Bad request (phase)"}), 400
         
-        line_calibration_starter(phase)
-        logger.info(f"Line sensor calibration phase {phase} started")
+        calibration.start_line_calibration(phase)
+
         return jsonify({
             "status": "ok",
             "phase": phase,
@@ -355,15 +284,11 @@ def start_line_calibration():
 @app.route('/api/line_calibration/stop', methods=['POST'])
 def stop_line_calibration():
     try:
-        if line_calibration_stopper is None or line_calibration_status_getter is None:
-            raise RuntimeError("api.line_calibration_stopper or api.line_calibration_status_getter is None")
-        
-        status = line_calibration_status_getter()
+        status = calibration.get_line_calibration_status()
         if not status['phase'] > 0:
             return jsonify({"error": "Calibration is not active"}), 400
         
-        thresholds, min_values, max_values, phase = line_calibration_stopper() # pyright: ignore[reportGeneralTypeIssues]
-        logger.info(f"Line sensor calibration phase {phase} completed and applied. Thresholds: {thresholds}")
+        thresholds, min_values, max_values, phase = calibration.stop_line_calibration()
         
         can_start_phase2 = (phase == 1 and any(min_values[i] != float('inf') for i in range(len(min_values))))
         
@@ -383,19 +308,12 @@ def stop_line_calibration():
 @app.route('/api/line_calibration/cancel', methods=['POST'])
 def cancel_line_calibration():
     try:
-        if line_calibration_stopper is None:
-            raise RuntimeError("api.line_calibration_stopper is None")
-        if line_calibration_status_getter is None:
-            raise RuntimeError("api.line_calibration_status_getter is None")
-        
-        status = line_calibration_status_getter()
+        status = calibration.get_line_calibration_status()
         if not status['phase'] > 0:
             return jsonify({"error": "Calibration is not active"}), 400
         
         phase = status.get('phase', 0)
-        line_calibration_stopper(cancel=True)
-        
-        logger.info(f"Line sensor calibration phase {phase} cancelled")
+        calibration.stop_line_calibration(cancel=True)
         
         return jsonify({
             "status": "ok",
@@ -410,10 +328,7 @@ def cancel_line_calibration():
 @app.route('/api/line_calibration/status')
 def get_line_calibration_status():
     try:
-        if line_calibration_status_getter is None:
-            raise RuntimeError("api.line_calibration_status_getter is None")
-        
-        status = line_calibration_status_getter()
+        status = calibration.get_line_calibration_status()
         return jsonify(status)
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -423,9 +338,6 @@ def get_line_calibration_status():
 @app.route('/api/line_calibration/set_thresholds', methods=['POST'])
 def set_line_thresholds():
     try:
-        if line_detection_thresholds_setter is None:
-            raise RuntimeError("api.line_detection_thresholds_setter is None")
-        
         data = request.get_json()
         if not data or 'thresholds' not in data:
             return jsonify({"error": "Missing 'thresholds' in request body"}), 400
@@ -442,8 +354,7 @@ def set_line_thresholds():
                 else:
                     return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs"}), 400
             
-            line_detection_thresholds_setter(thresholds_ranges)  # pyright: ignore[reportGeneralTypeIssues]
-            logger.info(f"Line detection thresholds manually set to: {thresholds_ranges}")
+            calibration.set_line_detection_thresholds(thresholds_ranges)
             return jsonify({"status": "ok", "thresholds": thresholds_ranges})
         except (ValueError, TypeError) as e:
             return jsonify({"error": f"Invalid threshold values: {e}"}) , 400
@@ -455,17 +366,12 @@ def set_line_thresholds():
 @app.route('/api/get_motor_settings')
 def get_motor_settings():
     try:
-        if rotation_correction_enabled_getter is None:
-            raise RuntimeError("api.rotation_correction_enabled_getter is None")
-        if line_avoiding_enabled_getter is None:
-            raise RuntimeError("api.line_avoiding_enabled_getter is None")
-        
         return jsonify({
-            "rotation_correction_enabled": rotation_correction_enabled_getter(),
-            "line_avoiding_enabled": line_avoiding_enabled_getter(),
-            "position_based_speed_enabled": position_based_speed_enabled_getter() if position_based_speed_enabled_getter else True,
-            "camera_ball_usage_enabled": camera_ball_usage_enabled_getter() if camera_ball_usage_enabled_getter else True,
-            "always_facing_goal_enabled": always_facing_goal_enabled_getter() if always_facing_goal_enabled_getter else True,
+            "rotation_correction_enabled": shared_data.get_rotation_correction_enabled(),
+            "line_avoiding_enabled": shared_data.get_line_avoiding_enabled(),
+            "position_based_speed_enabled": shared_data.get_position_based_speed_enabled(),
+            "camera_ball_usage_enabled": shared_data.get_camera_ball_usage_enabled(),
+            "always_facing_goal_enabled": shared_data.get_always_facing_goal_enabled(),
         })
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -475,11 +381,6 @@ def get_motor_settings():
 @app.route('/api/set_motor_settings', methods=['POST'])
 def set_motor_settings():
     try:
-        if rotation_correction_enabled_setter is None:
-            raise RuntimeError("api.rotation_correction_enabled_setter is None")
-        if line_avoiding_enabled_setter is None:
-            raise RuntimeError("api.line_avoiding_enabled_setter is None")
-        
         data = request.get_json()
         if not data:
             return jsonify({"error": "Missing request body"}), 400
@@ -487,35 +388,32 @@ def set_motor_settings():
         if 'rotation_correction_enabled' in data:
             if not isinstance(data['rotation_correction_enabled'], bool):
                 return jsonify({"error": "rotation_correction_enabled must be a boolean"}), 400
-            rotation_correction_enabled_setter(data['rotation_correction_enabled'])
+            shared_data.set_rotation_correction_enabled(data['rotation_correction_enabled'])
             logger.info(f"Rotation correction {'enabled' if data['rotation_correction_enabled'] else 'disabled'}")
         
         if 'line_avoiding_enabled' in data:
             if not isinstance(data['line_avoiding_enabled'], bool):
                 return jsonify({"error": "line_avoiding_enabled must be a boolean"}), 400
-            line_avoiding_enabled_setter(data['line_avoiding_enabled'])
+            shared_data.set_line_avoiding_enabled(data['line_avoiding_enabled'])
             logger.info(f"Line avoiding {'enabled' if data['line_avoiding_enabled'] else 'disabled'}")
         
         if 'position_based_speed_enabled' in data:
             if not isinstance(data['position_based_speed_enabled'], bool):
                 return jsonify({"error": "position_based_speed_enabled must be a boolean"}), 400
-            if position_based_speed_enabled_setter:
-                position_based_speed_enabled_setter(data['position_based_speed_enabled'])
-                logger.info(f"Position-based speed {'enabled' if data['position_based_speed_enabled'] else 'disabled'}")
+            shared_data.set_position_based_speed_enabled(data['position_based_speed_enabled'])
+            logger.info(f"Position-based speed {'enabled' if data['position_based_speed_enabled'] else 'disabled'}")
         
         if 'camera_ball_usage_enabled' in data:
             if not isinstance(data['camera_ball_usage_enabled'], bool):
                 return jsonify({"error": "camera_ball_usage_enabled must be a boolean"}), 400
-            if camera_ball_usage_enabled_setter:
-                camera_ball_usage_enabled_setter(data['camera_ball_usage_enabled'])
-                logger.info(f"Camera ball usage {'enabled' if data['camera_ball_usage_enabled'] else 'disabled'}")
+            shared_data.set_camera_ball_usage_enabled(data['camera_ball_usage_enabled'])
+            logger.info(f"Camera ball usage {'enabled' if data['camera_ball_usage_enabled'] else 'disabled'}")
         
         if 'always_facing_goal_enabled' in data:
             if not isinstance(data['always_facing_goal_enabled'], bool):
                 return jsonify({"error": "always_facing_goal_enabled must be a boolean"}), 400
-            if always_facing_goal_enabled_setter:
-                always_facing_goal_enabled_setter(data['always_facing_goal_enabled'])
-                logger.info(f"Always facing goal {'enabled' if data['always_facing_goal_enabled'] else 'disabled'}")
+            shared_data.set_always_facing_goal_enabled(data['always_facing_goal_enabled'])
+            logger.info(f"Always facing goal {'enabled' if data['always_facing_goal_enabled'] else 'disabled'}")
         
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -526,14 +424,9 @@ def set_motor_settings():
 @app.route('/api/get_goal_settings')
 def get_goal_settings():
     try:
-        if goal_color_getter is None:
-            raise RuntimeError("api.goal_color_getter is None")
-        if goal_calibration_getter is None:
-            raise RuntimeError("api.goal_calibration_getter is None")
-        
-        goal_color = goal_color_getter()
-        yellow_lower, yellow_upper = goal_calibration_getter('yellow') # pyright: ignore[reportGeneralTypeIssues]
-        blue_lower, blue_upper = goal_calibration_getter('blue') # pyright: ignore[reportGeneralTypeIssues]
+        goal_color = shared_data.get_goal_color()
+        yellow_lower, yellow_upper = shared_data.get_goal_calibration('yellow')
+        blue_lower, blue_upper = shared_data.get_goal_calibration('blue')
         
         return jsonify({
             "goal_color": goal_color,
@@ -556,11 +449,6 @@ def get_goal_settings():
 @app.route('/api/set_goal_settings', methods=['POST'])
 def set_goal_settings():
     try:
-        if goal_color_setter is None:
-            raise RuntimeError("api.goal_color_setter is None")
-        if goal_calibration_setter is None:
-            raise RuntimeError("api.goal_calibration_setter is None")
-        
         data = request.get_json()
         if not data:
             return jsonify({"error": "Missing request body"}), 400
@@ -568,8 +456,7 @@ def set_goal_settings():
         if 'goal_color' in data:
             if data['goal_color'] not in ['yellow', 'blue']:
                 return jsonify({"error": "goal_color must be 'yellow' or 'blue'"}), 400
-            goal_color_setter(data['goal_color'])
-            logger.info(f"Goal color set to {data['goal_color']}")
+            calibration.set_enemy_goal_color(data['goal_color'])
         
         if 'calibration' in data:
             cal = data['calibration']
@@ -577,15 +464,12 @@ def set_goal_settings():
                 yellow = cal['yellow']
                 if 'lower' in yellow and 'upper' in yellow:
                     if yellow['lower'] and len(yellow['lower']) == 3 and yellow['upper'] and len(yellow['upper']) == 3:
-                        logger.info(yellow)
-                        goal_calibration_setter('yellow', yellow['lower'], yellow['upper'])
-                        logger.info(f"Yellow goal calibration set: {yellow['lower']} - {yellow['upper']}")
+                        calibration.set_goal_color_ranges('yellow', tuple(yellow['lower']), tuple(yellow['upper']))
             if 'blue' in cal:
                 blue = cal['blue']
                 if 'lower' in blue and 'upper' in blue:
                     if blue['lower'] and len(blue['lower']) == 3 and blue['upper'] and len(blue['upper']) == 3:
-                        goal_calibration_setter('blue', blue['lower'], blue['upper'])
-                        logger.info(f"Blue goal calibration set: {blue['lower']} - {blue['upper']}")
+                        calibration.set_goal_color_ranges('blue', tuple(blue['lower']), tuple(blue['upper']))
         
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -596,10 +480,7 @@ def set_goal_settings():
 @app.route('/api/get_goal_detection')
 def get_goal_detection():
     try:
-        if goal_detection_result_getter is None:
-            raise RuntimeError("api.goal_detection_result_getter is None")
-        
-        result = goal_detection_result_getter()
+        result = shared_data.get_goal_detection_result()
         if result is None:
             return jsonify({
                 "goal_detected": False,
@@ -624,9 +505,6 @@ def get_goal_detection():
 @app.route('/api/compute_hsv_from_regions', methods=['POST'])
 def compute_hsv_from_regions():
     try:
-        if camera_frame_getter is None:
-            raise RuntimeError("Camera frame getter is not set")
-        
         data = request.get_json()
         if not data:
             return jsonify({"error": "Missing request body"}), 400
@@ -647,11 +525,12 @@ def compute_hsv_from_regions():
             if width <= 0 or height <= 0:
                 return jsonify({"error": "Invalid region dimensions"}), 400
             
-            frame = camera_frame_getter()
-            if frame is None:
+            frame_data = shared_data.get_camera_frame()
+            if frame_data is None or frame_data.frame is None:
                 return jsonify({"error": "No camera frame available"}), 503
+            frame = frame_data.frame
             
-            frame_height, frame_width = frame.shape[:2] # pyright: ignore[reportGeneralTypeIssues]
+            frame_height, frame_width = frame.shape[:2]
             
             x = max(0, min(x, frame_width - 1))
             y = max(0, min(y, frame_height - 1))
@@ -702,10 +581,7 @@ def compute_hsv_from_regions():
 @app.route('/api/get_position_estimate')
 def get_position_estimate():
     try:
-        if position_estimate_getter is None:
-            raise RuntimeError("api.position_estimate_getter is None")
-        
-        position: PositionEstimate = position_estimate_getter()
+        position: PositionEstimate | None = vision.get_position_estimate()
         if position is None:
             return jsonify({
                 "x_mm": None,
@@ -724,12 +600,9 @@ def get_position_estimate():
 
 
 @app.route('/api/goal_distance/get_focal_length')
-def get_goal_focal_length_api():
+def get_goal_focal_length():
     try:
-        if goal_focal_length_getter is None:
-            raise RuntimeError("api.goal_focal_length_getter is None")
-        
-        focal_length = goal_focal_length_getter()
+        focal_length = shared_data.get_goal_focal_length()
         return jsonify({"focal_length_pixels": focal_length})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -737,11 +610,8 @@ def get_goal_focal_length_api():
 
 
 @app.route('/api/goal_distance/set_focal_length', methods=['POST'])
-def set_goal_focal_length_api():
+def set_goal_focal_length():
     try:
-        if goal_focal_length_setter is None:
-            raise RuntimeError("api.goal_focal_length_setter is None")
-        
         data = request.get_json()
         if not data or 'focal_length_pixels' not in data:
             return jsonify({"error": "Missing 'focal_length_pixels' in request body"}), 400
@@ -750,8 +620,7 @@ def set_goal_focal_length_api():
         if not isinstance(focal_length, (int, float)) or focal_length <= 0:
             return jsonify({"error": "focal_length_pixels must be a positive number"}), 400
         
-        goal_focal_length_setter(float(focal_length))
-        logger.info(f"Goal focal length set to {focal_length}")
+        calibration.set_goal_focal_length(float(focal_length))
         return jsonify({"status": "ok", "focal_length_pixels": focal_length})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -759,11 +628,8 @@ def set_goal_focal_length_api():
 
 
 @app.route('/api/goal_distance_calibration/start', methods=['POST'])
-def start_goal_distance_calibration_api():
+def start_goal_distance_calibration():
     try:
-        if goal_distance_calibration_starter is None:
-            raise RuntimeError("api.goal_distance_calibration_starter is None")
-        
         data = request.get_json(silent=True) or {}
         initial_distance = data.get('initial_distance', 200.0)
         line_distance = data.get('line_distance', 200.0)
@@ -774,8 +640,7 @@ def start_goal_distance_calibration_api():
         if not isinstance(line_distance, (int, float)) or line_distance <= 0:
             return jsonify({"error": "line_distance must be a positive number"}), 400
         
-        goal_distance_calibration_starter(float(initial_distance), float(line_distance))
-        logger.info(f"Goal distance calibration started: initial={initial_distance}mm, line={line_distance}mm")
+        calibration.start_goal_distance_calibration(float(initial_distance), float(line_distance))
         return jsonify({
             "status": "ok",
             "message": "Drive the robot toward the enemy goal until it detects the line, then stop calibration"
@@ -786,17 +651,13 @@ def start_goal_distance_calibration_api():
 
 
 @app.route('/api/goal_distance_calibration/stop', methods=['POST'])
-def stop_goal_distance_calibration_api():
+def stop_goal_distance_calibration():
     try:
-        if goal_distance_calibration_stopper is None:
-            raise RuntimeError("api.goal_distance_calibration_stopper is None")
-        
-        result = goal_distance_calibration_stopper()
+        result = calibration.stop_goal_distance_calibration()
         
         if not result.get('success'):
             return jsonify(result), 400
         
-        logger.info(f"Goal distance calibration completed: focal_length={result['focal_length_pixels']:.2f} pixels")
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -804,13 +665,9 @@ def stop_goal_distance_calibration_api():
 
 
 @app.route('/api/goal_distance_calibration/cancel', methods=['POST'])
-def cancel_goal_distance_calibration_api():
+def cancel_goal_distance_calibration():
     try:
-        if goal_distance_calibration_canceler is None:
-            raise RuntimeError("api.goal_distance_calibration_canceler is None")
-        
-        goal_distance_calibration_canceler()
-        logger.info("Goal distance calibration cancelled")
+        calibration.cancel_goal_distance_calibration()
         return jsonify({"status": "ok", "message": "Calibration cancelled"})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -818,23 +675,18 @@ def cancel_goal_distance_calibration_api():
 
 
 @app.route('/api/goal_distance_calibration/status')
-def get_goal_distance_calibration_status_api():
+def get_goal_distance_calibration_status():
     try:
-        if goal_distance_calibration_status_getter is None:
-            raise RuntimeError("api.goal_distance_calibration_status_getter is None")
-        
-        status = goal_distance_calibration_status_getter()
+        status = calibration.get_goal_distance_calibration_status()
         return jsonify(status)
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/get_autonomous_state')
-def get_autonomous_state_api():
+def get_autonomous_state():
     try:
-        if autonomous_state_getter is None:
-            return jsonify({'state': 'unavailable'})
-        state = autonomous_state_getter()
+        state = shared_data.get_autonomous_state()
         return jsonify(state if state else {'state': 'idle'})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -844,39 +696,16 @@ def get_autonomous_state_api():
 @app.route('/api/get_detections')
 def get_detections():
     try:
-        if detections_getter is None:
-            return jsonify({"detections": []})
-        
-        detections = detections_getter()
-        if not isinstance(detections, list):
-            detections = []
-        
-        detection_list = []
-        for det in detections:
-            if isinstance(det, dict):
-                detection_list.append(det)
-            else:
-                detection_list.append({
-                    "object_type": det.object_type,
-                    "x": det.x,
-                    "y": det.y,
-                    "width": det.width,
-                    "height": det.height,
-                    "confidence": det.confidence,
-                    "color": getattr(det, 'color', (255, 255, 255))
-                })
-        
-        return jsonify({"detections": detection_list})
+        detections = shared_data.get_detected_objects_raw()
+        return jsonify({"detections": detections})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/get_ball_calibration')
-def get_ball_calibration_api():
+def get_ball_calibration():
     try:
-        if ball_calibration_getter is None:
-            raise RuntimeError("api.ball_calibration_getter is None")
-        lower, upper = ball_calibration_getter()
+        lower, upper = shared_data.get_ball_calibration()
         return jsonify({"lower": lower, "upper": upper})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -884,10 +713,8 @@ def get_ball_calibration_api():
 
 
 @app.route('/api/set_ball_calibration', methods=['POST'])
-def set_ball_calibration_api():
+def set_ball_calibration():
     try:
-        if ball_calibration_setter is None:
-            raise RuntimeError("api.ball_calibration_setter is None")
         data = request.get_json()
         if not data:
             return jsonify({"error": "Missing request body"}), 400
@@ -895,8 +722,7 @@ def set_ball_calibration_api():
         upper = data.get('upper')
         if not lower or not upper or len(lower) != 3 or len(upper) != 3:
             return jsonify({"error": "'lower' and 'upper' must be lists of 3 values"}), 400
-        ball_calibration_setter([int(v) for v in lower], [int(v) for v in upper])
-        logger.info(f"Ball calibration set: lower={lower} upper={upper}")
+        calibration.set_ball_color_range(tuple([int(v) for v in lower]), tuple([int(v) for v in upper]))
         return jsonify({"status": "ok"})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -913,14 +739,26 @@ def get_index_html():
     except Exception:
         return "", 404
 
-def start(host: str = API_HOST, port: int = API_PORT):
+
+
+def start(host: str = API_HOST, port: int = API_PORT, stop_event: multiprocessing.synchronize.Event | None = None):
     server = make_server(host=host, port=port, app=app, threaded=True)
     logger.info(f"API server started on {host}:{port}")
+
+    thread = threading.Thread(target=server.serve_forever)
     try:
-        server.serve_forever()
+        thread.start()
+
+        if stop_event:
+            stop_event.wait()
+        else:
+            while True:
+                time.sleep(1)
     except KeyboardInterrupt:
         server.shutdown()
+        thread.join()
 
 
 if __name__ == "__main__":
     start()
+
