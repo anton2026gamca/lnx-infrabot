@@ -2,7 +2,6 @@ import cv2
 import time
 import numpy as np
 from dataclasses import dataclass
-from sys import exception
 
 try:
     from picamera2 import Picamera2 # pyright: ignore[reportMissingImports]
@@ -10,7 +9,6 @@ except ImportError:
     Picamera2 = None
 
 from robot.config import *
-from robot.vision.visualizer import DetectedObject
 
 
 

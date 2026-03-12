@@ -1,11 +1,11 @@
 import time
 import logging
 import multiprocessing.synchronize
-import robot.hardware.teensy as teensy
-import robot.multiprocessing.shared_data as shared_data
-import robot.utils as utils
-import robot.calibration as calibration
-import robot.hardware.line_sensors as line_sensors
+
+from robot import calibration, utils
+from robot.hardware import line_sensors, teensy
+from robot.multiprocessing import shared_data
+
 from robot.hardware.teensy import TeensyCommunicator
 from robot.config import *
 

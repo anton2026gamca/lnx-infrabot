@@ -1,10 +1,12 @@
-import time
 import logging
 import multiprocessing.synchronize
 import numpy as np
-import robot.utils as utils
-import robot.vision.camera as camera
-import robot.multiprocessing.shared_data as shared_data
+import time
+
+from robot import utils
+from robot.multiprocessing import shared_data
+from robot.vision import camera
+
 from robot.vision.camera import FrameData
 from robot.config import *
 

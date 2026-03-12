@@ -11,7 +11,7 @@ logs_buffer = multiprocessing.Queue(maxsize=LOG_BUFFER_MAX_ENTRIES)
 logs_buffer_lock = multiprocessing.Lock()
 
 
-import robot.utils as utils
+from robot import utils
 from robot.config import *
 from robot.hardware.teensy import ParsedTeensyData, IRData, CompassData, RunningStateData
 from robot.robot import RobotManualControl

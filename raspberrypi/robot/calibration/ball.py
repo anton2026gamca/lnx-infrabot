@@ -1,7 +1,7 @@
 import math
 
-import robot.multiprocessing.shared_data as shared_data
-import robot.utils as utils
+from robot import utils
+from robot.multiprocessing import shared_data
 from robot.calibration.data_manager import save_calibration_data
 
 

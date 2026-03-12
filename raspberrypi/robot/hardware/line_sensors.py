@@ -1,6 +1,7 @@
-import robot.multiprocessing.shared_data as shared_data
-from robot.config import *
+from robot.multiprocessing import shared_data
+
 from robot.hardware.teensy import ParsedTeensyData
+from robot.config import *
 
 
 

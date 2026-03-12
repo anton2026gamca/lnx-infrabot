@@ -1,11 +1,11 @@
 import math
 import time
 
-import robot.multiprocessing.shared_data as shared_data
-import robot.utils as utils
-import robot.vision as vision
-from robot.config import *
+from robot import utils, vision
+from robot.multiprocessing import shared_data
+
 from robot.hardware.motors import SmartMotorsController
+from robot.config import *
 
 
 

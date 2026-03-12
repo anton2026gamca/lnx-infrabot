@@ -3,7 +3,7 @@ import sys
 from multiprocessing import Queue
 from multiprocessing.synchronize import Lock
 
-import robot.multiprocessing.shared_data as shared_data
+from robot.multiprocessing import shared_data
 from robot.config import *
 
 

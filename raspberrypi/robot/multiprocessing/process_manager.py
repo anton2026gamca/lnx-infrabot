@@ -1,12 +1,11 @@
 import logging
 import multiprocessing
 
-import robot.multiprocessing.processes.api_process as api_process
-import robot.multiprocessing.processes.camera_capture_process as camera_capture_process
-import robot.multiprocessing.processes.camera_processing_process as camera_processing_process
-import robot.multiprocessing.processes.hardware_process as hardware_process
-import robot.multiprocessing.processes.logic_process as logic_process
-import robot.utils as utils
+from robot import utils
+from robot.api import api_process
+from robot.hardware import hardware_process
+from robot.logic import logic_process
+from robot.vision import camera_capture_process, camera_processing_process
 
 
 

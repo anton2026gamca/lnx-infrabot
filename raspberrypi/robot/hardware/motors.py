@@ -1,9 +1,10 @@
 import math
 import time
 
-import robot.hardware.line_sensors as line_sensors
-import robot.multiprocessing.shared_data as shared_data
-import robot.utils as utils
+from robot import utils
+from robot.hardware import line_sensors
+from robot.multiprocessing import shared_data
+
 from robot.config import *
 
 

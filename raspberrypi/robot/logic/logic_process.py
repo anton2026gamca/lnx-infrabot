@@ -1,16 +1,18 @@
 import logging
 import multiprocessing.synchronize
 import time
-import robot.multiprocessing.shared_data as shared_data
-import robot.hardware.motors as motors
-from robot.brain import AutonomousController
+
+from robot.multiprocessing import shared_data
+
+from robot.logic import AutonomousController
 from robot.robot import RobotMode
+from robot.hardware.motors import SmartMotorsController
 from robot.config import *
 
 
 
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
-    motors_controller = motors.SmartMotorsController()
+    motors_controller = SmartMotorsController()
     autonomous_controller = AutonomousController()
 
     while not stop_event.is_set():

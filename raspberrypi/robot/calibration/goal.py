@@ -1,9 +1,10 @@
-import robot.hardware.line_sensors as line_sensors
-import robot.multiprocessing.shared_data as shared_data
-import robot.utils as utils
+from robot import utils
 from robot.calibration.data_manager import save_calibration_data
-from robot.config import *
+from robot.hardware import line_sensors
+from robot.multiprocessing import shared_data
+
 from robot.vision import GoalDetectionResult
+from robot.config import *
 
 
 
@@ -19,7 +20,7 @@ def set_enemy_goal_color(color: str) -> None:
     save_calibration_data()
     logger.info(f"Enemy goal color set to: {color.lower()}")
 
-def set_goal_color_ranges(goal_color: str, lower_hsv: tuple[int, int, int], upper_hsv: tuple[int, int, int]) -> None:
+def set_goal_color_range(goal_color: str, lower_hsv: tuple[int, int, int], upper_hsv: tuple[int, int, int]) -> None:
     if goal_color.lower() not in ['yellow', 'blue']:
         logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
         return
