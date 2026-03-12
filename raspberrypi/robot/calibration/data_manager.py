@@ -2,8 +2,9 @@ import json
 import multiprocessing
 import os
 
-import robot.multiprocessing.shared_data as shared_data
-import robot.utils as utils
+from robot import utils
+from robot.multiprocessing import shared_data
+
 from robot.config import *
 
 

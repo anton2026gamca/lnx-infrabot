@@ -3,9 +3,9 @@ import math
 import numpy as np
 from dataclasses import dataclass, field
 
-import robot.multiprocessing.shared_data as shared_data
-from robot.config import *
+from robot.multiprocessing import shared_data
 from robot.vision.visualizer import DetectedObject
+from robot.config import *
 
 
 

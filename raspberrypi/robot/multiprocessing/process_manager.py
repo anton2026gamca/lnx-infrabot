@@ -1,12 +1,11 @@
 import logging
 import multiprocessing
 
-import robot.multiprocessing.processes.api_process as api_process
-import robot.multiprocessing.processes.camera_capture_process as camera_capture_process
-import robot.multiprocessing.processes.camera_processing_process as camera_processing_process
-import robot.multiprocessing.processes.hardware_process as hardware_process
-import robot.multiprocessing.processes.logic_process as logic_process
-import robot.utils as utils
+from robot import utils
+from robot.api import api_process
+from robot.hardware import hardware_process
+from robot.logic import logic_process
+from robot.vision import camera_capture_process, camera_processing_process
 
 
 
@@ -19,9 +18,11 @@ class Process:
         self.function = function
         self.stop_event = multiprocessing.Event()
         self.stop_event.is_set()
-        self.logger = utils.get_logger(f"{name}") if logger is None else logger
+        self.logger = logger
 
     def run(self):
+        if self.logger is None:
+            self.logger = utils.get_logger(self.name)
         try:
             self.function(stop_event=self.stop_event, logger=self.logger)
         except KeyboardInterrupt:
@@ -36,11 +37,11 @@ class Process:
 
 
 processes: list[Process] = [
-    Process("API Process", api_process.run),
+    Process("Hardware Process", hardware_process.run),
     Process("Camera Capture Process", camera_capture_process.run),
     Process("Camera Processing Process", camera_processing_process.run),
-    Process("Hardware Process", hardware_process.run),
     Process("Logic Process", logic_process.run),
+    Process("API Process", api_process.run),
 ]
 
 
@@ -82,8 +83,10 @@ def start_all_processes():
         start_process(process)
 
 def stop_all_processes():
+    processes.reverse()
     for process in processes:
         if process is None:
             continue
         stop_process(process)
+    processes.reverse()
 

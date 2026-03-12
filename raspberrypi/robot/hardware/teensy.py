@@ -173,6 +173,7 @@ class TeensyCommunicator:
         self.ser = None
         self._log = logger
         self.buffer: bytearray | None = None
+        self.auto_connect = auto_connect
         if auto_connect:
             self.connect()
 
@@ -190,7 +191,8 @@ class TeensyCommunicator:
             self.ser = None
     
     def __enter__(self) -> "TeensyCommunicator":
-        self.connect()
+        if not self.auto_connect:
+            self.connect()
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:

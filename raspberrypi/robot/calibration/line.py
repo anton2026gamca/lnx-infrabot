@@ -1,8 +1,9 @@
-import robot.multiprocessing.shared_data as shared_data
-import robot.utils as utils
+from robot import utils
 from robot.calibration.data_manager import save_calibration_data
-from robot.config import *
+from robot.multiprocessing import shared_data
+
 from robot.hardware.teensy import ParsedTeensyData
+from robot.config import *
 
 
 

@@ -7,16 +7,14 @@ import numpy as np
 from flask import Flask, Response, jsonify, request
 from werkzeug.serving import make_server
 
-import robot.brain as brain
-import robot.calibration as calibration
-import robot.hardware.line_sensors as line_sensors
-import robot.multiprocessing.shared_data as shared_data
-import robot.utils as utils
-import robot.vision as vision
-from robot.config import *
+from robot import calibration, utils, vision
+from robot.hardware import line_sensors
+from robot.multiprocessing import shared_data
+
 from robot.robot import RobotManualControl
 from robot.utils import Suppress200Filter
 from robot.vision import DetectedObject, PositionEstimate
+from robot.config import *
 
 
 app = Flask(__name__)
@@ -464,12 +462,12 @@ def set_goal_settings():
                 yellow = cal['yellow']
                 if 'lower' in yellow and 'upper' in yellow:
                     if yellow['lower'] and len(yellow['lower']) == 3 and yellow['upper'] and len(yellow['upper']) == 3:
-                        calibration.set_goal_color_ranges('yellow', tuple(yellow['lower']), tuple(yellow['upper']))
+                        calibration.set_goal_color_range('yellow', tuple(yellow['lower']), tuple(yellow['upper']))
             if 'blue' in cal:
                 blue = cal['blue']
                 if 'lower' in blue and 'upper' in blue:
                     if blue['lower'] and len(blue['lower']) == 3 and blue['upper'] and len(blue['upper']) == 3:
-                        calibration.set_goal_color_ranges('blue', tuple(blue['lower']), tuple(blue['upper']))
+                        calibration.set_goal_color_range('blue', tuple(blue['lower']), tuple(blue['upper']))
         
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -755,6 +753,8 @@ def start(host: str = API_HOST, port: int = API_PORT, stop_event: multiprocessin
             while True:
                 time.sleep(1)
     except KeyboardInterrupt:
+        pass
+    finally:
         server.shutdown()
         thread.join()
 

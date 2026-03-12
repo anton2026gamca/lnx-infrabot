@@ -1,11 +1,12 @@
 import cv2
-import time
 import logging
 import multiprocessing.synchronize
 import numpy as np
-import robot.multiprocessing.shared_data as shared_data
-import robot.vision as vision
-import robot.calibration as calibration
+import time
+
+from robot import calibration, vision
+from robot.multiprocessing import shared_data
+
 from robot.vision import GoalColorCalibration, DetectedObject
 from robot.config import *
 
