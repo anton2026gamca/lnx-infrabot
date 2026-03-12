@@ -21,7 +21,6 @@ class AutoState:
     PUSH          = "push"          # ball possessed - drive forward, keep goal centred
     GOAL_SCORED   = "goal_scored"   # goal scored - wait until the ball isn't in the goal anymore
 
-
 class AutonomousController:
     """
     Autonomous soccer behaviour.
@@ -55,9 +54,6 @@ class AutonomousController:
         self.state_start_time: float = time.time()
         self._possession_ticks: int = 0
         self._POSSESSION_CONFIRM_TICKS: int = 3
-        self._ball_lost_ticks: int = 0
-        self._BALL_LOST_CONFIRM_TICKS: int = 5
-        self._camera_ball_lost_frames: int = 0
         self._ball_likely_inside_robot: bool = False
 
     # ------------------------------------------------------------------
@@ -346,7 +342,6 @@ class AutonomousController:
 
     def reset(self):
         self._possession_ticks = 0
-        self._ball_lost_ticks = 0
         self._cam_possession_elapsed_ticks = 10000
         self._ball_likely_inside_robot = False
         self._transition(AutoState.IDLE)

@@ -1,19 +1,19 @@
 import multiprocessing
 import multiprocessing.shared_memory
 import numpy as np
+from robot.config import *
 
 
 _manager = multiprocessing.Manager()
 
 # define logging stuff before we import any robot stuff
-next_log_id = multiprocessing.Value('i', 1)
-logs_buffer = _manager.dict()
+logs_buffer = multiprocessing.Queue(maxsize=LOG_BUFFER_MAX_ENTRIES)
 logs_buffer_lock = multiprocessing.Lock()
 
 
 import robot.utils as utils
 from robot.config import *
-from robot.hardware.teensy import ParsedTeensyData, RunningStateData
+from robot.hardware.teensy import ParsedTeensyData, IRData, CompassData, RunningStateData
 from robot.robot import RobotManualControl
 from robot.vision import CameraBallPosition, DetectedObject, GoalDetectionResult
 from robot.vision.camera import FrameData
@@ -51,18 +51,45 @@ hardware_data = _manager.dict()
 hardware_data_lock = multiprocessing.Lock()
 def set_hardware_data(data: ParsedTeensyData | None):
     with hardware_data_lock:
+        dict_data = {
+            'compass': {
+                'heading': data.compass.heading if data else None,
+                'pitch': data.compass.pitch if data else None,
+                'roll': data.compass.roll if data else None,
+            },
+            'ir': {
+                'angle': data.ir.angle if data else None,
+                'distance': data.ir.distance if data else None,
+                'sensors': data.ir.sensors if data else None,
+                'status': data.ir.status if data else None,
+            },
+            'line_sensors': data.line if data else None,
+            'raw': data.raw if data else None,
+            'timestamp': data.timestamp if data else None,
+        }
         hardware_data.clear()
-        if data:
-            for key, value in data.__dict__.items():
-                hardware_data[key] = value
+        hardware_data.update(dict_data)
 
 def get_hardware_data() -> ParsedTeensyData | None:
     with hardware_data_lock:
         if not hardware_data:
             return None
-        data = ParsedTeensyData.__new__(ParsedTeensyData)
-        for key, value in hardware_data.items():
-            setattr(data, key, value)
+        data = ParsedTeensyData(
+            compass=CompassData(
+                heading=hardware_data['compass']['heading'],
+                pitch=hardware_data['compass']['pitch'],
+                roll=hardware_data['compass']['roll'],
+            ),
+            ir=IRData(
+                angle=hardware_data['ir']['angle'],
+                distance=hardware_data['ir']['distance'],
+                sensors=hardware_data['ir']['sensors'],
+                status=hardware_data['ir']['status'],
+            ),
+            line=hardware_data['line_sensors'],
+            raw=hardware_data['raw'],
+            timestamp=hardware_data['timestamp'],
+        )
         return data
 
 

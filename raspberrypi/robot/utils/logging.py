@@ -1,5 +1,7 @@
 import logging
 import sys
+from multiprocessing import Queue
+from multiprocessing.synchronize import Lock
 
 import robot.multiprocessing.shared_data as shared_data
 from robot.config import *
@@ -48,13 +50,10 @@ class Suppress200Filter(logging.Filter):
         return True
 
 class BufferedLogHandler(logging.Handler):
-    def __init__(self, logs_dict, logs_lock, next_log_id, formatter=None, max_entries: int = 100):
+    def __init__(self, logs_queue: Queue, logs_lock: Lock, formatter=None):
         super().__init__()
-        self.logs_dict = logs_dict
+        self.logs_queue = logs_queue
         self.logs_lock = logs_lock
-        self.next_log_id = next_log_id
-        self.max_entries = max_entries
-        self._cleanup_threshold = int(max_entries * 1.2)
         if formatter:
             self.setFormatter(formatter)
         elif LogFormatter is not None:
@@ -69,19 +68,7 @@ class BufferedLogHandler(logging.Handler):
                 "logger": record.name,
                 "time": getattr(record, "created", None),
             }
-            with self.logs_lock:
-                lid = self.next_log_id.value
-                self.logs_dict[lid] = entry
-                self.next_log_id.value += 1
-
-                if len(self.logs_dict) > self._cleanup_threshold:
-                    sorted_keys = sorted(self.logs_dict.keys())
-                    to_remove = len(self.logs_dict) - self.max_entries
-                    for key in sorted_keys[:to_remove]:
-                        try:
-                            del self.logs_dict[key]
-                        except KeyError:
-                            pass
+            self.logs_queue.put(entry)
         except Exception as e:
             self.handleError(record)
 
@@ -102,17 +89,16 @@ def setup_logger(name: str | None = None, level=_default_logger_level) -> loggin
     logger.setLevel(level)
     logger.propagate = False
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(level)
-
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(level)
     formatter = LogFormatter(
         f"[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s",
         datefmt="%H:%M:%S"
     )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
     
-    buffer_handler = BufferedLogHandler(shared_data.logs_buffer, shared_data.logs_buffer_lock, shared_data.next_log_id, max_entries=LOG_BUFFER_MAX_ENTRIES)
+    buffer_handler = BufferedLogHandler(shared_data.logs_buffer, shared_data.logs_buffer_lock, formatter=formatter)
     buffer_handler.setLevel(level)
     logger.addHandler(buffer_handler)
     
@@ -127,13 +113,26 @@ def get_logger(name: str | None = None, level=_default_logger_level) -> logging.
     _known_loggers[logger.name] = logger
     return logger
 
+_next_log_id = 1
+_logs_buffer: list[dict] = []
+def _drain_logs():
+    global _next_log_id
+
+    while True:
+        try:
+            entry = shared_data.logs_buffer.get_nowait()
+        except Exception:
+            break
+
+        entry["id"] = _next_log_id
+        _next_log_id += 1
+        _logs_buffer.append(entry)
+
 def get_logs(since_id: int = 0) -> tuple[list[dict], int]:
-    with shared_data.logs_buffer_lock:
-        items = [
-            {"id": lid, **entry}
-            for lid, entry in sorted(shared_data.logs_buffer.items())
-            if lid > since_id
-        ]
-        last_id = max(shared_data.logs_buffer.keys()) if shared_data.logs_buffer else 0
+    _drain_logs()
+
+    items = [log for log in _logs_buffer if log["id"] > since_id]
+    last_id = _logs_buffer[-1]["id"] if _logs_buffer else 0
+
     return items, last_id
 

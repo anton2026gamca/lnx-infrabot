@@ -2,6 +2,7 @@ import time
 from dataclasses import dataclass
 
 
+# Define classes and data structures before importing other robot modules to avoid circular import errors
 
 class RobotMode:
     IDLE       = 0
@@ -14,14 +15,15 @@ class RobotManualControl:
     move_speed: float = 0.0
     rotate: float = 0.0
 
+
 import robot.calibration as calibration
 import robot.multiprocessing.process_manager as process_manager
 import robot.multiprocessing.shared_data as shared_data
 import robot.utils as utils
 from robot.config import *
 
-logger = utils.get_logger()
 
+logger = utils.get_logger()
 
 
 def main():
@@ -35,7 +37,8 @@ def main():
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        logger.info("Stopping...")
+        pass
+    logger.info("Stopping...")
 
     process_manager.stop_all_processes()
 

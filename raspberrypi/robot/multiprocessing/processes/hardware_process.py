@@ -6,6 +6,7 @@ import robot.multiprocessing.shared_data as shared_data
 import robot.utils as utils
 import robot.calibration as calibration
 import robot.hardware.line_sensors as line_sensors
+from robot.hardware.teensy import TeensyCommunicator
 from robot.config import *
 
 
@@ -21,12 +22,13 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         "roll": 0
     }
 
-    with teensy.TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
+    with TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
         while not stop_event.is_set():
             start_time = time.time()
 
             line = communicator.read_line()
             data = None
+
             if line:
                 messages_received += 1
 
@@ -40,7 +42,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 
                 communicator.send_motors_message(shared_data.get_motor_speeds(), shared_data.get_kicker_state())
                 messages_sent += 1
-            
+
             if data:
                 if data.compass.heading != 999:
                     data.compass.heading -= compass_offset["heading"]
@@ -53,9 +55,9 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 
                 calibration.update_line_calibration(data)
                 line_sensors.update_line_detected(data)
-
                 shared_data.set_hardware_data(data)
-            
+
+
             if shared_data.check_and_clear_compass_reset():
                 if not data:
                     data = shared_data.get_hardware_data()
@@ -64,14 +66,15 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                     compass_offset["heading"] += data.compass.heading
                     compass_offset["pitch"] += data.compass.pitch
                     compass_offset["roll"] += data.compass.roll
-            
+
             if time.time() > last_log_time + 1:
                 logger.debug(f"Messages received per second: {messages_received}")
                 logger.debug(f"Messages sent per second: {messages_sent}")
                 messages_received = 0
                 messages_sent = 0
                 last_log_time = time.time()
-            
+
             time_elapsed = time.time() - start_time
             if time_elapsed < COMMUNICATION_LOOP_PERIOD:
                 time.sleep(max(0.0, COMMUNICATION_LOOP_PERIOD - time_elapsed - 0.001))
+

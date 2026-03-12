@@ -755,6 +755,8 @@ def start(host: str = API_HOST, port: int = API_PORT, stop_event: multiprocessin
             while True:
                 time.sleep(1)
     except KeyboardInterrupt:
+        pass
+    finally:
         server.shutdown()
         thread.join()
 
