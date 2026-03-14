@@ -56,7 +56,7 @@ MOTOR_SPEED_MIN = -9999
 MOTOR_SPEED_MAX = 9999
 
 # Motor acceleration (logic loops required to go from 0 to max speed)
-MOTOR_ACCELERATION_LOGIC_LOOPS = 2
+MOTOR_ACCELERATION_LOGIC_LOOPS = 4
 
 # =========================== LINE SENSOR SETTINGS ===============================
 LINE_SENSOR_COUNT = 12

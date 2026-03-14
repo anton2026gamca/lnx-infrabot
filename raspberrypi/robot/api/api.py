@@ -203,7 +203,9 @@ def get_logs():
 def get_mode():
     try:
         mode = shared_data.get_robot_mode()
-        return jsonify({"mode": mode})
+        if not mode in [0, 1, 2]:
+            raise ValueError(f"Invalid robot mode: {mode}")
+        return jsonify({"mode": ["idle", "manual", "autonomous"][mode]})
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
         return "", 500

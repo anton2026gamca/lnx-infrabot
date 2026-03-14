@@ -15,7 +15,7 @@ from robot import utils
 from robot.config import *
 from robot.hardware.teensy import ParsedTeensyData, IRData, CompassData, RunningStateData
 from robot.robot import RobotManualControl
-from robot.vision import CameraBallPosition, DetectedObject, GoalDetectionResult
+from robot.vision import CameraBallData, DetectedObject, GoalDetectionResult
 from robot.vision.camera import FrameData
 
 
@@ -354,16 +354,16 @@ camera_ball_distance = multiprocessing.Value('d', 999.0)
 camera_ball_detected = multiprocessing.Value('b', False)
 camera_ball_area_pixels = multiprocessing.Value('d', 0.0)
 
-def set_camera_ball_data(ball_data: CameraBallPosition) -> None:
+def set_camera_ball_data(ball_data: CameraBallData) -> None:
     with camera_ball_position_lock:
         camera_ball_angle.value = ball_data.angle
         camera_ball_distance.value = ball_data.distance
         camera_ball_detected.value = ball_data.detected
         camera_ball_area_pixels.value = ball_data.area_pixels
 
-def get_camera_ball_data() -> CameraBallPosition:
+def get_camera_ball_data() -> CameraBallData:
     with camera_ball_position_lock:
-        return CameraBallPosition(
+        return CameraBallData(
             angle=camera_ball_angle.value,
             distance=camera_ball_distance.value,
             detected=camera_ball_detected.value,

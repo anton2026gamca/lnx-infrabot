@@ -8,7 +8,7 @@ from robot.vision.visualizer import DetectedObject
 
 
 @dataclass
-class CameraBallPosition:
+class CameraBallData:
     angle: float
     distance: float
     detected: bool
@@ -72,7 +72,7 @@ def detect_ball(
     
     return detections, len(detections) > 0
 
-def calculate_ball_data(ball_detections, frame_width: float, camera_fov: float, calibration_constant: float) -> CameraBallPosition:
+def calculate_ball_data(ball_detections, frame_width: float, camera_fov: float, calibration_constant: float) -> CameraBallData:
     camera_ball_angle = 999.0
     camera_ball_distance = 0.0
     camera_ball_detected = False
@@ -91,7 +91,7 @@ def calculate_ball_data(ball_detections, frame_width: float, camera_fov: float, 
         camera_ball_distance = (calibration_constant if calibration_constant is not None else 10000.0) / math.sqrt(max(ball_area_pixels, 1.0))
         camera_ball_detected = True
 
-    return CameraBallPosition(
+    return CameraBallData(
         camera_ball_angle,
         camera_ball_distance,
         camera_ball_detected,
