@@ -1,7 +1,7 @@
 import math
 import time
 
-from robot import utils
+from robot import utils, vision
 from robot.hardware import line_sensors
 from robot.multiprocessing import shared_data
 
@@ -96,15 +96,14 @@ class SmartMotorsController(MotorsController):
         total_rotation = self.rotate * 0.4 + rotation_correction
         total_rotation = max(-1.0, min(1.0, total_rotation))
 
-        line_avoiding_enabled = shared_data.get_line_avoiding_enabled()
-        current_time = time.time()
-        
-        self.recently_crossed_angles = [
-            (angle, t) for angle, t in self.recently_crossed_angles 
-            if current_time - t < self.line_avoidance_cooldown_duration
-        ]
-        
-        if line_avoiding_enabled:
+        if shared_data.get_line_avoiding_enabled():
+            current_time = time.time()
+            
+            self.recently_crossed_angles = [
+                (angle, t) for angle, t in self.recently_crossed_angles 
+                if current_time - t < self.line_avoidance_cooldown_duration
+            ]
+            
             lines_detected = line_sensors.get_line_detected()
             if any(lines_detected):
                 logger.info(f"Line detected: {lines_detected}")
@@ -164,9 +163,22 @@ class SmartMotorsController(MotorsController):
                 self.move_y = move_speed * math.sin(avoid_angle)
                 self.line_avoidance_direction = avoid_angle
         
-        move_angle = math.atan2(self.move_y, self.move_x)
-        move_speed = math.sqrt(self.move_x**2 + self.move_y**2)
+        pos_speed_factor = 1.0
+        if shared_data.get_position_based_speed_enabled():
+            pos = vision.get_position_estimate()
+            if pos is not None:
+                distances = [
+                    pos.x_mm - AUTO_POSITION_SLOW_START_DISTANCE_X_MM,
+                    AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM - pos.y_mm,
+                    pos.y_mm - AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM
+                ]
+                highest = max(*distances)
+                highest = max(0.0, min(AUTO_POSITION_SLOW_END_DISTANCE_MM, highest))
+                pos_speed_factor = 1.0 - (highest / AUTO_POSITION_SLOW_END_DISTANCE_MM) * AUTO_POSITION_SLOW_MIN_SPEED
 
+        move_angle = math.atan2(self.move_y, self.move_x)
+        move_speed = math.sqrt(self.move_x**2 + self.move_y**2) * pos_speed_factor
+        
         motors = calculate_speeds(move_angle, move_speed * 255, total_rotation * 255)
         shared_data.set_motor_speeds(motors)
     

@@ -1,7 +1,7 @@
 import math
 import time
 
-from robot import utils, vision
+from robot import utils
 from robot.multiprocessing import shared_data
 
 from robot.hardware.motors import SmartMotorsController
@@ -202,8 +202,7 @@ class AutonomousController:
             side = math.sin(angle_rad) * speed
     
         move_angle_deg = math.degrees(math.atan2(side, fwd)) - heading if heading else math.degrees(math.atan2(side, fwd))
-        pos_factor = self._position_speed_factor()
-        move_speed = min(1.0, math.sqrt(fwd**2 + side**2)) * AUTO_SPEED_MULTIPLIER * pos_factor
+        move_speed = min(1.0, math.sqrt(fwd**2 + side**2)) * AUTO_SPEED_MULTIPLIER
 
         rotate = self._goal_track_rotation(goal, goal_visible)
 
@@ -231,8 +230,7 @@ class AutonomousController:
             )
             return
 
-        pos_factor = self._position_speed_factor()
-        move_speed = AUTO_PUSH_SPEED * AUTO_SPEED_MULTIPLIER * pos_factor
+        move_speed = AUTO_PUSH_SPEED * AUTO_SPEED_MULTIPLIER
         move_angle = 0.0
         rotate = self._goal_track_rotation(goal, goal_visible)
 
@@ -299,23 +297,6 @@ class AutonomousController:
             rotate = goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
             return max(-1.0, min(1.0, rotate))
         return 0
-
-    def _position_speed_factor(self) -> float:
-        """Get a speed multiplier based on the position on field to avoid lines/drive slower near them."""
-        if not shared_data.get_position_based_speed_enabled():
-            return 1.0
-        pos = vision.get_position_estimate()
-        if pos is None:
-            return 1.0
-        distances = [
-            pos.x_mm - AUTO_POSITION_SLOW_START_DISTANCE_X_MM,
-            AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM - pos.y_mm,
-            pos.y_mm - AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM
-        ]
-        highest = max(*distances)
-        highest = max(0.0, min(AUTO_POSITION_SLOW_END_DISTANCE_MM, highest))
-        return 1.0 - (highest / AUTO_POSITION_SLOW_END_DISTANCE_MM) * AUTO_POSITION_SLOW_MIN_SPEED
-
 
     def _transition(self, new_state: str, *debug_messages: str):
         if new_state != self.state:
