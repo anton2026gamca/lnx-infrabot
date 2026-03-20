@@ -53,6 +53,7 @@ class SmartMotorsController(MotorsController):
     Enhanced motors controller with:
         - Rotation correction: when enabled, automatically applies a rotation correction to maintain the robot's heading when no manual rotation input is given.
         - Line avoidance: when enabled, detects line sensor triggers and automatically steers the robot away from the line for a short duration, with cooldown to prevent oscillation.
+        - Position-based speed: when enabled, uses the robot's position estimate to reduce speed as it approaches lines, to help prevent crossing them.
     """
 
     def __init__(self):
@@ -69,11 +70,15 @@ class SmartMotorsController(MotorsController):
         self.last_line_avoid_end_time = 0.0
         self.recently_crossed_angles = []
 
+        self.rotation_correction_enabled = True
+        self.line_avoiding_enabled = True
+        self.position_based_speed_enabled = True
+
     def set_motors(self, angle: float, speed: float, rotate: float):
         hardware_data = shared_data.get_hardware_data()
         current_heading = hardware_data.compass.heading if hardware_data else None
 
-        rotation_correction_enabled = shared_data.get_rotation_correction_enabled()
+        rotation_correction_enabled = shared_data.get_rotation_correction_enabled() and self.rotation_correction_enabled
 
         absolute_angle = (angle + self.target_heading - current_heading) % 360 if rotation_correction_enabled and self.target_heading is not None and current_heading is not None else angle
         self.move_x += (speed * math.cos(math.radians(absolute_angle)) - self.move_x) * self.acceleration * LOGIC_LOOP_PERIOD
@@ -96,7 +101,7 @@ class SmartMotorsController(MotorsController):
         total_rotation = self.rotate * 0.4 + rotation_correction
         total_rotation = max(-1.0, min(1.0, total_rotation))
 
-        if shared_data.get_line_avoiding_enabled():
+        if shared_data.get_line_avoiding_enabled() and self.line_avoiding_enabled:
             current_time = time.time()
             
             self.recently_crossed_angles = [
@@ -164,7 +169,7 @@ class SmartMotorsController(MotorsController):
                 self.line_avoidance_direction = avoid_angle
         
         pos_speed_factor = 1.0
-        if shared_data.get_position_based_speed_enabled():
+        if shared_data.get_position_based_speed_enabled() and self.position_based_speed_enabled:
             pos = vision.get_position_estimate()
             if pos is not None:
                 distances = [
@@ -181,6 +186,18 @@ class SmartMotorsController(MotorsController):
         
         motors = calculate_speeds(move_angle, move_speed * 255, total_rotation * 255)
         shared_data.set_motor_speeds(motors)
+
+    def set_functions_enabled(self, rotation_correction_enabled: bool | None = None, line_avoiding_enabled: bool | None = None, position_based_speed_enabled: bool | None = None):
+        """
+        Enable or disable smart functions. If a parameter is None, it will not change the current state of that function.
+        NOTE: Enabling any of the functions may not actually enable them, if they are disabled globally (via the api)
+        """
+        if rotation_correction_enabled is not None:
+            self.rotation_correction_enabled = rotation_correction_enabled
+        if line_avoiding_enabled is not None:
+            self.line_avoiding_enabled = line_avoiding_enabled
+        if position_based_speed_enabled is not None:
+            self.position_based_speed_enabled = position_based_speed_enabled
     
     def reset(self):
         super().reset()

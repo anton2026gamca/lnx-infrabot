@@ -337,6 +337,20 @@
         background: #daa520;
       }
 
+      .select {
+        background: #333;
+        color: white;
+        border: 1px solid #555;
+        border-radius: 5px;
+        padding: 3px 8px;
+        margin-top: 3px;
+        font-size: 0.9em;
+      }
+      .select option {
+        background: #222;
+        color: white;
+      }
+
       .action-buttons {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
@@ -1127,9 +1141,9 @@
                 <button class="toggle-btn line-avoiding-toggle">Line Avoiding</button>
                 <button class="toggle-btn position-speed-toggle">Position Speed</button>
               </div>
+              <select class="select autonomous-state-machine-select"></select>
             </div>
 
-            <!-- Autonomous State -->
             <div class="sensor-card grid-span-4" id="autonomous-state-card" style="display:none;">
               <div class="sensor-label">Autonomous State</div>
               <div style="display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:4px;">
@@ -1154,7 +1168,6 @@
                   <div class="sensor-value" id="auto-goal-dist" style="font-size:1.1em;">---</div>
                 </div>
               </div>
-              <!-- State progress bar / pipeline -->
               <div style="display:flex; gap:3px; margin-top:8px; align-items:stretch;">
                 <div class="auto-step" id="auto-step-idle"     data-state="idle">IDLE</div>
                 <div style="color:#555;align-self:center;">&#9654;</div>
@@ -1720,6 +1733,7 @@
       });
 
       const autonomousControlGroup = document.getElementById('autonomous-controls');
+      const autonomousStateMachineSelect = document.querySelector('select.autonomous-state-machine-select');
 
       let activeManualControlBox = mainManualControlBox;
       let selectedMode = null;
@@ -1773,6 +1787,164 @@
           }
         });
       }
+
+      function computeCommandFromKeys(keys, box) {
+        let dy = 0, dx = 0;
+        if (keys.has('w')) dy += 1;
+        if (keys.has('s')) dy -= 1;
+        if (keys.has('d')) dx += 1;
+        if (keys.has('a')) dx -= 1;
+
+        const mag = Math.hypot(dx, dy);
+        // Get speed from slider for this box
+        const speed = manualSpeedSettings.get(box) || 1;
+        if (mag === 0) {
+          const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
+          return { move: { angle: 0, speed: 0 }, rotate: Math.max(-1, Math.min(1, rotate)) };
+        }
+
+        const angleRad = Math.atan2(dx, dy);
+        let angleDeg = angleRad * (180 / Math.PI);
+        angleDeg = ((angleDeg % 360) + 360) % 360;
+
+        const move = { angle: Number(angleDeg.toFixed(1)), speed: speed };
+
+        const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
+        return { move, rotate: Math.max(-1, Math.min(1, rotate)) };
+      }
+
+
+      function sendCurrentKeysCommand(box = activeManualControlBox) {
+        const { move, rotate } = computeCommandFromKeys(pressedKeys, box);
+        if (!move && (!rotate || rotate === 0)) {
+          sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 });
+        } else {
+          sendManualCommand({ move, rotate });
+        }
+      }
+
+      function handleManualKeyDown(e) {
+        const k = e.key.toLowerCase();
+        const allowed = ["w","a","s","d","arrowleft","arrowright"];
+        if (!allowed.includes(k)) return;
+        if (!pressedKeys.has(k)) {
+          pressedKeys.add(k);
+          sendCurrentKeysCommand(e.currentTarget);
+        }
+        e.preventDefault();
+      }
+
+      function handleManualKeyUp(e) {
+        const k = e.key.toLowerCase();
+        const allowed = ["w","a","s","d","arrowleft","arrowright"];
+        if (!allowed.includes(k)) return;
+        if (pressedKeys.has(k)) pressedKeys.delete(k);
+        sendCurrentKeysCommand(e.currentTarget);
+        e.preventDefault();
+      }
+
+      manualControlBoxes.forEach(box => {
+        box.addEventListener('keydown', handleManualKeyDown);
+        box.addEventListener('keyup', handleManualKeyUp);
+        box.addEventListener('blur', () => { pressedKeys.clear(); sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 }); });
+      });
+
+      function changeModeTo(mode) {
+        selectedMode = mode;
+        modeButtons.forEach(btn => {
+          if (btn.getAttribute('changemodeto') === mode) {
+            btn.classList.add("selected");
+          } else {
+            btn.classList.remove("selected");
+          }
+        });
+        Array.from(manualControlGroups).forEach(group => {
+          if (mode === 'manual') {
+            group.style.display = '';
+          } else {
+            group.style.display = 'none';
+          }
+        });
+        if (mode === 'autonomous') {
+          updateAutonomousStateMachines();
+          autonomousControlGroup.style.display = '';
+        } else {
+          autonomousControlGroup.style.display = 'none';
+        }
+        setTimeout(() => activeManualControlBox && activeManualControlBox.focus(), 40);
+      }
+      
+      async function updateMode() {
+        const response = await fetch('/api/get_mode');
+        if (!response.ok) {
+          console.error('Failed to fetch robot mode:', response.status);
+          return;
+        }
+        
+        const data = await response.json();
+        if (selectedMode && data.mode === selectedMode) return;
+        changeModeTo(data.mode);
+      }
+
+      if (autonomousStateMachineSelect) {
+        autonomousStateMachineSelect.addEventListener('change', async () => {
+          const sm = autonomousStateMachineSelect.value;
+          try {
+            const response = await fetch('/api/set_state_machine', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: sm })
+            });
+            if (!response.ok) {
+              console.error('Failed to set autonomous state machine:', response.status);
+            }
+          } catch (e) {
+            console.error('Error setting autonomous state machine:', e);
+          }
+        });
+
+        (async () => {
+          await updateAutonomousStateMachines();
+          await updateCurrentStateMachine();
+        })();
+      }
+
+      async function updateCurrentStateMachine() {
+        try {
+          const response = await fetch('/api/get_state_machine');
+          if (response.ok) {
+            const data = await response.json();
+            if (data.current_state_machine) {
+              autonomousStateMachineSelect.value = data.current_state_machine;
+            }
+          }
+        } catch (e) {
+          console.error('Error fetching current autonomous state machine:', e);
+        }
+      }
+
+      async function updateAutonomousStateMachines() {
+        try {
+          const response = await fetch('/api/get_all_state_machines');
+          if (response.ok) {
+            const data = await response.json();
+            prevValue = autonomousStateMachineSelect.value;
+            autonomousStateMachineSelect.innerHTML = '';
+            data.state_machines.forEach(sm => {
+              const option = document.createElement('option');
+              option.value = sm;
+              option.textContent = sm;
+              autonomousStateMachineSelect.appendChild(option);
+            });
+            if (data.state_machines.includes(prevValue)) {
+              autonomousStateMachineSelect.value = prevValue;
+            }
+          }
+        } catch (e) {
+          console.error('Error fetching autonomous state machines:', e);
+        }
+      }
+
 
       // ========== Motor Settings Toggles ==========
       const rotationCorrectionToggles = document.querySelectorAll('.toggle-btn.rotation-correction-toggle');
@@ -1900,99 +2072,6 @@
           await updateMotorSettings({ always_facing_goal_enabled: alwaysFacingGoalEnabled });
         });
       });
-
-
-      function computeCommandFromKeys(keys, box) {
-        let dy = 0, dx = 0;
-        if (keys.has('w')) dy += 1;
-        if (keys.has('s')) dy -= 1;
-        if (keys.has('d')) dx += 1;
-        if (keys.has('a')) dx -= 1;
-
-        const mag = Math.hypot(dx, dy);
-        // Get speed from slider for this box
-        const speed = manualSpeedSettings.get(box) || 1;
-        if (mag === 0) {
-          const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
-          return { move: { angle: 0, speed: 0 }, rotate: Math.max(-1, Math.min(1, rotate)) };
-        }
-
-        const angleRad = Math.atan2(dx, dy);
-        let angleDeg = angleRad * (180 / Math.PI);
-        angleDeg = ((angleDeg % 360) + 360) % 360;
-
-        const move = { angle: Number(angleDeg.toFixed(1)), speed: speed };
-
-        const rotate = (keys.has('arrowright') ? 1 : 0) + (keys.has('arrowleft') ? -1 : 0);
-        return { move, rotate: Math.max(-1, Math.min(1, rotate)) };
-      }
-
-
-      function sendCurrentKeysCommand(box = activeManualControlBox) {
-        const { move, rotate } = computeCommandFromKeys(pressedKeys, box);
-        if (!move && (!rotate || rotate === 0)) {
-          sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 });
-        } else {
-          sendManualCommand({ move, rotate });
-        }
-      }
-
-      function handleManualKeyDown(e) {
-        const k = e.key.toLowerCase();
-        const allowed = ["w","a","s","d","arrowleft","arrowright"];
-        if (!allowed.includes(k)) return;
-        if (!pressedKeys.has(k)) {
-          pressedKeys.add(k);
-          sendCurrentKeysCommand(e.currentTarget);
-        }
-        e.preventDefault();
-      }
-
-      function handleManualKeyUp(e) {
-        const k = e.key.toLowerCase();
-        const allowed = ["w","a","s","d","arrowleft","arrowright"];
-        if (!allowed.includes(k)) return;
-        if (pressedKeys.has(k)) pressedKeys.delete(k);
-        sendCurrentKeysCommand(e.currentTarget);
-        e.preventDefault();
-      }
-
-      manualControlBoxes.forEach(box => {
-        box.addEventListener('keydown', handleManualKeyDown);
-        box.addEventListener('keyup', handleManualKeyUp);
-        box.addEventListener('blur', () => { pressedKeys.clear(); sendManualCommand({ move: { angle: 0, speed: 0 }, rotate: 0 }); });
-      });
-
-      function changeModeTo(mode) {
-        selectedMode = mode;
-        modeButtons.forEach(btn => {
-          if (btn.getAttribute('changemodeto') === mode) {
-            btn.classList.add("selected");
-          } else {
-            btn.classList.remove("selected");
-          }
-        });
-        Array.from(manualControlGroups).forEach(group => {
-          if (mode === 'manual') {
-            group.style.display = '';
-          } else {
-            group.style.display = 'none';
-          }
-        });
-        autonomousControlGroup.style.display = (mode === 'autonomous') ? '' : 'none';
-        setTimeout(() => activeManualControlBox && activeManualControlBox.focus(), 40);
-      }
-      
-      async function updateMode() {
-        const response = await fetch('/api/get_mode');
-        if (!response.ok) {
-          console.error('Failed to fetch robot mode:', response.status);
-          return;
-        }
-        
-        const data = await response.json();
-        changeModeTo(data.mode);
-      }
 
       
       // ========== Sensors ==========

@@ -114,10 +114,10 @@ def update_goal_distance_calibration(goal_result: GoalDetectionResult) -> None:
         phase = shared_data.goal_distance_calibration_data.get('phase')
         initial_height = shared_data.goal_distance_calibration_data.get('initial_height_pixels')
         
-        if phase == 'initial' and goal_result.goal_detected and goal_result.goal_height_pixels > 0:
-            shared_data.goal_distance_calibration_data['initial_height_pixels'] = goal_result.goal_height_pixels
-            logger.debug(f"Recording initial goal height: {goal_result.goal_height_pixels:.2f} pixels")
-            initial_height = goal_result.goal_height_pixels
+        if phase == 'initial' and goal_result.detected and goal_result.height_pixels > 0:
+            shared_data.goal_distance_calibration_data['initial_height_pixels'] = goal_result.height_pixels
+            logger.debug(f"Recording initial goal height: {goal_result.height_pixels:.2f} pixels")
+            initial_height = goal_result.height_pixels
         
         if phase == 'initial' and initial_height is not None and initial_height > 0:
             shared_data.goal_distance_calibration_data['phase'] = 'driving'
@@ -125,7 +125,7 @@ def update_goal_distance_calibration(goal_result: GoalDetectionResult) -> None:
         
         if phase == 'driving':
             line_detected = line_sensors.get_line_detected()
-            if any(line_detected) and goal_result.goal_detected and goal_result.goal_height_pixels > 0:
-                shared_data.goal_distance_calibration_data['line_height_pixels'] = goal_result.goal_height_pixels
-                logger.info(f"Line detected! Recorded goal height: {goal_result.goal_height_pixels:.2f} pixels.")
+            if any(line_detected) and goal_result.detected and goal_result.height_pixels > 0:
+                shared_data.goal_distance_calibration_data['line_height_pixels'] = goal_result.height_pixels
+                logger.info(f"Line detected! Recorded goal height: {goal_result.height_pixels:.2f} pixels.")
 

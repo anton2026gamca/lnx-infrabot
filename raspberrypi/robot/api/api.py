@@ -9,8 +9,8 @@ from werkzeug.serving import make_server
 
 from robot import calibration, utils, vision
 from robot.hardware import line_sensors
+from robot.logic import autonomous_mode
 from robot.multiprocessing import shared_data
-
 from robot.robot import RobotManualControl
 from robot.utils import Suppress200Filter
 from robot.vision import DetectedObject, PositionEstimate
@@ -490,12 +490,12 @@ def get_goal_detection():
             })
         
         return jsonify({
-            "goal_detected": result.goal_detected,
+            "goal_detected": result.detected,
             "alignment": result.alignment,
-            "goal_center_x": result.goal_center_x,
-            "goal_area": result.goal_area,
+            "goal_center_x": result.center_x,
+            "goal_area": result.area,
             "distance_mm": result.distance_mm,
-            "goal_height_pixels": result.goal_height_pixels
+            "goal_height_pixels": result.height_pixels
         })
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
@@ -728,12 +728,46 @@ def set_ball_calibration():
         logger.error(f"Error: {e}", exc_info=True)
         return "", 500
 
+@app.route('/api/get_all_state_machines')
+def get_all_state_machines():
+    try:
+        state_machines = autonomous_mode.get_available_state_machines()
+        return jsonify({"state_machines": list(state_machines.keys())})
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        return "", 500
+
+@app.route('/api/get_state_machine')
+def get_state_machine():
+    try:
+        current = autonomous_mode.get_current_state_machine()
+        return jsonify({"current_state_machine": current.name if current else None})
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        return "", 500
+
+@app.route('/api/set_state_machine', methods=['POST'])
+def set_state_machine():
+    try:
+        data = request.get_json()
+        if not data or 'name' not in data:
+            return jsonify({"error": "Missing 'name' in request body"}), 400
+        name = data['name']
+        state_machine = autonomous_mode.find_state_machine_by_name(name)
+        if state_machine is None:
+            return jsonify({"error": f"State machine with name '{name}' not found"}), 404
+        autonomous_mode.set_current_state_machine(state_machine)
+        return jsonify({"status": "ok", "current_state_machine": name})
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        return "", 500
+
 
 @app.route('/')
 def get_index_html():
     try:
         logger.warning("Accessed root endpoint, which serves index.html. In production, this should be served by nginx directly. This may indicate a misconfiguration.")
-        with open('web_server/site/index.html', 'r', encoding='utf-8') as f:
+        with open('web_server/static/index.html', 'r', encoding='utf-8') as f:
             index_html = f.read()
             return index_html
     except Exception:

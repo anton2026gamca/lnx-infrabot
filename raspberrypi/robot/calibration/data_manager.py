@@ -25,9 +25,9 @@ def _create_calibration_data() -> dict:
     thresholds = shared_data.get_line_detection_thresholds()
 
     goal_color = shared_data.get_goal_color()
-    yellow_cal = shared_data.get_goal_calibration("yellow")
-    blue_cal = shared_data.get_goal_calibration("blue")
-    ball_cal = shared_data.get_ball_calibration()
+    yellow_lower, yellow_upper = shared_data.get_goal_calibration("yellow")
+    blue_lower, blue_upper = shared_data.get_goal_calibration("blue")
+    ball_lower, ball_upper = shared_data.get_ball_calibration()
     
     return {
         "version": CALIBRATION_SCHEMA_VERSION,
@@ -37,15 +37,15 @@ def _create_calibration_data() -> dict:
             },
             "goal_detection": {
                 "goal_color": goal_color,
-                "yellow_lower": yellow_cal[:3],
-                "yellow_upper": yellow_cal[3:],
-                "blue_lower": blue_cal[:3],
-                "blue_upper": blue_cal[3:],
+                "yellow_lower": yellow_lower,
+                "yellow_upper": yellow_upper,
+                "blue_lower": blue_lower,
+                "blue_upper": blue_upper,
                 "focal_length_pixels": shared_data.get_goal_focal_length()
             },
             "ball_detection": {
-                "ball_lower": ball_cal[:3],
-                "ball_upper": ball_cal[3:],
+                "ball_lower": ball_lower,
+                "ball_upper": ball_upper,
             },
             "ball_distance": {
                 "calibration_constant": shared_data.get_camera_ball_calibration_constant()

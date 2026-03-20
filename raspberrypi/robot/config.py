@@ -1,4 +1,4 @@
-# ================================ CAMERA SETTINGS =================================
+# ================================ CAMERA SETTINGS ================================
 # Camera resolution
 CAMERA_SENSOR_WIDTH = 4608
 CAMERA_SENSOR_HEIGHT = 2592
@@ -40,12 +40,12 @@ API_VIDEO_TARGET_FPS = 30
 API_HOST = '0.0.0.0'
 API_PORT = 5000
 
-# ============================= LOGGING SETTINGS ================================
+# ============================= LOGGING SETTINGS ==================================
 LOG_LEVEL = "DEBUG"  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Log buffer
 LOG_BUFFER_MAX_ENTRIES = 100
 
-# ============================== MOTOR CONTROL ===================================
+# ============================== MOTOR CONTROL ====================================
 MOTOR_COUNT = 4
 
 # Motor angles (degrees)
@@ -58,33 +58,33 @@ MOTOR_SPEED_MAX = 9999
 # Motor acceleration (logic loops required to go from 0 to max speed)
 MOTOR_ACCELERATION_LOGIC_LOOPS = 4
 
-# =========================== LINE SENSOR SETTINGS ===============================
+# =========================== LINE SENSOR SETTINGS ================================
 LINE_SENSOR_COUNT = 12
 LINE_SENSOR_LOCATIONS = [i * (360 / LINE_SENSOR_COUNT) for i in range(LINE_SENSOR_COUNT)]
 
 # Default values, can be calibrated/changed via API
 DEFAULT_LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT  # Array of [min, max] values
 
-# ========================== CALIBRATION STORAGE ================================
+# ========================== CALIBRATION STORAGE ==================================
 CALIBRATION_FILE_PATH = "calibration_data.json"
 
-# ======================== OBJECT DETECTION SETTINGS ============================
+# ======================== OBJECT DETECTION SETTINGS ==============================
 # Scale factor for processing frames (0.5 means half resolution)
 DETECTION_FRAME_SIZE_SCALE = 0.5
 DETECTION_FRAME_WIDTH = int(FRAME_WIDTH * DETECTION_FRAME_SIZE_SCALE)
 DETECTION_FRAME_HEIGHT = int(FRAME_HEIGHT * DETECTION_FRAME_SIZE_SCALE)
 
 
-# ========================= GOAL DETECTION SETTINGS =============================
+# ========================= GOAL DETECTION SETTINGS ===============================
 # Real-world goal height in millimeters
 GOAL_HEIGHT_MM = 100.0
 DEFAULT_FOCAL_LENGTH_PIXELS = 1000.0
 
-# ============================== LOGIC SETTINGS =================================
+# ============================== LOGIC SETTINGS ===================================
 DEFAULT_LINE_AVOIDING_ENABLED = False
 DEFAULT_ROTATION_CORRECTION_ENABLED = True
 
-# ===================== AUTONOMOUS BEHAVIOUR SETTINGS ===========================
+# ===================== AUTONOMOUS BEHAVIOUR SETTINGS =============================
 
 # --- General ---
 # Global speed multiplier for all autonomous movements (reduce for debugging)

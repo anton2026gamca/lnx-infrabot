@@ -155,7 +155,7 @@ def set_autonomous_state(state: str, ball_angle: float, ball_distance: float, go
         'ball_angle': int(ball_angle) if ball_angle != 999 else None,
         'ball_distance': int(ball_distance) if ball_distance != 999 else None,
         'have_ball': have_ball,
-        'goal_detected': goal.goal_detected if goal else False,
+        'goal_detected': goal.detected if goal else False,
         'goal_alignment': round(goal.alignment, 3) if goal else None,
         'goal_distance_mm': int(round(goal.distance_mm)) if goal and goal.distance_mm else None,
     }
@@ -166,6 +166,28 @@ def set_autonomous_state(state: str, ball_angle: float, ball_distance: float, go
 def get_autonomous_state() -> dict:
     with autonomous_state_lock:
         return dict(autonomous_state)
+
+state_machine_change_request = multiprocessing.Array('c', b''.ljust(50))
+def request_state_machine_change(name: str) -> None:
+    name_bytes = name.encode()[:50].ljust(50)
+    with state_machine_change_request.get_lock():
+        for i in range(50):
+            state_machine_change_request[i] = name_bytes[i:i+1]
+def check_state_machine_change_request() -> str:
+    with state_machine_change_request.get_lock():
+        req = bytes(state_machine_change_request[:]).decode().strip()
+        state_machine_change_request[:] = b''.ljust(50)
+        return req
+
+current_state_machine_name = multiprocessing.Array('c', b''.ljust(50))
+def set_current_state_machine_name(name: str) -> None:
+    name_bytes = name.encode()[:50].ljust(50)
+    with current_state_machine_name.get_lock():
+        for i in range(50):
+            current_state_machine_name[i] = name_bytes[i:i+1]
+def get_current_state_machine_name() -> str:
+    with current_state_machine_name.get_lock():
+        return bytes(current_state_machine_name[:]).decode().strip()
 
 
 # Shared memory for frame data
@@ -302,22 +324,22 @@ def set_goal_detection_result(result: GoalDetectionResult | None) -> None:
         goal_detection_result.clear()
         if result:
             goal_detection_result['alignment'] = result.alignment
-            goal_detection_result['goal_detected'] = result.goal_detected
-            goal_detection_result['goal_center_x'] = result.goal_center_x
-            goal_detection_result['goal_area'] = result.goal_area
+            goal_detection_result['goal_detected'] = result.detected
+            goal_detection_result['goal_center_x'] = result.center_x
+            goal_detection_result['goal_area'] = result.area
             goal_detection_result['distance_mm'] = result.distance_mm
-            goal_detection_result['goal_height_pixels'] = result.goal_height_pixels
+            goal_detection_result['goal_height_pixels'] = result.height_pixels
 def get_goal_detection_result() -> GoalDetectionResult | None:
     with goal_detection_lock:
         if not goal_detection_result:
             return None
         return GoalDetectionResult(
             alignment=goal_detection_result.get('alignment', 0.0),
-            goal_detected=goal_detection_result.get('goal_detected', False),
-            goal_center_x=goal_detection_result.get('goal_center_x', None),
-            goal_area=goal_detection_result.get('goal_area', 0.0),
+            detected=goal_detection_result.get('goal_detected', False),
+            center_x=goal_detection_result.get('goal_center_x', None),
+            area=goal_detection_result.get('goal_area', 0.0),
             distance_mm=goal_detection_result.get('distance_mm', None),
-            goal_height_pixels=goal_detection_result.get('goal_height_pixels', 0.0)
+            height_pixels=goal_detection_result.get('goal_height_pixels', 0.0)
         )
 
 goal_focal_length = multiprocessing.Value('d', DEFAULT_FOCAL_LENGTH_PIXELS)
