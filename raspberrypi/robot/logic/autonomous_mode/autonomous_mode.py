@@ -11,11 +11,13 @@ current_state_machine: StateMachine | None = state_machines.list()[0]
 
 
 def tick() -> None:
+    if current_state_machine is not None:
+        current_state_machine.tick()
+
+def check_state_machine_change_request() -> str:
     req = shared_data.check_state_machine_change_request()
     if req != "":
         _set_current_state_machine_internal(req)
-    if current_state_machine is not None:
-        current_state_machine.tick()
 
 def set_current_state_machine(state_machine: StateMachine | str) -> None:
     name = state_machine.name if isinstance(state_machine, StateMachine) else state_machine

@@ -26,6 +26,8 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         elif mode == RobotMode.AUTONOMOUS:
             autonomous_mode.tick()
 
+        autonomous_mode.check_state_machine_change_request()
+
         elapsed = time.time() - start_time
         sleep_duration = max(0.0, LOGIC_LOOP_PERIOD - elapsed - 0.001)
         if sleep_duration > 0:
