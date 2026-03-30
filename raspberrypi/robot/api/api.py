@@ -3,6 +3,7 @@ import cv2
 import multiprocessing.synchronize
 import numpy as np
 import uvicorn
+from contextlib import asynccontextmanager
 
 import socketio
 from fastapi import FastAPI
@@ -37,12 +38,122 @@ sio = socketio.AsyncServer(
     engineio_logger=False,
 )
 
-fastapi_app = FastAPI()
+@asynccontextmanager
+async def _fastapi_lifespan(app: FastAPI):
+    await _startup_event()
+    yield
+    await _shutdown_event()
+
+async def _startup_event():
+    global _state_monitor_task
+    _state_monitor_task = asyncio.create_task(_monitor_state_changes())
+    logger.info("State monitor task started")
+
+async def _shutdown_event():
+    global _state_monitor_task
+    if _state_monitor_task:
+        _state_monitor_task.cancel()
+        try:
+            await _state_monitor_task
+        except asyncio.CancelledError:
+            pass
+    logger.info("State monitor task stopped")
+
+fastapi_app = FastAPI(lifespan=_fastapi_lifespan)
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)
 
 _video_tasks: dict[str, asyncio.Task] = {}
+_update_subscriptions: dict[str, dict] = {}  # {sid: {subscribed_updates: set, task: asyncio.Task}}
+_state_tracker: dict = {  # Track previous state for change detection
+    "robot_mode": None,
+    "goal_color": None,
+    "line_detected": None,
+    "ball_detected": None,
+    "goal_detected": None,
+    "last_log_id": 0,
+}
+_state_tracker_lock = asyncio.Lock()
 
 encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), API_VIDEO_JPEG_QUALITY]
+
+_state_monitor_task: asyncio.Task | None = None
+
+
+# ---------------------------------------------------------------------------
+# State change monitoring and subscriptions
+# ---------------------------------------------------------------------------
+
+async def _monitor_state_changes() -> None:
+    """Continuously monitor state changes and emit updates to subscribed clients."""
+    global _state_tracker
+    check_interval = 0.1  # Check for changes every 100ms
+    
+    try:
+        while True:
+            await asyncio.sleep(check_interval)
+            
+            try:
+                # Get current state
+                current_mode = shared_data.get_robot_mode()
+                current_goal_color = shared_data.get_goal_color()
+                current_line_detected = line_sensors.get_line_detected()
+                current_hw_data = shared_data.get_hardware_data()
+                current_ir_data = current_hw_data.ir if current_hw_data else None
+                current_cam_data = shared_data.get_camera_ball_data()
+                
+                current_ir_detected = current_ir_data.angle != 999 if current_ir_data else False
+                current_cam_detected = current_cam_data.detected if current_cam_data else False
+                current_ball_detected = current_cam_detected or current_ir_detected
+
+                logs, last_id = utils.get_logs(_state_tracker["last_log_id"])
+
+                async with _state_tracker_lock:
+                    if current_mode != _state_tracker["robot_mode"]:
+                        _state_tracker["robot_mode"] = current_mode
+                        mode_name = ["idle", "manual", "autonomous"][current_mode] if current_mode in [0, 1, 2] else "unknown"
+                        await _broadcast_update("mode_changed", {"mode": mode_name})
+                    
+                    if current_goal_color != _state_tracker["goal_color"]:
+                        _state_tracker["goal_color"] = current_goal_color
+                        await _broadcast_update("goal_color_changed", {"goal_color": current_goal_color})
+                    
+                    if (current_line_detected != _state_tracker["line_detected"] or
+                        current_ir_detected != _state_tracker["ir_detected"] or
+                        current_ball_detected != _state_tracker["ball_detected"]
+                    ):  
+                        _state_tracker["line_detected"] = current_line_detected
+                        _state_tracker["ir_detected"] = current_ir_detected
+                        _state_tracker["ball_detected"] = current_ball_detected
+                        await _broadcast_update("important_sensor_data_change", create_sensor_data())
+
+                    if last_id > _state_tracker["last_log_id"]:
+                        _state_tracker["last_log_id"] = last_id
+                        await _broadcast_update("new_logs", {"logs": logs})
+                        
+            except Exception as exc:
+                logger.error(f"Error in state monitoring: {exc}", exc_info=True)
+                
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        logger.error(f"State monitoring loop error: {exc}", exc_info=True)
+
+
+async def _broadcast_update(event_name: str, data: dict) -> None:
+    """Broadcast an update event to all subscribed clients."""
+    sids_to_remove = []
+    for sid, sub_info in _update_subscriptions.items():
+        if event_name in sub_info["subscribed_updates"]:
+            try:
+                await sio.emit(event_name, data, to=sid)
+                # logger.info(f"Emitted {event_name} update to {sid}")
+            except Exception as exc:
+                logger.debug(f"Error emitting {event_name} to {sid}: {exc}")
+                sids_to_remove.append(sid)
+    
+    # Clean up disconnected clients
+    for sid in sids_to_remove:
+        _update_subscriptions.pop(sid, None)
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +241,54 @@ async def disconnect(sid: str):
     task = _video_tasks.pop(sid, None)
     if task:
         task.cancel()
+    _update_subscriptions.pop(sid, None)
+
+
+# ---------------------------------------------------------------------------
+# Update subscriptions
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def subscribe_updates(sid: str, data: dict | None = None):
+    """
+    Subscribe to state change notifications.
+    """
+    data = data or {}
+    updates = data.get("updates", {})
+
+    if not isinstance(updates, dict):
+        return _err("updates must be a dictionary of [event: bool]")
+
+    valid_events = {
+        "mode_changed",
+        "goal_color_changed",
+        "important_sensor_data_change",
+        "new_logs",
+    }
+
+    current = _update_subscriptions.get(sid, {}).get("subscribed_updates", set())
+
+    subscribed = set()
+    for event in valid_events:
+        if updates.get(event, None) is not False:
+            if event in current or updates.get(event, False):
+                subscribed.add(event)
+
+    if not subscribed:
+        return _err(f"No valid updates specified. Valid events: {', '.join(sorted(valid_events))}")
+
+    _update_subscriptions[sid] = {"subscribed_updates": subscribed}
+    logger.info(f"Client {sid} subscribed to updates: {subscribed}")
+    return _ok(message=f"Subscribed to {len(subscribed)} update(s)")
+
+
+@sio.event
+async def unsubscribe_updates(sid: str, data: dict | None = None):
+    """Unsubscribe from state change notifications."""
+    if sid in _update_subscriptions:
+        _update_subscriptions.pop(sid)
+        logger.info(f"Client {sid} unsubscribed from updates")
+    return _ok()
 
 
 # ---------------------------------------------------------------------------
@@ -174,48 +333,51 @@ async def unsubscribe_video(sid: str, data: dict | None = None):
 # Sensor / state queries
 # ---------------------------------------------------------------------------
 
+def create_sensor_data() -> dict:
+    hw = shared_data.get_hardware_data()
+    if hw is None:
+        return _err("No data available yet")
+
+    running_state = shared_data.get_running_state()
+    cam = shared_data.get_camera_ball_data()
+
+    return _ok(
+        compass={
+            "heading": hw.compass.heading,
+            "pitch": hw.compass.pitch,
+            "roll": hw.compass.roll,
+        },
+        ir={
+            "angle": hw.ir.angle,
+            "distance": hw.ir.distance,
+            "sensors": hw.ir.sensors,
+            "status": hw.ir.status,
+        },
+        camera_ball={
+            "angle": cam.angle if cam else None,
+            "distance": cam.distance if cam else None,
+            "detected": cam.detected if cam else None,
+        },
+        line={
+            "raw": hw.line,
+            "detected": line_sensors.get_line_detected(),
+            "thresholds": shared_data.get_line_detection_thresholds(),
+        },
+        motors=shared_data.get_motor_speeds(),
+        kicker=shared_data.get_kicker_state(),
+        running_state={
+            "running": running_state.running if running_state else False,
+            "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
+            "bt_module_state": running_state.bt_module_state if running_state else False,
+            "switch_state": running_state.switch_state if running_state else False,
+        } if running_state else None,
+        timestamp=hw.timestamp,
+    )
+
 @sio.event
-async def get_sensor_data(sid: str, data: dict | None = None):
+async def get_sensor_data(sid: str | None = None, data: dict | None = None):
     try:
-        hw = shared_data.get_hardware_data()
-        if hw is None:
-            return _err("No data available yet")
-
-        running_state = shared_data.get_running_state()
-        cam = shared_data.get_camera_ball_data()
-
-        return _ok(
-            compass={
-                "heading": hw.compass.heading,
-                "pitch": hw.compass.pitch,
-                "roll": hw.compass.roll,
-            },
-            ir={
-                "angle": hw.ir.angle,
-                "distance": hw.ir.distance,
-                "sensors": hw.ir.sensors,
-                "status": hw.ir.status,
-            },
-            camera_ball={
-                "angle": cam.angle if cam else None,
-                "distance": cam.distance if cam else None,
-                "detected": cam.detected if cam else None,
-            },
-            line={
-                "raw": hw.line,
-                "detected": line_sensors.get_line_detected(),
-                "thresholds": shared_data.get_line_detection_thresholds(),
-            },
-            motors=shared_data.get_motor_speeds(),
-            kicker=shared_data.get_kicker_state(),
-            running_state={
-                "running": running_state.running if running_state else False,
-                "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
-                "bt_module_state": running_state.bt_module_state if running_state else False,
-                "switch_state": running_state.switch_state if running_state else False,
-            } if running_state else None,
-            timestamp=hw.timestamp,
-        )
+        return create_sensor_data()
     except Exception as exc:
         logger.error(f"get_sensor_data: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -305,16 +467,6 @@ async def get_position_estimate(sid: str, data: dict | None = None):
         return _ok(x_mm=position.x_mm, y_mm=position.y_mm, confidence=position.confidence)
     except Exception as exc:
         logger.error(f"get_position_estimate: {exc}", exc_info=True)
-        return _err("Internal server error")
-
-
-@sio.event
-async def get_autonomous_state(sid: str, data: dict | None = None):
-    try:
-        state = shared_data.get_autonomous_state()
-        return state if state else {"state": "idle"}
-    except Exception as exc:
-        logger.error(f"get_autonomous_state: {exc}", exc_info=True)
         return _err("Internal server error")
 
 
@@ -447,11 +599,10 @@ async def set_motor_settings(sid: str, data: dict | None = None):
     try:
         d = data or {}
         bool_settings = {
-            "rotation_correction_enabled": shared_data.set_rotation_correction_enabled,
-            "line_avoiding_enabled":       shared_data.set_line_avoiding_enabled,
+            "rotation_correction_enabled":  shared_data.set_rotation_correction_enabled,
+            "line_avoiding_enabled":        shared_data.set_line_avoiding_enabled,
             "position_based_speed_enabled": shared_data.set_position_based_speed_enabled,
-            "camera_ball_usage_enabled":   shared_data.set_camera_ball_usage_enabled,
-            "always_facing_goal_enabled":  shared_data.set_always_facing_goal_enabled,
+            "camera_ball_usage_enabled":    shared_data.set_camera_ball_usage_enabled,
         }
         for key, setter in bool_settings.items():
             if key in d:
@@ -527,16 +678,20 @@ async def set_goal_focal_length(sid: str, data: dict | None = None):
 async def set_autonomous_state(sid: str, data: dict | None = None):
     """data: { name: str }"""
     try:
+        logger.info(f"Received request to set autonomous state: {data}")
+
         state_machine = (data or {}).get("state_machine")
         if isinstance(state_machine, str):
             sm = autonomous_mode.find_state_machine_by_name(state_machine)
             if sm is None:
                 return _err(f"State machine '{state_machine}' not found")
             autonomous_mode.set_current_state_machine(sm)
+            logger.info(f"Autonomous state machine set to '{sm.name}'")
 
         always_face_goal_enabled = (data or {}).get("always_face_goal_enabled")
         if isinstance(always_face_goal_enabled, bool):
             shared_data.set_always_facing_goal_enabled(always_face_goal_enabled)
+            logger.info(f"always_facing_goal_enabled set to {always_face_goal_enabled}")
 
         return _ok()
     except Exception as exc:

@@ -50,10 +50,9 @@ class Suppress200Filter(logging.Filter):
         return True
 
 class BufferedLogHandler(logging.Handler):
-    def __init__(self, logs_queue: Queue, logs_lock: Lock, formatter=None):
+    def __init__(self, logs_queue: Queue, formatter=None):
         super().__init__()
         self.logs_queue = logs_queue
-        self.logs_lock = logs_lock
         if formatter:
             self.setFormatter(formatter)
         elif LogFormatter is not None:
@@ -98,7 +97,7 @@ def setup_logger(name: str | None = None, level=_default_logger_level) -> loggin
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
     
-    buffer_handler = BufferedLogHandler(shared_data.logs_buffer, shared_data.logs_buffer_lock, formatter=formatter)
+    buffer_handler = BufferedLogHandler(shared_data.logs_buffer, formatter=formatter)
     buffer_handler.setLevel(level)
     logger.addHandler(buffer_handler)
     
