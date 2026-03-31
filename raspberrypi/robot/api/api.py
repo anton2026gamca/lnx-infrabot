@@ -146,7 +146,6 @@ async def _broadcast_update(event_name: str, data: dict) -> None:
         if event_name in sub_info["subscribed_updates"]:
             try:
                 await sio.emit(event_name, data, to=sid)
-                # logger.info(f"Emitted {event_name} update to {sid}")
             except Exception as exc:
                 logger.debug(f"Error emitting {event_name} to {sid}: {exc}")
                 sids_to_remove.append(sid)
@@ -413,8 +412,6 @@ async def get_motor_settings(sid: str, data: dict | None = None):
             rotation_correction_enabled=shared_data.get_rotation_correction_enabled(),
             line_avoiding_enabled=shared_data.get_line_avoiding_enabled(),
             position_based_speed_enabled=shared_data.get_position_based_speed_enabled(),
-            camera_ball_usage_enabled=shared_data.get_camera_ball_usage_enabled(),
-            always_facing_goal_enabled=shared_data.get_always_facing_goal_enabled(),
         )
     except Exception as exc:
         logger.error(f"get_motor_settings: {exc}", exc_info=True)
@@ -515,6 +512,7 @@ async def get_autonomous_state(sid: str, data: dict | None = None):
         return _ok(
             state_machine=state_machine.name if state_machine else None,
             always_face_goal_enabled=shared_data.get_always_facing_goal_enabled(),
+            camera_ball_usage_enabled=shared_data.get_camera_ball_usage_enabled(),
         )
     except Exception as exc:
         logger.error(f"get_autonomous_state: {exc}", exc_info=True)
@@ -602,7 +600,6 @@ async def set_motor_settings(sid: str, data: dict | None = None):
             "rotation_correction_enabled":  shared_data.set_rotation_correction_enabled,
             "line_avoiding_enabled":        shared_data.set_line_avoiding_enabled,
             "position_based_speed_enabled": shared_data.set_position_based_speed_enabled,
-            "camera_ball_usage_enabled":    shared_data.set_camera_ball_usage_enabled,
         }
         for key, setter in bool_settings.items():
             if key in d:
@@ -678,8 +675,6 @@ async def set_goal_focal_length(sid: str, data: dict | None = None):
 async def set_autonomous_state(sid: str, data: dict | None = None):
     """data: { name: str }"""
     try:
-        logger.info(f"Received request to set autonomous state: {data}")
-
         state_machine = (data or {}).get("state_machine")
         if isinstance(state_machine, str):
             sm = autonomous_mode.find_state_machine_by_name(state_machine)
@@ -692,6 +687,11 @@ async def set_autonomous_state(sid: str, data: dict | None = None):
         if isinstance(always_face_goal_enabled, bool):
             shared_data.set_always_facing_goal_enabled(always_face_goal_enabled)
             logger.info(f"always_facing_goal_enabled set to {always_face_goal_enabled}")
+
+        camera_ball_usage_enabled = (data or {}).get("camera_ball_usage_enabled")
+        if isinstance(camera_ball_usage_enabled, bool):
+            shared_data.set_camera_ball_usage_enabled(camera_ball_usage_enabled)
+            logger.info(f"camera_ball_usage_enabled set to {camera_ball_usage_enabled}")
 
         return _ok()
     except Exception as exc:

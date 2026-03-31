@@ -14,7 +14,7 @@ def tick() -> None:
     if current_state_machine is not None:
         current_state_machine.tick()
 
-def check_state_machine_change_request() -> str:
+def check_state_machine_change_request() -> None:
     req = shared_data.check_state_machine_change_request()
     if req != "":
         _set_current_state_machine_internal(req)
