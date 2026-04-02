@@ -1,5 +1,6 @@
 import logging
 import sys
+import queue
 from multiprocessing import Queue
 from multiprocessing.synchronize import Lock
 
@@ -67,7 +68,10 @@ class BufferedLogHandler(logging.Handler):
                 "logger": record.name,
                 "time": getattr(record, "created", None),
             }
-            self.logs_queue.put(entry)
+            try:
+                self.logs_queue.put_nowait(entry)
+            except queue.Full:
+                pass
         except Exception as e:
             self.handleError(record)
 

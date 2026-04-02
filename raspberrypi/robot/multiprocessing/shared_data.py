@@ -8,7 +8,6 @@ _manager = multiprocessing.Manager()
 
 # define logging stuff before we import any robot stuff
 logs_buffer = multiprocessing.Queue(maxsize=LOG_BUFFER_MAX_ENTRIES)
-logs_buffer_lock = multiprocessing.Lock()
 
 
 from robot import utils
