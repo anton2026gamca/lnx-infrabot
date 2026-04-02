@@ -1,3 +1,8 @@
+import os
+
+# =============================== API CONFIGURATION ===============================
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "ooops")  # Should be set in environment variables
+
 # ================================ CAMERA SETTINGS ================================
 # Camera resolution
 CAMERA_SENSOR_WIDTH = 4608

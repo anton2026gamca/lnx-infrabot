@@ -29,6 +29,5 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         thickness=3
     )
 
-
     api.start(stop_event=stop_event)
 

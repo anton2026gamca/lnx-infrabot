@@ -3,7 +3,8 @@ import cv2
 import multiprocessing.synchronize
 import numpy as np
 import uvicorn
-from contextlib import asynccontextmanager
+import urllib.parse
+from engineio.packet import base64
 
 import socketio
 from fastapi import FastAPI
@@ -15,13 +16,7 @@ from robot.logic import autonomous_mode
 from robot.multiprocessing import shared_data
 from robot.robot import RobotManualControl
 from robot.vision import DetectedObject, PositionEstimate
-from robot.config import (
-    API_HOST,
-    API_PORT,
-    API_VIDEO_TARGET_FPS,
-    API_VIDEO_JPEG_QUALITY,
-    LINE_SENSOR_COUNT,
-)
+from robot.config import *
 
 
 # ---------------------------------------------------------------------------
@@ -38,29 +33,16 @@ sio = socketio.AsyncServer(
     engineio_logger=False,
 )
 
-@asynccontextmanager
-async def _fastapi_lifespan(app: FastAPI):
-    await _startup_event()
-    yield
-    await _shutdown_event()
-
-async def _startup_event():
-    global _state_monitor_task
-    _state_monitor_task = asyncio.create_task(_monitor_state_changes())
-    logger.info("State monitor task started")
-
-async def _shutdown_event():
-    global _state_monitor_task
-    if _state_monitor_task:
-        _state_monitor_task.cancel()
-        try:
-            await _state_monitor_task
-        except asyncio.CancelledError:
-            pass
-    logger.info("State monitor task stopped")
-
-fastapi_app = FastAPI(lifespan=_fastapi_lifespan)
+fastapi_app = FastAPI()
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)
+
+@fastapi_app.on_event("startup")
+async def _on_startup():
+    await _start_monitoring_loop()
+
+@fastapi_app.on_event("shutdown")
+async def _on_shutdown():
+    await _stop_monitoring_loop()
 
 _video_tasks: dict[str, asyncio.Task] = {}
 _update_subscriptions: dict[str, dict] = {}  # {sid: {subscribed_updates: set, task: asyncio.Task}}
@@ -82,6 +64,21 @@ _state_monitor_task: asyncio.Task | None = None
 # ---------------------------------------------------------------------------
 # State change monitoring and subscriptions
 # ---------------------------------------------------------------------------
+
+async def _start_monitoring_loop():
+    global _state_monitor_task
+    _state_monitor_task = asyncio.create_task(_monitor_state_changes())
+    logger.info("State monitor task started")
+
+async def _stop_monitoring_loop():
+    global _state_monitor_task
+    if _state_monitor_task:
+        _state_monitor_task.cancel()
+        try:
+            await _state_monitor_task
+        except asyncio.CancelledError:
+            pass
+    logger.info("State monitor task stopped")
 
 async def _monitor_state_changes() -> None:
     """Continuously monitor state changes and emit updates to subscribed clients."""
@@ -231,7 +228,19 @@ async def _video_loop(sid: str, fps: float, show_detections: bool) -> None:
 
 @sio.event
 async def connect(sid: str, environ: dict, auth: dict | None = None):
+    expected_token = base64.b64encode(AUTH_TOKEN.encode()).decode() if AUTH_TOKEN else None
+
+    query = environ.get("QUERY_STRING", "")
+    params = dict(qc.split("=", 1) for qc in query.split("&") if "=" in qc)
+    token = params.get("token")
+    if token is not None:
+        token = urllib.parse.unquote(token)
+
+    if expected_token is None or token != expected_token:
+        logger.warning(f"Unauthorized connection attempt from {sid} with token: {token}, expected: {expected_token}")
+        return False
     logger.info(f"Client connected: {sid}")
+    return True
 
 
 @sio.event
