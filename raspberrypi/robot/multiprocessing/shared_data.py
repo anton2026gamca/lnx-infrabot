@@ -295,27 +295,54 @@ def get_goal_color() -> str:
     with goal_detection_lock:
         return bytes(goal_color[:]).decode().strip()
 
-goal_calibration_yellow = multiprocessing.Array('i', [20, 100, 100, 30, 255, 255])
-goal_calibration_blue = multiprocessing.Array('i', [100, 100, 100, 130, 255, 255])
-def set_goal_calibration(color: str, lower: list[int], upper: list[int]) -> None:
+goal_calibration_yellow = _manager.dict()
+goal_calibration_blue = _manager.dict()
+
+goal_calibration_yellow['count'] = 1
+goal_calibration_yellow['range_0_lower'] = [20, 100, 100]
+goal_calibration_yellow['range_0_upper'] = [30, 255, 255]
+
+goal_calibration_blue['count'] = 1
+goal_calibration_blue['range_0_lower'] = [100, 100, 100]
+goal_calibration_blue['range_0_upper'] = [130, 255, 255]
+
+def set_goal_calibration(color: str, ranges: list[tuple[tuple[int, int, int], tuple[int, int, int]]]) -> None:
+    """Set goal calibration for a color with multiple HSV ranges.
+    
+    Args:
+        color: 'yellow' or 'blue'
+        ranges: List of tuples, each tuple is (lower_hsv, upper_hsv) where each is [h, s, v]
+    """
     with goal_detection_lock:
-        if color.lower() == 'yellow':
-            for i in range(3):
-                goal_calibration_yellow[i] = lower[i]
-                goal_calibration_yellow[i + 3] = upper[i]
-        elif color.lower() == 'blue':
-            for i in range(3):
-                goal_calibration_blue[i] = lower[i]
-                goal_calibration_blue[i + 3] = upper[i]
-def get_goal_calibration(color: str) -> tuple[list[int], list[int]]:
+        cal_dict = goal_calibration_yellow if color.lower() == 'yellow' else goal_calibration_blue
+        cal_dict.clear()
+        cal_dict['count'] = len(ranges)
+        for idx, (lower, upper) in enumerate(ranges):
+            cal_dict[f'range_{idx}_lower'] = [int(lower[0]), int(lower[1]), int(lower[2])]
+            cal_dict[f'range_{idx}_upper'] = [int(upper[0]), int(upper[1]), int(upper[2])]
+
+def get_goal_calibration(color: str) -> list[tuple[tuple[int, int, int], tuple[int, int, int]]]:
+    """Get goal calibration ranges for a color.
+    
+    Returns:
+        List of tuples, each tuple is (lower_hsv, upper_hsv) where each is [h, s, v]
+    """
     with goal_detection_lock:
-        if color.lower() == 'yellow':
-            arr = goal_calibration_yellow[:]
-            return arr[:3], arr[3:]
-        elif color.lower() == 'blue':
-            arr = goal_calibration_blue[:]
-            return arr[:3], arr[3:]
-        return [0, 0, 0], [0, 0, 0]
+        cal_dict = goal_calibration_yellow if color.lower() == 'yellow' else goal_calibration_blue
+        
+        if not cal_dict or 'count' not in cal_dict:
+            if color.lower() == 'yellow':
+                return [((20, 100, 100), (30, 255, 255))]
+            else:
+                return [((100, 100, 100), (130, 255, 255))]
+        
+        count = cal_dict['count']
+        ranges = []
+        for idx in range(count):
+            lower = cal_dict.get(f'range_{idx}_lower', [0, 0, 0])
+            upper = cal_dict.get(f'range_{idx}_upper', [0, 0, 0])
+            ranges.append((lower, upper))
+        return ranges
 
 goal_detection_result = _manager.dict()
 def set_goal_detection_result(result: GoalDetectionResult | None) -> None:
@@ -352,16 +379,45 @@ goal_distance_calibration_data = _manager.dict()
 goal_distance_calibration_lock = multiprocessing.Lock()
 
 # Ball detection and calibration
-ball_calibration_hsv = multiprocessing.Array('i', DEFAULT_BALL_CALIBRATION_HSV)
-def set_ball_calibration(lower: list[int], upper: list[int]) -> None:
+ball_calibration = _manager.dict()
+
+# Initialize with default single range
+ball_calibration['count'] = 1
+ball_calibration['range_0_lower'] = [DEFAULT_BALL_CALIBRATION_HSV[0], DEFAULT_BALL_CALIBRATION_HSV[1], DEFAULT_BALL_CALIBRATION_HSV[2]]
+ball_calibration['range_0_upper'] = [DEFAULT_BALL_CALIBRATION_HSV[3], DEFAULT_BALL_CALIBRATION_HSV[4], DEFAULT_BALL_CALIBRATION_HSV[5]]
+
+def set_ball_calibration(ranges: list[tuple[list[int], list[int]]]) -> None:
+    """Set ball calibration with multiple HSV ranges.
+    
+    Args:
+        ranges: List of tuples, each tuple is (lower_hsv, upper_hsv) where each is [h, s, v]
+    """
     with goal_detection_lock:
-        for i in range(3):
-            ball_calibration_hsv[i] = lower[i]
-            ball_calibration_hsv[i + 3] = upper[i]
-def get_ball_calibration() -> tuple[list[int], list[int]]:
+        ball_calibration.clear()
+        ball_calibration['count'] = len(ranges)
+        for idx, (lower, upper) in enumerate(ranges):
+            ball_calibration[f'range_{idx}_lower'] = [int(lower[0]), int(lower[1]), int(lower[2])]
+            ball_calibration[f'range_{idx}_upper'] = [int(upper[0]), int(upper[1]), int(upper[2])]
+
+def get_ball_calibration() -> list[tuple[list[int], list[int]]]:
+    """Get ball calibration ranges.
+    
+    Returns:
+        List of tuples, each tuple is (lower_hsv, upper_hsv) where each is [h, s, v]
+    """
     with goal_detection_lock:
-        arr = ball_calibration_hsv[:]
-        return arr[:3], arr[3:]
+        if not ball_calibration or 'count' not in ball_calibration:
+            # Return default single range
+            return [([DEFAULT_BALL_CALIBRATION_HSV[0], DEFAULT_BALL_CALIBRATION_HSV[1], DEFAULT_BALL_CALIBRATION_HSV[2]], 
+                     [DEFAULT_BALL_CALIBRATION_HSV[3], DEFAULT_BALL_CALIBRATION_HSV[4], DEFAULT_BALL_CALIBRATION_HSV[5]])]
+        
+        count = ball_calibration['count']
+        ranges = []
+        for idx in range(count):
+            lower = ball_calibration.get(f'range_{idx}_lower', [0, 0, 0])
+            upper = ball_calibration.get(f'range_{idx}_upper', [0, 0, 0])
+            ranges.append((lower, upper))
+        return ranges
 
 camera_ball_possession = multiprocessing.Value('b', False)
 def set_camera_ball_possession(possessed: bool) -> None:

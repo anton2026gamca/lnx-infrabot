@@ -11,12 +11,9 @@ from robot.config import *
 
 @dataclass
 class GoalColorCalibration:
-    """HSV color ranges for goal detection"""
-    yellow_lower: np.ndarray = field(default_factory=lambda: np.array([20, 100, 100]))
-    yellow_upper: np.ndarray = field(default_factory=lambda: np.array([30, 255, 255]))
-    
-    blue_lower: np.ndarray = field(default_factory=lambda: np.array([100, 100, 100]))
-    blue_upper: np.ndarray = field(default_factory=lambda: np.array([130, 255, 255]))
+    """HSV color ranges for goal detection - supports multiple ranges per color"""
+    yellow_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([20, 100, 100]), np.array([30, 255, 255]))])
+    blue_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([100, 100, 100]), np.array([130, 255, 255]))])
 
 @dataclass
 class GoalDetectionResult:
@@ -138,15 +135,20 @@ def _get_goal_bounding_rect(
         calibration = GoalColorCalibration()
     
     if goal_color.lower() == "yellow":
-        lower = calibration.yellow_lower
-        upper = calibration.yellow_upper
+        ranges = calibration.yellow_ranges
     elif goal_color.lower() == "blue":
-        lower = calibration.blue_lower
-        upper = calibration.blue_upper
+        ranges = calibration.blue_ranges
     else:
         return 0, 0, 0, 0
     
-    mask = cv2.inRange(hsv_frame, lower, upper)
+    # Combine masks from all ranges with OR logic
+    mask = None
+    for lower, upper in ranges:
+        range_mask = cv2.inRange(hsv_frame, lower, upper)
+        mask = range_mask if mask is None else cv2.bitwise_or(mask, range_mask)
+    
+    if mask is None:
+        return 0, 0, 0, 0
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)

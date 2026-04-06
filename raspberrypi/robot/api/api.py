@@ -431,13 +431,17 @@ async def get_motor_settings(sid: str, data: dict | None = None):
 async def get_goal_settings(sid: str, data: dict | None = None):
     try:
         goal_color = shared_data.get_goal_color()
-        y_lower, y_upper = shared_data.get_goal_calibration("yellow")
-        b_lower, b_upper = shared_data.get_goal_calibration("blue")
+        y_ranges = shared_data.get_goal_calibration("yellow")
+        b_ranges = shared_data.get_goal_calibration("blue")
+        
+        y_ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in y_ranges]
+        b_ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in b_ranges]
+        
         return _ok(
             goal_color=goal_color,
             calibration={
-                "yellow": {"lower": y_lower, "upper": y_upper},
-                "blue":   {"lower": b_lower, "upper": b_upper},
+                "yellow": {"ranges": y_ranges_list},
+                "blue":   {"ranges": b_ranges_list},
             },
         )
     except Exception as exc:
@@ -488,8 +492,9 @@ async def get_detections(sid: str, data: dict | None = None):
 @sio.event
 async def get_ball_calibration(sid: str, data: dict | None = None):
     try:
-        lower, upper = shared_data.get_ball_calibration()
-        return _ok(lower=lower, upper=upper)
+        ranges = shared_data.get_ball_calibration()
+        ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in ranges]
+        return _ok(ranges=ranges_list)
     except Exception as exc:
         logger.error(f"get_ball_calibration: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -624,7 +629,12 @@ async def set_motor_settings(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_goal_settings(sid: str, data: dict | None = None):
-    """data: { goal_color?: str, calibration?: { yellow?: {...}, blue?: {...} } }"""
+    """data: { goal_color?: str, calibration?: { yellow?: {...}, blue?: {...} } }
+    
+    Each color's calibration can have either:
+    - "ranges": [{"lower": [h,s,v], "upper": [h,s,v]}, ...] for multiple ranges
+    - "lower": [h,s,v], "upper": [h,s,v] for backward compatibility (sets single range)
+    """
     try:
         d = data or {}
         if "goal_color" in d:
@@ -636,10 +646,23 @@ async def set_goal_settings(sid: str, data: dict | None = None):
         for color in ("yellow", "blue"):
             if color in cal:
                 entry = cal[color]
-                lower = entry.get("lower")
-                upper = entry.get("upper")
-                if lower and len(lower) == 3 and upper and len(upper) == 3:
-                    calibration.set_goal_color_range(color, tuple(lower), tuple(upper))
+                
+                # Support new format with multiple ranges
+                if "ranges" in entry and isinstance(entry["ranges"], list):
+                    ranges = []
+                    for r in entry["ranges"]:
+                        lower = r.get("lower")
+                        upper = r.get("upper")
+                        if lower and len(lower) == 3 and upper and len(upper) == 3:
+                            ranges.append((tuple(lower), tuple(upper)))
+                    if ranges:
+                        calibration.set_goal_color_ranges(color, ranges)
+                # Support old format with single range
+                elif "lower" in entry and "upper" in entry:
+                    lower = entry.get("lower")
+                    upper = entry.get("upper")
+                    if lower and len(lower) == 3 and upper and len(upper) == 3:
+                        calibration.set_goal_color_range(color, tuple(lower), tuple(upper))
         return _ok()
     except Exception as exc:
         logger.error(f"set_goal_settings: {exc}", exc_info=True)
@@ -648,17 +671,37 @@ async def set_goal_settings(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_ball_calibration(sid: str, data: dict | None = None):
-    """data: { lower: [h,s,v], upper: [h,s,v] }"""
+    """data: { ranges?: [{"lower": [h,s,v], "upper": [h,s,v]}, ...], lower?: [h,s,v], upper?: [h,s,v] }
+    
+    Supports both:
+    - New format: ranges array with multiple ranges
+    - Old format: single lower/upper pair for backward compatibility
+    """
     try:
         d = data or {}
-        lower = d.get("lower")
-        upper = d.get("upper")
-        if not lower or not upper or len(lower) != 3 or len(upper) != 3:
-            return _err("'lower' and 'upper' must be lists of 3 values")
-        calibration.set_ball_color_range(
-            tuple(int(v) for v in lower),
-            tuple(int(v) for v in upper),
-        )
+        
+        # Support new format with multiple ranges
+        if "ranges" in d and isinstance(d["ranges"], list):
+            ranges = []
+            for r in d["ranges"]:
+                lower = r.get("lower")
+                upper = r.get("upper")
+                if lower and len(lower) == 3 and upper and len(upper) == 3:
+                    ranges.append((tuple(lower), tuple(upper)))
+            if ranges:
+                calibration.set_ball_color_ranges(ranges)
+        # Support old format with single range
+        elif "lower" in d and "upper" in d:
+            lower = d.get("lower")
+            upper = d.get("upper")
+            if not lower or not upper or len(lower) != 3 or len(upper) != 3:
+                return _err("'lower' and 'upper' must be lists of 3 values")
+            calibration.set_ball_color_range(
+                tuple(int(v) for v in lower),
+                tuple(int(v) for v in upper),
+            )
+        else:
+            return _err("Must provide either 'ranges' array or 'lower'/'upper' pair")
         return _ok()
     except Exception as exc:
         logger.error(f"set_ball_calibration: {exc}", exc_info=True)
@@ -750,6 +793,90 @@ async def camera_ball_distance_calibration(sid: str, data: dict | None = None):
         return _ok(calibration_constant=constant)
     except Exception as exc:
         logger.error(f"camera_ball_distance_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def add_goal_color_range(sid: str, data: dict | None = None):
+    """data: { goal_color: str, lower: [h,s,v], upper: [h,s,v] }"""
+    try:
+        d = data or {}
+        goal_color = d.get("goal_color")
+        lower = d.get("lower")
+        upper = d.get("upper")
+        
+        if goal_color not in ["yellow", "blue"]:
+            return _err("goal_color must be 'yellow' or 'blue'")
+        if not lower or not upper or len(lower) != 3 or len(upper) != 3:
+            return _err("'lower' and 'upper' must be lists of 3 values")
+        
+        calibration.add_goal_color_range(goal_color, tuple(lower), tuple(upper))
+        ranges = calibration.get_goal_color_ranges(goal_color)
+        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+    except Exception as exc:
+        logger.error(f"add_goal_color_range: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def remove_goal_color_range(sid: str, data: dict | None = None):
+    """data: { goal_color: str, index: int }"""
+    try:
+        d = data or {}
+        goal_color = d.get("goal_color")
+        index = d.get("index")
+        
+        if goal_color not in ["yellow", "blue"]:
+            return _err("goal_color must be 'yellow' or 'blue'")
+        if not isinstance(index, int) or index < 0:
+            return _err("index must be a non-negative integer")
+        
+        if not calibration.remove_goal_color_range(goal_color, index):
+            return _err(f"Invalid range index: {index}")
+        
+        ranges = calibration.get_goal_color_ranges(goal_color)
+        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+    except Exception as exc:
+        logger.error(f"remove_goal_color_range: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def add_ball_color_range(sid: str, data: dict | None = None):
+    """data: { lower: [h,s,v], upper: [h,s,v] }"""
+    try:
+        d = data or {}
+        lower = d.get("lower")
+        upper = d.get("upper")
+        
+        if not lower or not upper or len(lower) != 3 or len(upper) != 3:
+            return _err("'lower' and 'upper' must be lists of 3 values")
+        
+        calibration.add_ball_color_range(tuple(lower), tuple(upper))
+        ranges = calibration.get_ball_color_ranges()
+        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+    except Exception as exc:
+        logger.error(f"add_ball_color_range: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def remove_ball_color_range(sid: str, data: dict | None = None):
+    """data: { index: int }"""
+    try:
+        d = data or {}
+        index = d.get("index")
+        
+        if not isinstance(index, int) or index < 0:
+            return _err("index must be a non-negative integer")
+        
+        if not calibration.remove_ball_color_range(index):
+            return _err(f"Invalid range index: {index}")
+        
+        ranges = calibration.get_ball_color_ranges()
+        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+    except Exception as exc:
+        logger.error(f"remove_ball_color_range: {exc}", exc_info=True)
         return _err("Internal server error")
 
 

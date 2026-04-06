@@ -12,5 +12,5 @@ python-multipart>=0.0.5
 pyserial>=3.5
 
 # Camera support
-# picamera2>=0.3.0
+picamera2>=0.3.0
 

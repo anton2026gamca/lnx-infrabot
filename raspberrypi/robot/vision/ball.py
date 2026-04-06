@@ -26,8 +26,8 @@ class BallPossessionArea:
 
 def detect_ball(
     hsv_frame: np.ndarray,
-    ball_lower: np.ndarray,
-    ball_upper: np.ndarray,
+    ball_lower: np.ndarray | list[np.ndarray],
+    ball_upper: np.ndarray | list[np.ndarray],
     min_area: int = 50
 ) -> tuple[list[DetectedObject], bool]:
     """
@@ -35,8 +35,8 @@ def detect_ball(
     
     Args:
         hsv_frame: HSV image array.
-        ball_lower: HSV lower bound for the ball color.
-        ball_upper: HSV upper bound for the ball color.
+        ball_lower: HSV lower bound(s) for the ball color. Can be a single array or list of arrays for multiple ranges.
+        ball_upper: HSV upper bound(s) for the ball color. Can be a single array or list of arrays for multiple ranges.
         min_area: Minimum area to consider as a valid ball detection.
     
     Returns:
@@ -45,7 +45,16 @@ def detect_ball(
     if hsv_frame is None or hsv_frame.size == 0:
         return [], False
     
-    mask = cv2.inRange(hsv_frame, ball_lower, ball_upper)
+    mask = None
+    if isinstance(ball_lower, list):
+        for lower, upper in zip(ball_lower, ball_upper):
+            range_mask = cv2.inRange(hsv_frame, lower, upper)
+            mask = range_mask if mask is None else cv2.bitwise_or(mask, range_mask)
+    elif isinstance(ball_lower, np.ndarray) and isinstance(ball_upper, np.ndarray):
+        mask = cv2.inRange(hsv_frame, ball_lower, ball_upper)
+
+    if mask is None:
+        return [], False
     
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)

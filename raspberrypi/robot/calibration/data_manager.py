@@ -25,9 +25,14 @@ def _create_calibration_data() -> dict:
     thresholds = shared_data.get_line_detection_thresholds()
 
     goal_color = shared_data.get_goal_color()
-    yellow_lower, yellow_upper = shared_data.get_goal_calibration("yellow")
-    blue_lower, blue_upper = shared_data.get_goal_calibration("blue")
-    ball_lower, ball_upper = shared_data.get_ball_calibration()
+    yellow_ranges = shared_data.get_goal_calibration("yellow")
+    blue_ranges = shared_data.get_goal_calibration("blue")
+    ball_ranges = shared_data.get_ball_calibration()
+    
+    # Convert ranges to list of dicts for JSON serialization
+    yellow_ranges_list = [{'lower': list(lower), 'upper': list(upper)} for lower, upper in yellow_ranges]
+    blue_ranges_list = [{'lower': list(lower), 'upper': list(upper)} for lower, upper in blue_ranges]
+    ball_ranges_list = [{'lower': list(lower), 'upper': list(upper)} for lower, upper in ball_ranges]
     
     return {
         "version": CALIBRATION_SCHEMA_VERSION,
@@ -37,15 +42,12 @@ def _create_calibration_data() -> dict:
             },
             "goal_detection": {
                 "goal_color": goal_color,
-                "yellow_lower": yellow_lower,
-                "yellow_upper": yellow_upper,
-                "blue_lower": blue_lower,
-                "blue_upper": blue_upper,
+                "yellow_ranges": yellow_ranges_list,
+                "blue_ranges": blue_ranges_list,
                 "focal_length_pixels": shared_data.get_goal_focal_length()
             },
             "ball_detection": {
-                "ball_lower": ball_lower,
-                "ball_upper": ball_upper,
+                "ball_ranges": ball_ranges_list,
             },
             "ball_distance": {
                 "calibration_constant": shared_data.get_camera_ball_calibration_constant()
@@ -101,21 +103,31 @@ def load_calibration_data() -> None:
                     for i in range(10):
                         shared_data.goal_color[i] = color_bytes[i:i+1]
             
-            yellow_lower = goal_data.get("yellow_lower")
-            yellow_upper = goal_data.get("yellow_upper")
-            if yellow_lower and yellow_upper and len(yellow_lower) == 3 and len(yellow_upper) == 3:
-                with shared_data.goal_detection_lock:
-                    for i in range(3):
-                        shared_data.goal_calibration_yellow[i] = int(yellow_lower[i])
-                        shared_data.goal_calibration_yellow[i + 3] = int(yellow_upper[i])
+            # Load yellow ranges (support both old and new format)
+            yellow_ranges = goal_data.get("yellow_ranges")
+            if yellow_ranges and isinstance(yellow_ranges, list):
+                # New format with multiple ranges
+                ranges_list = [(r.get('lower', [20, 100, 100]), r.get('upper', [30, 255, 255])) for r in yellow_ranges if isinstance(r, dict)]
+                shared_data.set_goal_calibration('yellow', ranges_list)
+            else:
+                # Old format with single range
+                yellow_lower = goal_data.get("yellow_lower")
+                yellow_upper = goal_data.get("yellow_upper")
+                if yellow_lower and yellow_upper and len(yellow_lower) == 3 and len(yellow_upper) == 3:
+                    shared_data.set_goal_calibration('yellow', [(yellow_lower, yellow_upper)])
             
-            blue_lower = goal_data.get("blue_lower")
-            blue_upper = goal_data.get("blue_upper")
-            if blue_lower and blue_upper and len(blue_lower) == 3 and len(blue_upper) == 3:
-                with shared_data.goal_detection_lock:
-                    for i in range(3):
-                        shared_data.goal_calibration_blue[i] = int(blue_lower[i])
-                        shared_data.goal_calibration_blue[i + 3] = int(blue_upper[i])
+            # Load blue ranges (support both old and new format)
+            blue_ranges = goal_data.get("blue_ranges")
+            if blue_ranges and isinstance(blue_ranges, list):
+                # New format with multiple ranges
+                ranges_list = [(r.get('lower', [100, 100, 100]), r.get('upper', [130, 255, 255])) for r in blue_ranges if isinstance(r, dict)]
+                shared_data.set_goal_calibration('blue', ranges_list)
+            else:
+                # Old format with single range
+                blue_lower = goal_data.get("blue_lower")
+                blue_upper = goal_data.get("blue_upper")
+                if blue_lower and blue_upper and len(blue_lower) == 3 and len(blue_upper) == 3:
+                    shared_data.set_goal_calibration('blue', [(blue_lower, blue_upper)])
             
             focal_length = goal_data.get("focal_length_pixels")
             if focal_length is not None and isinstance(focal_length, (int, float)) and focal_length > 0:
@@ -123,13 +135,18 @@ def load_calibration_data() -> None:
 
         ball_data = calibrations.get("ball_detection", {}) if isinstance(calibrations, dict) else {}
         if ball_data:
-            ball_lower = ball_data.get("ball_lower")
-            ball_upper = ball_data.get("ball_upper")
-            if ball_lower and ball_upper and len(ball_lower) == 3 and len(ball_upper) == 3:
-                with shared_data.goal_detection_lock:
-                    for i in range(3):
-                        shared_data.ball_calibration_hsv[i] = int(ball_lower[i])
-                        shared_data.ball_calibration_hsv[i + 3] = int(ball_upper[i])
+            # Load ball ranges (support both old and new format)
+            ball_ranges = ball_data.get("ball_ranges")
+            if ball_ranges and isinstance(ball_ranges, list):
+                # New format with multiple ranges
+                ranges_list = [(r.get('lower', [0, 0, 0]), r.get('upper', [0, 0, 0])) for r in ball_ranges if isinstance(r, dict)]
+                shared_data.set_ball_calibration(ranges_list)
+            else:
+                # Old format with single range
+                ball_lower = ball_data.get("ball_lower")
+                ball_upper = ball_data.get("ball_upper")
+                if ball_lower and ball_upper and len(ball_lower) == 3 and len(ball_upper) == 3:
+                    shared_data.set_ball_calibration([(ball_lower, ball_upper)])
 
         ball_distance_data = calibrations.get("ball_distance", {}) if isinstance(calibrations, dict) else {}
         if ball_distance_data:
