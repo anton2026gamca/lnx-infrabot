@@ -1004,7 +1004,7 @@ async def compute_hsv_from_regions(sid: str, data: dict | None = None):
             if region_crop.size == 0:
                 return _err("Empty region")
 
-            hsv = cv2.cvtColor(region_crop, cv2.COLOR_RGB2HSV)
+            hsv = cv2.cvtColor(region_crop, cv2.COLOR_BGR2HSV)
             h_vals = hsv[:, :, 0].flatten()
             s_vals = hsv[:, :, 1].flatten()
             v_vals = hsv[:, :, 2].flatten()

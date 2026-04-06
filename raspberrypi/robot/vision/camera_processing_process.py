@@ -45,7 +45,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         last_frame_timestamp = frame.timestamp
         
         hsv_frame = cv2.resize(frame.frame, (DETECTION_FRAME_WIDTH, DETECTION_FRAME_HEIGHT))
-        hsv_frame = cv2.cvtColor(hsv_frame, cv2.COLOR_RGB2HSV)
+        hsv_frame = cv2.cvtColor(hsv_frame, cv2.COLOR_BGR2HSV)
 
         goal_color = shared_data.get_goal_color()
         goal_ranges = shared_data.get_goal_calibration(goal_color)
