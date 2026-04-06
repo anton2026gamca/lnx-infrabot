@@ -1027,23 +1027,6 @@ async def compute_hsv_from_regions(sid: str, data: dict | None = None):
 
 
 # ---------------------------------------------------------------------------
-# Fallback HTTP route (index.html, served by FastAPI if nginx isn't fronting)
-# ---------------------------------------------------------------------------
-
-@fastapi_app.get("/")
-async def get_index():
-    logger.warning(
-        "Accessed root endpoint serving index.html. "
-        "In production this should be served by nginx directly."
-    )
-    try:
-        with open("web_server/static/index.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
-    except FileNotFoundError:
-        return HTMLResponse("Not found", status_code=404)
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
