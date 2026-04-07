@@ -1,10 +1,7 @@
 #include <Adafruit_BNO055.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
-#include <algorithm>
 #include <math.h>
-#include <string.h>
-
 
 
 // ================================================
@@ -105,8 +102,8 @@ MotorsData motors_data = {{0, 0, 0, 0}, KICKER_IN};
 
 
 // ========== BNO055 Compass Sensor ==========
-#define BNO055_ID 55
-Adafruit_BNO055 bno = Adafruit_BNO055(BNO055_ID);
+#define BNO055_SENSOR_ID 55
+Adafruit_BNO055 bno = Adafruit_BNO055(BNO055_SENSOR_ID);
 bool bno_initialized = false;
 
 struct CompassData {

@@ -1,764 +1,1061 @@
+import asyncio
 import cv2
-import json
 import multiprocessing.synchronize
-import threading
-import time
 import numpy as np
-from flask import Flask, Response, jsonify, request
-from werkzeug.serving import make_server
+import uvicorn
+import urllib.parse
+from engineio.packet import base64
+
+import socketio
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 from robot import calibration, utils, vision
 from robot.hardware import line_sensors
+from robot.logic import autonomous_mode
 from robot.multiprocessing import shared_data
-
 from robot.robot import RobotManualControl
-from robot.utils import Suppress200Filter
 from robot.vision import DetectedObject, PositionEstimate
 from robot.config import *
 
 
-app = Flask(__name__)
-
-app.config.update(DEBUG=False, ENV="production")
+# ---------------------------------------------------------------------------
+# App setup
+# ---------------------------------------------------------------------------
 
 logger = utils.get_logger("API Process")
 
-_werkzeug_logger = utils.get_logger("werkzeug")
-_werkzeug_logger.addFilter(Suppress200Filter())
+sio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins="*",
+    max_http_buffer_size=5 * 1024 * 1024,
+    logger=False,
+    engineio_logger=False,
+)
+
+fastapi_app = FastAPI()
+app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)
+
+@fastapi_app.on_event("startup")
+async def _on_startup():
+    await _start_monitoring_loop()
+
+@fastapi_app.on_event("shutdown")
+async def _on_shutdown():
+    await _stop_monitoring_loop()
+
+_video_tasks: dict[str, asyncio.Task] = {}
+_update_subscriptions: dict[str, dict] = {}  # {sid: {subscribed_updates: set, task: asyncio.Task}}
+_state_tracker: dict = {  # Track previous state for change detection
+    "robot_mode": None,
+    "goal_color": None,
+    "line_detected": None,
+    "ball_detected": None,
+    "goal_detected": None,
+    "last_log_id": 0,
+}
+_state_tracker_lock = asyncio.Lock()
+
+encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), API_VIDEO_JPEG_QUALITY]
+
+_state_monitor_task: asyncio.Task | None = None
 
 
+# ---------------------------------------------------------------------------
+# State change monitoring and subscriptions
+# ---------------------------------------------------------------------------
 
-def gen_frames(fps=None, show_detections=True):
-    if fps is not None:
+async def _start_monitoring_loop():
+    global _state_monitor_task
+    _state_monitor_task = asyncio.create_task(_monitor_state_changes())
+    logger.info("State monitor task started")
+
+async def _stop_monitoring_loop():
+    global _state_monitor_task
+    if _state_monitor_task:
+        _state_monitor_task.cancel()
         try:
-            fps = float(fps)
-            if fps <= 0:
-                fps = API_VIDEO_TARGET_FPS
-        except Exception:
-            fps = API_VIDEO_TARGET_FPS
-    else:
-        fps = API_VIDEO_TARGET_FPS
-    sleep_time = 1.0 / fps if fps > 0 else 0
-    last_frame_data = None
-    frame_count = 0
+            await _state_monitor_task
+        except asyncio.CancelledError:
+            pass
+    logger.info("State monitor task stopped")
+
+async def _monitor_state_changes() -> None:
+    """Continuously monitor state changes and emit updates to subscribed clients."""
+    global _state_tracker
+    check_interval = 0.1  # Check for changes every 100ms
     
-    encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), API_VIDEO_JPEG_QUALITY]
-
-    while True:
-        if sleep_time:
-            time.sleep(sleep_time)
-        
-        frame_data = shared_data.get_camera_frame()
-        if frame_data is None or frame_data.frame is None:
-            if last_frame_data:
-                yield last_frame_data
-            continue
-
-        frame = frame_data.frame
-        
-        if show_detections:
-            try:
-                detections = shared_data.get_detected_objects()
-                if not isinstance(detections, list):
-                    detections = []
-
-                detected_objects = []
-                for det in detections:
-                    if isinstance(det, dict):
-                        color = tuple(det.get('color', (255, 255, 255))) if det.get('color') else (255, 255, 255)
-                        detected_objects.append(DetectedObject(
-                            object_type=det.get('object_type', 'unknown'),
-                            x=det.get('x', 0),
-                            y=det.get('y', 0),
-                            width=det.get('width', 0),
-                            height=det.get('height', 0),
-                            confidence=det.get('confidence', 0.0),
-                            color=color
-                        ))
-                    else:
-                        detected_objects.append(det)
-                
-                if detected_objects:
-                    frame = vision.draw_detections_on_frame(frame, detected_objects, draw_labels=True)
-            except Exception as e:
-                logger.debug(f"Error drawing detections: {e}")
-        
-        ret, buffer = cv2.imencode('.jpg', frame, encode_params)
-        if not ret:
-            continue
+    try:
+        while True:
+            await asyncio.sleep(check_interval)
             
-        frame_bytes = buffer.tobytes()
-        last_frame_data = (b'--frame\r\n'
-                          b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        yield last_frame_data
-        frame_count += 1
+            try:
+                # Get current state
+                current_mode = shared_data.get_robot_mode()
+                current_goal_color = shared_data.get_goal_color()
+                current_line_detected = line_sensors.get_line_detected()
+                current_hw_data = shared_data.get_hardware_data()
+                current_ir_data = current_hw_data.ir if current_hw_data else None
+                current_cam_data = shared_data.get_camera_ball_data()
+                
+                current_ir_detected = current_ir_data.angle != 999 if current_ir_data else False
+                current_cam_detected = current_cam_data.detected if current_cam_data else False
+                current_ball_detected = current_cam_detected or current_ir_detected
+
+                logs, last_id = utils.get_logs(_state_tracker["last_log_id"])
+
+                async with _state_tracker_lock:
+                    if current_mode != _state_tracker["robot_mode"]:
+                        _state_tracker["robot_mode"] = current_mode
+                        mode_name = ["idle", "manual", "autonomous"][current_mode] if current_mode in [0, 1, 2] else "unknown"
+                        await _broadcast_update("mode_changed", {"mode": mode_name})
+                    
+                    if current_goal_color != _state_tracker["goal_color"]:
+                        _state_tracker["goal_color"] = current_goal_color
+                        await _broadcast_update("goal_color_changed", {"goal_color": current_goal_color})
+                    
+                    if (current_line_detected != _state_tracker["line_detected"] or
+                        current_ir_detected != _state_tracker["ir_detected"] or
+                        current_ball_detected != _state_tracker["ball_detected"]
+                    ):  
+                        _state_tracker["line_detected"] = current_line_detected
+                        _state_tracker["ir_detected"] = current_ir_detected
+                        _state_tracker["ball_detected"] = current_ball_detected
+                        await _broadcast_update("important_sensor_data_change", create_sensor_data())
+
+                    if last_id > _state_tracker["last_log_id"]:
+                        _state_tracker["last_log_id"] = last_id
+                        await _broadcast_update("new_logs", {"logs": logs})
+                        
+            except Exception as exc:
+                logger.error(f"Error in state monitoring: {exc}", exc_info=True)
+                
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        logger.error(f"State monitoring loop error: {exc}", exc_info=True)
 
 
-@app.route('/api/video_feed')
-def video_feed():
+async def _broadcast_update(event_name: str, data: dict) -> None:
+    """Broadcast an update event to all subscribed clients."""
+    sids_to_remove = []
+    for sid, sub_info in _update_subscriptions.items():
+        if event_name in sub_info["subscribed_updates"]:
+            try:
+                await sio.emit(event_name, data, to=sid)
+            except Exception as exc:
+                logger.debug(f"Error emitting {event_name} to {sid}: {exc}")
+                sids_to_remove.append(sid)
+    
+    # Clean up disconnected clients
+    for sid in sids_to_remove:
+        _update_subscriptions.pop(sid, None)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _ok(**kwargs) -> dict:
+    return {"status": "ok", **kwargs}
+
+
+def _err(msg: str) -> dict:
+    return {"status": "error", "error": msg}
+
+
+def _build_detected_objects(detections: list) -> list[DetectedObject]:
+    result = []
+    for det in detections:
+        if isinstance(det, dict):
+            color = tuple(det.get("color", (255, 255, 255))) if det.get("color") else (255, 255, 255)
+            result.append(DetectedObject(
+                object_type=det.get("object_type", "unknown"),
+                x=det.get("x", 0),
+                y=det.get("y", 0),
+                width=det.get("width", 0),
+                height=det.get("height", 0),
+                confidence=det.get("confidence", 0.0),
+                color=color,
+            ))
+        else:
+            result.append(det)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Video streaming
+# ---------------------------------------------------------------------------
+
+async def _video_loop(sid: str, fps: float, show_detections: bool) -> None:
+    """Push binary JPEG frames to a single client until cancelled."""
+    sleep_time = 1.0 / fps if fps > 0 else 0
     try:
-        fps = request.args.get('fps', None)
-        show_detections = request.args.get('show_detections', 'true').lower() in ('true', '1', 'yes')
-        response = Response(gen_frames(fps=fps, show_detections=show_detections), mimetype='multipart/x-mixed-replace; boundary=frame')
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
-        return response
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+        while True:
+            if sleep_time:
+                await asyncio.sleep(sleep_time)
+
+            frame_data = shared_data.get_camera_frame()
+            if frame_data is None or frame_data.frame is None:
+                continue
+
+            frame = frame_data.frame
+
+            if show_detections:
+                try:
+                    detections = shared_data.get_detected_objects()
+                    if isinstance(detections, list):
+                        objects = _build_detected_objects(detections)
+                        if objects:
+                            frame = vision.draw_detections_on_frame(frame, objects, draw_labels=True)
+                except Exception as exc:
+                    logger.debug(f"Error drawing detections: {exc}")
+
+            ret, buffer = cv2.imencode(".jpg", frame, encode_params)
+            if not ret:
+                continue
+
+            await sio.emit("video_frame", buffer.tobytes(), to=sid)
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        logger.error(f"Video loop error for {sid}: {exc}", exc_info=True)
 
 
-@app.route('/api/camera_ball_distance_calibration', methods=['POST'])
-def camera_ball_distance_calibration():
+# ---------------------------------------------------------------------------
+# Connection lifecycle
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def connect(sid: str, environ: dict, auth: dict | None = None):
+    expected_token = base64.b64encode(AUTH_TOKEN.encode()).decode() if AUTH_TOKEN else None
+
+    query = environ.get("QUERY_STRING", "")
+    params = dict(qc.split("=", 1) for qc in query.split("&") if "=" in qc)
+    token = params.get("token")
+    if token is not None:
+        token = urllib.parse.unquote(token)
+
+    if expected_token is None or token != expected_token:
+        logger.warning(f"Unauthorized connection attempt from {sid} with token: {token}, expected: {expected_token}")
+        return False
+    logger.info(f"Client connected: {sid}")
+    return True
+
+
+@sio.event
+async def disconnect(sid: str):
+    logger.info(f"Client disconnected: {sid}")
+    task = _video_tasks.pop(sid, None)
+    if task:
+        task.cancel()
+    _update_subscriptions.pop(sid, None)
+
+
+# ---------------------------------------------------------------------------
+# Update subscriptions
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def subscribe_updates(sid: str, data: dict | None = None):
+    """
+    Subscribe to state change notifications.
+    """
+    data = data or {}
+    updates = data.get("updates", {})
+
+    if not isinstance(updates, dict):
+        return _err("updates must be a dictionary of [event: bool]")
+
+    valid_events = {
+        "mode_changed",
+        "goal_color_changed",
+        "important_sensor_data_change",
+        "new_logs",
+    }
+
+    current = _update_subscriptions.get(sid, {}).get("subscribed_updates", set())
+
+    subscribed = set()
+    for event in valid_events:
+        if updates.get(event, None) is not False:
+            if event in current or updates.get(event, False):
+                subscribed.add(event)
+
+    if not subscribed:
+        return _err(f"No valid updates specified. Valid events: {', '.join(sorted(valid_events))}")
+
+    _update_subscriptions[sid] = {"subscribed_updates": subscribed}
+    logger.info(f"Client {sid} subscribed to updates: {subscribed}")
+    return _ok(message=f"Subscribed to {len(subscribed)} update(s)")
+
+
+@sio.event
+async def unsubscribe_updates(sid: str, data: dict | None = None):
+    """Unsubscribe from state change notifications."""
+    if sid in _update_subscriptions:
+        _update_subscriptions.pop(sid)
+        logger.info(f"Client {sid} unsubscribed from updates")
+    return _ok()
+
+
+# ---------------------------------------------------------------------------
+# Video subscription
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def subscribe_video(sid: str, data: dict | None = None):
+    """
+    Client -> subscribe_video  { fps?: number, show_detections?: bool }
+    Server -> ack              { status: "ok" | "error" }
+    Server -> video_frame      <bytes>   (repeated until unsubscribed)
+    """
+    data = data or {}
+    if sid in _video_tasks:
+        return _ok(message="already subscribed")
+
     try:
-        data = request.get_json()
-        
-        if not data or 'known_distance_mm' not in data:
-            return jsonify({'Missing known_distance_mm'}), 400
+        fps = float(data.get("fps", API_VIDEO_TARGET_FPS))
+        if fps <= 0:
+            fps = API_VIDEO_TARGET_FPS
+    except (TypeError, ValueError):
+        fps = API_VIDEO_TARGET_FPS
 
-        known_distance = float(data['known_distance_mm'])
-        
-        if not isinstance(known_distance, (int, float)) or known_distance <= 0:
-            return jsonify({"known_distance_mm must be a positive number"}), 400
-        
-        calibration_constant = calibration.calibrate_ball_distance(known_distance)
-        
-        return jsonify({'status': 'ok', 'calibration_constant': calibration_constant})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return '', 500
+    show_detections = bool(data.get("show_detections", True))
+
+    task = asyncio.create_task(_video_loop(sid, fps, show_detections))
+    _video_tasks[sid] = task
+    return _ok()
 
 
-@app.route('/api/get_sensor_data')
-def get_sensor_data():
+@sio.event
+async def unsubscribe_video(sid: str, data: dict | None = None):
+    """Stop sending video frames to this client."""
+    task = _video_tasks.pop(sid, None)
+    if task:
+        task.cancel()
+    return _ok()
+
+
+# ---------------------------------------------------------------------------
+# Sensor / state queries
+# ---------------------------------------------------------------------------
+
+def create_sensor_data() -> dict:
+    hw = shared_data.get_hardware_data()
+    if hw is None:
+        return _err("No data available yet")
+
+    running_state = shared_data.get_running_state()
+    cam = shared_data.get_camera_ball_data()
+
+    return _ok(
+        compass={
+            "heading": hw.compass.heading,
+            "pitch": hw.compass.pitch,
+            "roll": hw.compass.roll,
+        },
+        ir={
+            "angle": hw.ir.angle,
+            "distance": hw.ir.distance,
+            "sensors": hw.ir.sensors,
+            "status": hw.ir.status,
+        },
+        camera_ball={
+            "angle": cam.angle if cam else None,
+            "distance": cam.distance if cam else None,
+            "detected": cam.detected if cam else None,
+        },
+        line={
+            "raw": hw.line,
+            "detected": line_sensors.get_line_detected(),
+            "thresholds": shared_data.get_line_detection_thresholds(),
+        },
+        motors=shared_data.get_motor_speeds(),
+        kicker=shared_data.get_kicker_state(),
+        running_state={
+            "running": running_state.running if running_state else False,
+            "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
+            "bt_module_state": running_state.bt_module_state if running_state else False,
+            "switch_state": running_state.switch_state if running_state else False,
+        } if running_state else None,
+        timestamp=hw.timestamp,
+    )
+
+@sio.event
+async def get_sensor_data(sid: str | None = None, data: dict | None = None):
     try:
-        data = shared_data.get_hardware_data()
-        if data is None:
-            return jsonify({"error": "No data available yet"}), 503
-        
-        running_state = shared_data.get_running_state()
-        
-        camera_ball_position = shared_data.get_camera_ball_data()
-        camera_ball_angle = camera_ball_position.angle if camera_ball_position else None
-        camera_ball_distance = camera_ball_position.distance if camera_ball_position else None
-        camera_ball_detected = camera_ball_position.detected if camera_ball_position else None
+        return create_sensor_data()
+    except Exception as exc:
+        logger.error(f"get_sensor_data: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-        response = {
-            "compass": {
-                "heading": data.compass.heading,
-                "pitch": data.compass.pitch,
-                "roll": data.compass.roll
-            },
-            "ir": {
-                "angle": data.ir.angle,
-                "distance": data.ir.distance,
-                "sensors": data.ir.sensors,
-                "status": data.ir.status
-            },
-            "camera_ball": {
-                "angle": camera_ball_angle,
-                "distance": camera_ball_distance,
-                "detected": camera_ball_detected
-            },
-            "line": {
-                "raw": data.line,
-                "detected": line_sensors.get_line_detected(),
-                "thresholds": shared_data.get_line_detection_thresholds(),
-            },
-            "motors": shared_data.get_motor_speeds(),
-            "kicker": shared_data.get_kicker_state(),
-            "running_state": {
-                "running": running_state.running if running_state else False,
-                "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
-                "bt_module_state": running_state.bt_module_state if running_state else False,
-                "switch_state": running_state.switch_state if running_state else False
-            } if running_state else None,
-            "timestamp": data.timestamp
-        }
-        return jsonify(response)
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/get_logs')
-def get_logs():
+@sio.event
+async def get_logs(sid: str, data: dict | None = None):
     try:
-        since = request.args.get('since', '0')
-        try:
-            since_id = int(since)
-        except ValueError:
-            since_id = 0
-
+        since_id = int((data or {}).get("since", 0))
         items, last_id = utils.get_logs(since_id)
-        return jsonify({"logs": items, "last_id": last_id})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+        return _ok(logs=items, last_id=last_id)
+    except Exception as exc:
+        logger.error(f"get_logs: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/get_mode')
-def get_mode():
+@sio.event
+async def get_mode(sid: str, data: dict | None = None):
     try:
         mode = shared_data.get_robot_mode()
-        return jsonify({"mode": mode})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+        if mode not in [0, 1, 2]:
+            raise ValueError(f"Invalid robot mode: {mode}")
+        return _ok(mode=["idle", "manual", "autonomous"][mode])
+    except Exception as exc:
+        logger.error(f"get_mode: {exc}", exc_info=True)
+        return _err("Internal server error")
 
-@app.route('/api/set_mode', methods=['POST'])
-def set_mode():
+
+@sio.event
+async def get_motor_settings(sid: str, data: dict | None = None):
     try:
-        mode = request.args.get('mode', None)
-        if mode is None:
-            mode = (request.get_json() or {}).get('mode', None)
-        if mode is None or not mode in ["idle", "manual", "autonomous"]:
-            return jsonify({"error": "Invalid mode"}), 400
-        shared_data.set_robot_mode(["idle", "manual", "autonomous"].index(mode))
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/set_manual_control', methods=['POST'])
-def set_manual_control():
-    try:
-        data_str = request.data
-        if data_str is None:
-            return jsonify({"error": f"Invalid request"}), 400
-        data = json.loads(data_str)
-        if data.get('move', None) is None or \
-        not isinstance(data['move'].get('angle', None), (int, float)) or \
-        not isinstance(data['move'].get('speed', None), (int, float)) or \
-        not isinstance(data.get('rotate', None), (int, float)):
-            return jsonify({"error": f"Invalid request data \"{data_str}\""}), 400
-
-        control = RobotManualControl(
-            move_angle=data['move']['angle'],
-            move_speed=data['move']['speed'],
-            rotate=data['rotate']
+        return _ok(
+            rotation_correction_enabled=shared_data.get_rotation_correction_enabled(),
+            line_avoiding_enabled=shared_data.get_line_avoiding_enabled(),
+            position_based_speed_enabled=shared_data.get_position_based_speed_enabled(),
         )
-        shared_data.set_manual_control(control)
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+    except Exception as exc:
+        logger.error(f"get_motor_settings: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/reset_compass', methods=['POST'])
-def reset_compass():
-    try:
-        shared_data.request_compass_reset()
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/line_calibration/start', methods=['POST'])
-def start_line_calibration():
-    try:
-        data = request.get_json(silent=True) or {}
-        phase = data.get('phase', 1)
-        
-        if phase not in [1, 2]:
-            return jsonify({"error": "Bad request (phase)"}), 400
-        
-        calibration.start_line_calibration(phase)
-
-        return jsonify({
-            "status": "ok",
-            "phase": phase,
-            "message": f"Phase {phase} started"
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/line_calibration/stop', methods=['POST'])
-def stop_line_calibration():
-    try:
-        status = calibration.get_line_calibration_status()
-        if not status['phase'] > 0:
-            return jsonify({"error": "Calibration is not active"}), 400
-        
-        thresholds, min_values, max_values, phase = calibration.stop_line_calibration()
-        
-        can_start_phase2 = (phase == 1 and any(min_values[i] != float('inf') for i in range(len(min_values))))
-        
-        return jsonify({
-            "status": "ok",
-            "phase": phase,
-            "thresholds": thresholds,
-            "min_values": min_values,
-            "max_values": max_values,
-            "can_start_phase2": can_start_phase2
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/line_calibration/cancel', methods=['POST'])
-def cancel_line_calibration():
-    try:
-        status = calibration.get_line_calibration_status()
-        if not status['phase'] > 0:
-            return jsonify({"error": "Calibration is not active"}), 400
-        
-        phase = status.get('phase', 0)
-        calibration.stop_line_calibration(cancel=True)
-        
-        return jsonify({
-            "status": "ok",
-            "phase": phase,
-            "message": "Calibration cancelled."
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/line_calibration/status')
-def get_line_calibration_status():
-    try:
-        status = calibration.get_line_calibration_status()
-        return jsonify(status)
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/line_calibration/set_thresholds', methods=['POST'])
-def set_line_thresholds():
-    try:
-        data = request.get_json()
-        if not data or 'thresholds' not in data:
-            return jsonify({"error": "Missing 'thresholds' in request body"}), 400
-        
-        thresholds = data['thresholds']
-        if not isinstance(thresholds, list) or len(thresholds) != LINE_SENSOR_COUNT:
-            return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs"}), 400
-        
-        try:
-            thresholds_ranges = []
-            for t in thresholds:
-                if isinstance(t, list) and len(t) == 2:
-                    thresholds_ranges.append([int(t[0]), int(t[1])])
-                else:
-                    return jsonify({"error": f"Thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs"}), 400
-            
-            calibration.set_line_detection_thresholds(thresholds_ranges)
-            return jsonify({"status": "ok", "thresholds": thresholds_ranges})
-        except (ValueError, TypeError) as e:
-            return jsonify({"error": f"Invalid threshold values: {e}"}) , 400
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/get_motor_settings')
-def get_motor_settings():
-    try:
-        return jsonify({
-            "rotation_correction_enabled": shared_data.get_rotation_correction_enabled(),
-            "line_avoiding_enabled": shared_data.get_line_avoiding_enabled(),
-            "position_based_speed_enabled": shared_data.get_position_based_speed_enabled(),
-            "camera_ball_usage_enabled": shared_data.get_camera_ball_usage_enabled(),
-            "always_facing_goal_enabled": shared_data.get_always_facing_goal_enabled(),
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/set_motor_settings', methods=['POST'])
-def set_motor_settings():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Missing request body"}), 400
-        
-        if 'rotation_correction_enabled' in data:
-            if not isinstance(data['rotation_correction_enabled'], bool):
-                return jsonify({"error": "rotation_correction_enabled must be a boolean"}), 400
-            shared_data.set_rotation_correction_enabled(data['rotation_correction_enabled'])
-            logger.info(f"Rotation correction {'enabled' if data['rotation_correction_enabled'] else 'disabled'}")
-        
-        if 'line_avoiding_enabled' in data:
-            if not isinstance(data['line_avoiding_enabled'], bool):
-                return jsonify({"error": "line_avoiding_enabled must be a boolean"}), 400
-            shared_data.set_line_avoiding_enabled(data['line_avoiding_enabled'])
-            logger.info(f"Line avoiding {'enabled' if data['line_avoiding_enabled'] else 'disabled'}")
-        
-        if 'position_based_speed_enabled' in data:
-            if not isinstance(data['position_based_speed_enabled'], bool):
-                return jsonify({"error": "position_based_speed_enabled must be a boolean"}), 400
-            shared_data.set_position_based_speed_enabled(data['position_based_speed_enabled'])
-            logger.info(f"Position-based speed {'enabled' if data['position_based_speed_enabled'] else 'disabled'}")
-        
-        if 'camera_ball_usage_enabled' in data:
-            if not isinstance(data['camera_ball_usage_enabled'], bool):
-                return jsonify({"error": "camera_ball_usage_enabled must be a boolean"}), 400
-            shared_data.set_camera_ball_usage_enabled(data['camera_ball_usage_enabled'])
-            logger.info(f"Camera ball usage {'enabled' if data['camera_ball_usage_enabled'] else 'disabled'}")
-        
-        if 'always_facing_goal_enabled' in data:
-            if not isinstance(data['always_facing_goal_enabled'], bool):
-                return jsonify({"error": "always_facing_goal_enabled must be a boolean"}), 400
-            shared_data.set_always_facing_goal_enabled(data['always_facing_goal_enabled'])
-            logger.info(f"Always facing goal {'enabled' if data['always_facing_goal_enabled'] else 'disabled'}")
-        
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/get_goal_settings')
-def get_goal_settings():
+@sio.event
+async def get_goal_settings(sid: str, data: dict | None = None):
     try:
         goal_color = shared_data.get_goal_color()
-        yellow_lower, yellow_upper = shared_data.get_goal_calibration('yellow')
-        blue_lower, blue_upper = shared_data.get_goal_calibration('blue')
+        y_ranges = shared_data.get_goal_calibration("yellow")
+        b_ranges = shared_data.get_goal_calibration("blue")
         
-        return jsonify({
-            "goal_color": goal_color,
-            "calibration": {
-                "yellow": {
-                    "lower": yellow_lower,
-                    "upper": yellow_upper
-                },
-                "blue": {
-                    "lower": blue_lower,
-                    "upper": blue_upper
-                }
-            }
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+        y_ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in y_ranges]
+        b_ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in b_ranges]
+        
+        return _ok(
+            goal_color=goal_color,
+            calibration={
+                "yellow": {"ranges": y_ranges_list},
+                "blue":   {"ranges": b_ranges_list},
+            },
+        )
+    except Exception as exc:
+        logger.error(f"get_goal_settings: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/set_goal_settings', methods=['POST'])
-def set_goal_settings():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Missing request body"}), 400
-        
-        if 'goal_color' in data:
-            if data['goal_color'] not in ['yellow', 'blue']:
-                return jsonify({"error": "goal_color must be 'yellow' or 'blue'"}), 400
-            calibration.set_enemy_goal_color(data['goal_color'])
-        
-        if 'calibration' in data:
-            cal = data['calibration']
-            if 'yellow' in cal:
-                yellow = cal['yellow']
-                if 'lower' in yellow and 'upper' in yellow:
-                    if yellow['lower'] and len(yellow['lower']) == 3 and yellow['upper'] and len(yellow['upper']) == 3:
-                        calibration.set_goal_color_range('yellow', tuple(yellow['lower']), tuple(yellow['upper']))
-            if 'blue' in cal:
-                blue = cal['blue']
-                if 'lower' in blue and 'upper' in blue:
-                    if blue['lower'] and len(blue['lower']) == 3 and blue['upper'] and len(blue['upper']) == 3:
-                        calibration.set_goal_color_range('blue', tuple(blue['lower']), tuple(blue['upper']))
-        
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/get_goal_detection')
-def get_goal_detection():
+@sio.event
+async def get_goal_detection(sid: str, data: dict | None = None):
     try:
         result = shared_data.get_goal_detection_result()
         if result is None:
-            return jsonify({
-                "goal_detected": False,
-                "alignment": 0.0,
-                "goal_center_x": None,
-                "goal_area": 0.0
-            })
-        
-        return jsonify({
-            "goal_detected": result.goal_detected,
-            "alignment": result.alignment,
-            "goal_center_x": result.goal_center_x,
-            "goal_area": result.goal_area,
-            "distance_mm": result.distance_mm,
-            "goal_height_pixels": result.goal_height_pixels
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+            return _ok(goal_detected=False, alignment=0.0, goal_center_x=None, goal_area=0.0)
+        return _ok(
+            goal_detected=result.detected,
+            alignment=result.alignment,
+            goal_center_x=result.center_x,
+            goal_area=result.area,
+            distance_mm=result.distance_mm,
+            goal_height_pixels=result.height_pixels,
+        )
+    except Exception as exc:
+        logger.error(f"get_goal_detection: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/compute_hsv_from_regions', methods=['POST'])
-def compute_hsv_from_regions():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Missing request body"}), 400
-        
-        regions = data.get('regions', [])
-        if not regions:
-            return jsonify({"error": "Missing 'regions' in request body"}), 400
-
-        h_min, s_min, v_min = 179, 255, 255
-        h_max, s_max, v_max = 0, 0, 0
-
-        for region in regions:
-            x = int(region.get('x', 0))
-            y = int(region.get('y', 0))
-            width = int(region.get('width', 0))
-            height = int(region.get('height', 0))
-            
-            if width <= 0 or height <= 0:
-                return jsonify({"error": "Invalid region dimensions"}), 400
-            
-            frame_data = shared_data.get_camera_frame()
-            if frame_data is None or frame_data.frame is None:
-                return jsonify({"error": "No camera frame available"}), 503
-            frame = frame_data.frame
-            
-            frame_height, frame_width = frame.shape[:2]
-            
-            x = max(0, min(x, frame_width - 1))
-            y = max(0, min(y, frame_height - 1))
-            x2 = max(0, min(x + width, frame_width))
-            y2 = max(0, min(y + height, frame_height))
-            
-            region = frame[y:y2, x:x2]
-            
-            if region.size == 0:
-                return jsonify({"error": "Empty region"}), 400
-            
-            hsv_region = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
-            
-            h_values = hsv_region[:, :, 0].flatten()
-            s_values = hsv_region[:, :, 1].flatten()
-            v_values = hsv_region[:, :, 2].flatten()
-            
-            new_h_min = int(np.percentile(h_values, 5))
-            new_h_max = int(np.percentile(h_values, 95))
-            new_s_min = int(np.percentile(s_values, 5))
-            new_s_max = int(np.percentile(s_values, 95))
-            new_v_min = int(np.percentile(v_values, 5))
-            new_v_max = int(np.percentile(v_values, 95))
-            
-            new_h_min = max(0, new_h_min - 5)
-            new_h_max = min(179, new_h_max + 5)
-            new_s_min = max(0, new_s_min - 20)
-            new_s_max = min(255, new_s_max + 20)
-            new_v_min = max(0, new_v_min - 20)
-            new_v_max = min(255, new_v_max + 20)
-
-            h_min = min(h_min, new_h_min)
-            h_max = max(h_max, new_h_max)
-            s_min = min(s_min, new_s_min)
-            s_max = max(s_max, new_s_max)
-            v_min = min(v_min, new_v_min)
-            v_max = max(v_max, new_v_max)
-        
-        return jsonify({
-            "lower": [h_min, s_min, v_min],
-            "upper": [h_max, s_max, v_max]
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
-
-
-@app.route('/api/get_position_estimate')
-def get_position_estimate():
+@sio.event
+async def get_position_estimate(sid: str, data: dict | None = None):
     try:
         position: PositionEstimate | None = vision.get_position_estimate()
         if position is None:
-            return jsonify({
-                "x_mm": None,
-                "y_mm": None,
-                "confidence": 0.0
-            })
-        
-        return jsonify({
-            "x_mm": position.x_mm,
-            "y_mm": position.y_mm,
-            "confidence": position.confidence
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+            return _ok(x_mm=None, y_mm=None, confidence=0.0)
+        return _ok(x_mm=position.x_mm, y_mm=position.y_mm, confidence=position.confidence)
+    except Exception as exc:
+        logger.error(f"get_position_estimate: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/goal_distance/get_focal_length')
-def get_goal_focal_length():
+@sio.event
+async def get_detections(sid: str, data: dict | None = None):
     try:
-        focal_length = shared_data.get_goal_focal_length()
-        return jsonify({"focal_length_pixels": focal_length})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+        return _ok(detections=shared_data.get_detected_objects_raw())
+    except Exception as exc:
+        logger.error(f"get_detections: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/goal_distance/set_focal_length', methods=['POST'])
-def set_goal_focal_length():
+@sio.event
+async def get_ball_calibration(sid: str, data: dict | None = None):
     try:
-        data = request.get_json()
-        if not data or 'focal_length_pixels' not in data:
-            return jsonify({"error": "Missing 'focal_length_pixels' in request body"}), 400
-        
-        focal_length = data['focal_length_pixels']
-        if not isinstance(focal_length, (int, float)) or focal_length <= 0:
-            return jsonify({"error": "focal_length_pixels must be a positive number"}), 400
-        
-        calibration.set_goal_focal_length(float(focal_length))
-        return jsonify({"status": "ok", "focal_length_pixels": focal_length})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+        ranges = shared_data.get_ball_calibration()
+        ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in ranges]
+        return _ok(ranges=ranges_list)
+    except Exception as exc:
+        logger.error(f"get_ball_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/goal_distance_calibration/start', methods=['POST'])
-def start_goal_distance_calibration():
+@sio.event
+async def get_goal_focal_length(sid: str, data: dict | None = None):
     try:
-        data = request.get_json(silent=True) or {}
-        initial_distance = data.get('initial_distance', 200.0)
-        line_distance = data.get('line_distance', 200.0)
-        
-        if not isinstance(initial_distance, (int, float)) or initial_distance <= 0:
-            return jsonify({"error": "initial_distance must be a positive number"}), 400
-        
-        if not isinstance(line_distance, (int, float)) or line_distance <= 0:
-            return jsonify({"error": "line_distance must be a positive number"}), 400
-        
-        calibration.start_goal_distance_calibration(float(initial_distance), float(line_distance))
-        return jsonify({
-            "status": "ok",
-            "message": "Drive the robot toward the enemy goal until it detects the line, then stop calibration"
-        })
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+        return _ok(focal_length_pixels=shared_data.get_goal_focal_length())
+    except Exception as exc:
+        logger.error(f"get_goal_focal_length: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/goal_distance_calibration/stop', methods=['POST'])
-def stop_goal_distance_calibration():
+@sio.event
+async def get_all_state_machines(sid: str, data: dict | None = None):
     try:
-        result = calibration.stop_goal_distance_calibration()
-        
-        if not result.get('success'):
-            return jsonify(result), 400
-        
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return jsonify({"error": "Internal server error"}), 500
+        machines = autonomous_mode.get_available_state_machines()
+        return _ok(state_machines=list(machines.keys()))
+    except Exception as exc:
+        logger.error(f"get_all_state_machines: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/goal_distance_calibration/cancel', methods=['POST'])
-def cancel_goal_distance_calibration():
+@sio.event
+async def get_autonomous_state(sid: str, data: dict | None = None):
+    try:
+        state_machine = autonomous_mode.get_current_state_machine()
+        return _ok(
+            state_machine=state_machine.name if state_machine else None,
+            always_face_goal_enabled=shared_data.get_always_facing_goal_enabled(),
+            camera_ball_usage_enabled=shared_data.get_camera_ball_usage_enabled(),
+        )
+    except Exception as exc:
+        logger.error(f"get_autonomous_state: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def get_line_calibration_status(sid: str, data: dict | None = None):
+    try:
+        return calibration.get_line_calibration_status()
+    except Exception as exc:
+        logger.error(f"get_line_calibration_status: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def get_goal_distance_calibration_status(sid: str, data: dict | None = None):
+    try:
+        return calibration.get_goal_distance_calibration_status()
+    except Exception as exc:
+        logger.error(f"get_goal_distance_calibration_status: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# Mutations
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def set_mode(sid: str, data: dict | None = None):
+    """data: { mode: "idle" | "manual" | "autonomous" }"""
+    try:
+        mode = (data or {}).get("mode")
+        if mode not in ["idle", "manual", "autonomous"]:
+            return _err("mode must be 'idle', 'manual', or 'autonomous'")
+        shared_data.set_robot_mode(["idle", "manual", "autonomous"].index(mode))
+        return _ok()
+    except Exception as exc:
+        logger.error(f"set_mode: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_manual_control(sid: str, data: dict | None = None):
+    """data: { move: { angle: float, speed: float }, rotate: float }"""
+    try:
+        d = data or {}
+        move = d.get("move")
+        rotate = d.get("rotate")
+        if (
+            not isinstance(move, dict)
+            or not isinstance(move.get("angle"), (int, float))
+            or not isinstance(move.get("speed"), (int, float))
+            or not isinstance(rotate, (int, float))
+        ):
+            return _err(f"Invalid request data: {d}")
+
+        shared_data.set_manual_control(RobotManualControl(
+            move_angle=move["angle"],
+            move_speed=move["speed"],
+            rotate=rotate,
+        ))
+        return _ok()
+    except Exception as exc:
+        logger.error(f"set_manual_control: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def reset_compass(sid: str, data: dict | None = None):
+    try:
+        shared_data.request_compass_reset()
+        return _ok()
+    except Exception as exc:
+        logger.error(f"reset_compass: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_motor_settings(sid: str, data: dict | None = None):
+    """data: { rotation_correction_enabled?: bool, line_avoiding_enabled?: bool, ... }"""
+    try:
+        d = data or {}
+        bool_settings = {
+            "rotation_correction_enabled":  shared_data.set_rotation_correction_enabled,
+            "line_avoiding_enabled":        shared_data.set_line_avoiding_enabled,
+            "position_based_speed_enabled": shared_data.set_position_based_speed_enabled,
+        }
+        for key, setter in bool_settings.items():
+            if key in d:
+                if not isinstance(d[key], bool):
+                    return _err(f"{key} must be a boolean")
+                setter(d[key])
+                logger.info(f"{key} set to {d[key]}")
+        return _ok()
+    except Exception as exc:
+        logger.error(f"set_motor_settings: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_goal_settings(sid: str, data: dict | None = None):
+    """data: { goal_color?: str, calibration?: { yellow?: {...}, blue?: {...} } }
+    
+    Each color's calibration can have either:
+    - "ranges": [{"lower": [h,s,v], "upper": [h,s,v]}, ...] for multiple ranges
+    - "lower": [h,s,v], "upper": [h,s,v] for backward compatibility (sets single range)
+    """
+    try:
+        d = data or {}
+        if "goal_color" in d:
+            if d["goal_color"] not in ["yellow", "blue"]:
+                return _err("goal_color must be 'yellow' or 'blue'")
+            calibration.set_enemy_goal_color(d["goal_color"])
+
+        cal = d.get("calibration", {})
+        for color in ("yellow", "blue"):
+            if color in cal:
+                entry = cal[color]
+                
+                # Support new format with multiple ranges
+                if "ranges" in entry and isinstance(entry["ranges"], list):
+                    ranges = []
+                    for r in entry["ranges"]:
+                        lower = r.get("lower")
+                        upper = r.get("upper")
+                        if lower and len(lower) == 3 and upper and len(upper) == 3:
+                            ranges.append((tuple(lower), tuple(upper)))
+                    if ranges:
+                        calibration.set_goal_color_ranges(color, ranges)
+                # Support old format with single range
+                elif "lower" in entry and "upper" in entry:
+                    lower = entry.get("lower")
+                    upper = entry.get("upper")
+                    if lower and len(lower) == 3 and upper and len(upper) == 3:
+                        calibration.set_goal_color_range(color, tuple(lower), tuple(upper))
+        return _ok()
+    except Exception as exc:
+        logger.error(f"set_goal_settings: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_ball_calibration(sid: str, data: dict | None = None):
+    """data: { ranges?: [{"lower": [h,s,v], "upper": [h,s,v]}, ...], lower?: [h,s,v], upper?: [h,s,v] }
+    
+    Supports both:
+    - New format: ranges array with multiple ranges
+    - Old format: single lower/upper pair for backward compatibility
+    """
+    try:
+        d = data or {}
+        
+        # Support new format with multiple ranges
+        if "ranges" in d and isinstance(d["ranges"], list):
+            ranges = []
+            for r in d["ranges"]:
+                lower = r.get("lower")
+                upper = r.get("upper")
+                if lower and len(lower) == 3 and upper and len(upper) == 3:
+                    ranges.append((tuple(lower), tuple(upper)))
+            if ranges:
+                calibration.set_ball_color_ranges(ranges)
+        # Support old format with single range
+        elif "lower" in d and "upper" in d:
+            lower = d.get("lower")
+            upper = d.get("upper")
+            if not lower or not upper or len(lower) != 3 or len(upper) != 3:
+                return _err("'lower' and 'upper' must be lists of 3 values")
+            calibration.set_ball_color_range(
+                tuple(int(v) for v in lower),
+                tuple(int(v) for v in upper),
+            )
+        else:
+            return _err("Must provide either 'ranges' array or 'lower'/'upper' pair")
+        return _ok()
+    except Exception as exc:
+        logger.error(f"set_ball_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_goal_focal_length(sid: str, data: dict | None = None):
+    """data: { focal_length_pixels: float }"""
+    try:
+        d = data or {}
+        fl = d.get("focal_length_pixels")
+        if not isinstance(fl, (int, float)) or fl <= 0:
+            return _err("focal_length_pixels must be a positive number")
+        calibration.set_goal_focal_length(float(fl))
+        return _ok(focal_length_pixels=fl)
+    except Exception as exc:
+        logger.error(f"set_goal_focal_length: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_autonomous_state(sid: str, data: dict | None = None):
+    """data: { name: str }"""
+    try:
+        state_machine = (data or {}).get("state_machine")
+        if isinstance(state_machine, str):
+            sm = autonomous_mode.find_state_machine_by_name(state_machine)
+            if sm is None:
+                return _err(f"State machine '{state_machine}' not found")
+            autonomous_mode.set_current_state_machine(sm)
+            logger.info(f"Autonomous state machine set to '{sm.name}'")
+
+        always_face_goal_enabled = (data or {}).get("always_face_goal_enabled")
+        if isinstance(always_face_goal_enabled, bool):
+            shared_data.set_always_facing_goal_enabled(always_face_goal_enabled)
+            logger.info(f"always_facing_goal_enabled set to {always_face_goal_enabled}")
+
+        camera_ball_usage_enabled = (data or {}).get("camera_ball_usage_enabled")
+        if isinstance(camera_ball_usage_enabled, bool):
+            shared_data.set_camera_ball_usage_enabled(camera_ball_usage_enabled)
+            logger.info(f"camera_ball_usage_enabled set to {camera_ball_usage_enabled}")
+
+        return _ok()
+    except Exception as exc:
+        logger.error(f"set_autonomous_state: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_line_thresholds(sid: str, data: dict | None = None):
+    """data: { thresholds: [[min,max], ...] }  (LINE_SENSOR_COUNT pairs)"""
+    try:
+        d = data or {}
+        thresholds = d.get("thresholds")
+        if not isinstance(thresholds, list) or len(thresholds) != LINE_SENSOR_COUNT:
+            return _err(f"thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs")
+        ranges = []
+        for t in thresholds:
+            if isinstance(t, list) and len(t) == 2:
+                ranges.append([int(t[0]), int(t[1])])
+            else:
+                return _err(f"thresholds must be a list of {LINE_SENSOR_COUNT} [min, max] pairs")
+        calibration.set_line_detection_thresholds(ranges)
+        return _ok(thresholds=ranges)
+    except (ValueError, TypeError) as exc:
+        return _err(f"Invalid threshold values: {exc}")
+    except Exception as exc:
+        logger.error(f"set_line_thresholds: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# Calibration procedures
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def camera_ball_distance_calibration(sid: str, data: dict | None = None):
+    """data: { known_distance_mm: float }"""
+    try:
+        d = data or {}
+        known = d.get("known_distance_mm")
+        if known is None:
+            return _err("Missing known_distance_mm")
+        known = float(known)
+        if known <= 0:
+            return _err("known_distance_mm must be a positive number")
+        constant = calibration.calibrate_ball_distance(known)
+        return _ok(calibration_constant=constant)
+    except Exception as exc:
+        logger.error(f"camera_ball_distance_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def add_goal_color_range(sid: str, data: dict | None = None):
+    """data: { goal_color: str, lower: [h,s,v], upper: [h,s,v] }"""
+    try:
+        d = data or {}
+        goal_color = d.get("goal_color")
+        lower = d.get("lower")
+        upper = d.get("upper")
+        
+        if goal_color not in ["yellow", "blue"]:
+            return _err("goal_color must be 'yellow' or 'blue'")
+        if not lower or not upper or len(lower) != 3 or len(upper) != 3:
+            return _err("'lower' and 'upper' must be lists of 3 values")
+        
+        calibration.add_goal_color_range(goal_color, tuple(lower), tuple(upper))
+        ranges = calibration.get_goal_color_ranges(goal_color)
+        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+    except Exception as exc:
+        logger.error(f"add_goal_color_range: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def remove_goal_color_range(sid: str, data: dict | None = None):
+    """data: { goal_color: str, index: int }"""
+    try:
+        d = data or {}
+        goal_color = d.get("goal_color")
+        index = d.get("index")
+        
+        if goal_color not in ["yellow", "blue"]:
+            return _err("goal_color must be 'yellow' or 'blue'")
+        if not isinstance(index, int) or index < 0:
+            return _err("index must be a non-negative integer")
+        
+        if not calibration.remove_goal_color_range(goal_color, index):
+            return _err(f"Invalid range index: {index}")
+        
+        ranges = calibration.get_goal_color_ranges(goal_color)
+        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+    except Exception as exc:
+        logger.error(f"remove_goal_color_range: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def add_ball_color_range(sid: str, data: dict | None = None):
+    """data: { lower: [h,s,v], upper: [h,s,v] }"""
+    try:
+        d = data or {}
+        lower = d.get("lower")
+        upper = d.get("upper")
+        
+        if not lower or not upper or len(lower) != 3 or len(upper) != 3:
+            return _err("'lower' and 'upper' must be lists of 3 values")
+        
+        calibration.add_ball_color_range(tuple(lower), tuple(upper))
+        ranges = calibration.get_ball_color_ranges()
+        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+    except Exception as exc:
+        logger.error(f"add_ball_color_range: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def remove_ball_color_range(sid: str, data: dict | None = None):
+    """data: { index: int }"""
+    try:
+        d = data or {}
+        index = d.get("index")
+        
+        if not isinstance(index, int) or index < 0:
+            return _err("index must be a non-negative integer")
+        
+        if not calibration.remove_ball_color_range(index):
+            return _err(f"Invalid range index: {index}")
+        
+        ranges = calibration.get_ball_color_ranges()
+        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+    except Exception as exc:
+        logger.error(f"remove_ball_color_range: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def start_line_calibration(sid: str, data: dict | None = None):
+    """data: { phase: 1 | 2 }"""
+    try:
+        phase = int((data or {}).get("phase", 1))
+        if phase not in [1, 2]:
+            return _err("phase must be 1 or 2")
+        calibration.start_line_calibration(phase)
+        return _ok(phase=phase, message=f"Phase {phase} started")
+    except Exception as exc:
+        logger.error(f"start_line_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def stop_line_calibration(sid: str, data: dict | None = None):
+    try:
+        status = calibration.get_line_calibration_status()
+        if not status["phase"] > 0:
+            return _err("Calibration is not active")
+        thresholds, min_values, max_values, phase = calibration.stop_line_calibration()
+        can_phase2 = phase == 1 and any(min_values[i] != float("inf") for i in range(len(min_values)))
+        return _ok(
+            phase=phase,
+            thresholds=thresholds,
+            min_values=min_values,
+            max_values=max_values,
+            can_start_phase2=can_phase2,
+        )
+    except Exception as exc:
+        logger.error(f"stop_line_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def cancel_line_calibration(sid: str, data: dict | None = None):
+    try:
+        status = calibration.get_line_calibration_status()
+        if not status["phase"] > 0:
+            return _err("Calibration is not active")
+        phase = status.get("phase", 0)
+        calibration.stop_line_calibration(cancel=True)
+        return _ok(phase=phase, message="Calibration cancelled.")
+    except Exception as exc:
+        logger.error(f"cancel_line_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def start_goal_distance_calibration(sid: str, data: dict | None = None):
+    """data: { initial_distance?: float, line_distance?: float }"""
+    try:
+        d = data or {}
+        init_dist = d.get("initial_distance", 200.0)
+        line_dist = d.get("line_distance",    200.0)
+        if not isinstance(init_dist, (int, float)) or init_dist <= 0:
+            return _err("initial_distance must be a positive number")
+        if not isinstance(line_dist, (int, float)) or line_dist <= 0:
+            return _err("line_distance must be a positive number")
+        calibration.start_goal_distance_calibration(float(init_dist), float(line_dist))
+        return _ok(message="Drive the robot toward the enemy goal until it detects the line, then stop calibration")
+    except Exception as exc:
+        logger.error(f"start_goal_distance_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def stop_goal_distance_calibration(sid: str, data: dict | None = None):
+    try:
+        return calibration.stop_goal_distance_calibration()
+    except Exception as exc:
+        logger.error(f"stop_goal_distance_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def cancel_goal_distance_calibration(sid: str, data: dict | None = None):
     try:
         calibration.cancel_goal_distance_calibration()
-        return jsonify({"status": "ok", "message": "Calibration cancelled"})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return jsonify({"error": "Internal server error"}), 500
+        return _ok(message="Calibration cancelled")
+    except Exception as exc:
+        logger.error(f"cancel_goal_distance_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
-@app.route('/api/goal_distance_calibration/status')
-def get_goal_distance_calibration_status():
+@sio.event
+async def compute_hsv_from_regions(sid: str, data: dict | None = None):
+    """
+    data: { regions: [{ x, y, width, height }, ...] }
+    Returns the union HSV range across all regions.
+    """
     try:
-        status = calibration.get_goal_distance_calibration_status()
-        return jsonify(status)
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return jsonify({"error": "Internal server error"}), 500
+        d = data or {}
+        regions = d.get("regions", [])
+        if not regions:
+            return _err("Missing 'regions'")
 
-@app.route('/api/get_autonomous_state')
-def get_autonomous_state():
-    try:
-        state = shared_data.get_autonomous_state()
-        return jsonify(state if state else {'state': 'idle'})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return jsonify({'error': 'Internal server error'}), 500
+        h_min, s_min, v_min = 179, 255, 255
+        h_max, s_max, v_max = 0,   0,   0
 
+        for region_spec in regions:
+            x      = int(region_spec.get("x",      0))
+            y      = int(region_spec.get("y",      0))
+            width  = int(region_spec.get("width",  0))
+            height = int(region_spec.get("height", 0))
 
-@app.route('/api/get_detections')
-def get_detections():
-    try:
-        detections = shared_data.get_detected_objects_raw()
-        return jsonify({"detections": detections})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return jsonify({"error": "Internal server error"}), 500
+            if width <= 0 or height <= 0:
+                return _err("Invalid region dimensions")
 
-@app.route('/api/get_ball_calibration')
-def get_ball_calibration():
-    try:
-        lower, upper = shared_data.get_ball_calibration()
-        return jsonify({"lower": lower, "upper": upper})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+            frame_data = shared_data.get_camera_frame()
+            if frame_data is None or frame_data.frame is None:
+                return _err("No camera frame available")
+            frame = frame_data.frame
 
+            fh, fw = frame.shape[:2]
+            x  = max(0, min(x,        fw - 1))
+            y  = max(0, min(y,        fh - 1))
+            x2 = max(0, min(x + width,  fw))
+            y2 = max(0, min(y + height, fh))
 
-@app.route('/api/set_ball_calibration', methods=['POST'])
-def set_ball_calibration():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Missing request body"}), 400
-        lower = data.get('lower')
-        upper = data.get('upper')
-        if not lower or not upper or len(lower) != 3 or len(upper) != 3:
-            return jsonify({"error": "'lower' and 'upper' must be lists of 3 values"}), 400
-        calibration.set_ball_color_range(tuple([int(v) for v in lower]), tuple([int(v) for v in upper]))
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        return "", 500
+            region_crop = frame[y:y2, x:x2]
+            if region_crop.size == 0:
+                return _err("Empty region")
 
+            hsv = cv2.cvtColor(region_crop, cv2.COLOR_BGR2HSV)
+            h_vals = hsv[:, :, 0].flatten()
+            s_vals = hsv[:, :, 1].flatten()
+            v_vals = hsv[:, :, 2].flatten()
 
-@app.route('/')
-def get_index_html():
-    try:
-        logger.warning("Accessed root endpoint, which serves index.html. In production, this should be served by nginx directly. This may indicate a misconfiguration.")
-        with open('web_server/site/index.html', 'r', encoding='utf-8') as f:
-            index_html = f.read()
-            return index_html
-    except Exception:
-        return "", 404
+            nh_min = max(0,   int(np.percentile(h_vals, 5))  - 5)
+            nh_max = min(179, int(np.percentile(h_vals, 95)) + 5)
+            ns_min = max(0,   int(np.percentile(s_vals, 5))  - 20)
+            ns_max = min(255, int(np.percentile(s_vals, 95)) + 20)
+            nv_min = max(0,   int(np.percentile(v_vals, 5))  - 20)
+            nv_max = min(255, int(np.percentile(v_vals, 95)) + 20)
+
+            h_min = min(h_min, nh_min); h_max = max(h_max, nh_max)
+            s_min = min(s_min, ns_min); s_max = max(s_max, ns_max)
+            v_min = min(v_min, nv_min); v_max = max(v_max, nv_max)
+
+        return _ok(lower=[h_min, s_min, v_min], upper=[h_max, s_max, v_max])
+    except Exception as exc:
+        logger.error(f"compute_hsv_from_regions: {exc}", exc_info=True)
+        return _err("Internal server error")
 
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
-def start(host: str = API_HOST, port: int = API_PORT, stop_event: multiprocessing.synchronize.Event | None = None):
-    server = make_server(host=host, port=port, app=app, threaded=True)
+def start(
+    host: str = API_HOST,
+    port: int = API_PORT,
+    stop_event: multiprocessing.synchronize.Event | None = None,
+) -> None:
+    config = uvicorn.Config(
+        app=app,
+        host=host,
+        port=port,
+        log_level="warning",
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
     logger.info(f"API server started on {host}:{port}")
 
-    thread = threading.Thread(target=server.serve_forever)
-    try:
-        thread.start()
+    if stop_event:
+        import threading
 
-        if stop_event:
+        def _watch():
             stop_event.wait()
-        else:
-            while True:
-                time.sleep(1)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.shutdown()
-        thread.join()
+            server.should_exit = True
+
+        threading.Thread(target=_watch, daemon=True).start()
+
+    server.run()
 
 
 if __name__ == "__main__":
     start()
-

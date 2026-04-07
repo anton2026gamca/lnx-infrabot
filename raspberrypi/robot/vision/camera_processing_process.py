@@ -45,15 +45,15 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         last_frame_timestamp = frame.timestamp
         
         hsv_frame = cv2.resize(frame.frame, (DETECTION_FRAME_WIDTH, DETECTION_FRAME_HEIGHT))
-        hsv_frame = cv2.cvtColor(hsv_frame, cv2.COLOR_RGB2HSV)
+        hsv_frame = cv2.cvtColor(hsv_frame, cv2.COLOR_BGR2HSV)
 
         goal_color = shared_data.get_goal_color()
-        lower, upper = shared_data.get_goal_calibration(goal_color)
+        goal_ranges = shared_data.get_goal_calibration(goal_color)
+        
+        # Convert ranges to numpy arrays for vision module
         color_range = GoalColorCalibration(
-            yellow_lower=np.array(lower) if goal_color.lower() == 'yellow' else GoalColorCalibration().yellow_lower,
-            yellow_upper=np.array(upper) if goal_color.lower() == 'yellow' else GoalColorCalibration().yellow_upper,
-            blue_lower=np.array(lower) if goal_color.lower() == 'blue' else GoalColorCalibration().blue_lower,
-            blue_upper=np.array(upper) if goal_color.lower() == 'blue' else GoalColorCalibration().blue_upper
+            yellow_ranges=[(np.array(lower), np.array(upper)) for lower, upper in goal_ranges] if goal_color.lower() == 'yellow' else [(np.array([20, 100, 100]), np.array([30, 255, 255]))],
+            blue_ranges=[(np.array(lower), np.array(upper)) for lower, upper in goal_ranges] if goal_color.lower() == 'blue' else [(np.array([100, 100, 100]), np.array([130, 255, 255]))]
         )
         focal_length = shared_data.get_goal_focal_length()
         [result, goal_detections] = vision.detect_goal_alignment_with_rect(
@@ -66,8 +66,11 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         shared_data.set_goal_detection_result(result)
         calibration.update_goal_distance_calibration(result)
 
-        ball_lower, ball_upper = shared_data.get_ball_calibration()
-        ball_detections, _ = vision.detect_ball(hsv_frame, np.array(ball_lower), np.array(ball_upper))
+        ball_ranges = shared_data.get_ball_calibration()
+        # Convert to numpy arrays: list of lower bounds and list of upper bounds
+        ball_lower_arrays = [np.array(lower) for lower, _ in ball_ranges]
+        ball_upper_arrays = [np.array(upper) for _, upper in ball_ranges]
+        ball_detections, _ = vision.detect_ball(hsv_frame, ball_lower_arrays, ball_upper_arrays)
 
         ball_data = vision.calculate_ball_data(ball_detections, DETECTION_FRAME_WIDTH, CAMERA_FOV_DEG, shared_data.get_camera_ball_calibration_constant())
         shared_data.set_camera_ball_data(ball_data)

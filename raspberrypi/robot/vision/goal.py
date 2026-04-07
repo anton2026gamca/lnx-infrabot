@@ -11,21 +11,18 @@ from robot.config import *
 
 @dataclass
 class GoalColorCalibration:
-    """HSV color ranges for goal detection"""
-    yellow_lower: np.ndarray = field(default_factory=lambda: np.array([20, 100, 100]))
-    yellow_upper: np.ndarray = field(default_factory=lambda: np.array([30, 255, 255]))
-    
-    blue_lower: np.ndarray = field(default_factory=lambda: np.array([100, 100, 100]))
-    blue_upper: np.ndarray = field(default_factory=lambda: np.array([130, 255, 255]))
+    """HSV color ranges for goal detection - supports multiple ranges per color"""
+    yellow_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([20, 100, 100]), np.array([30, 255, 255]))])
+    blue_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([100, 100, 100]), np.array([130, 255, 255]))])
 
 @dataclass
 class GoalDetectionResult:
     alignment: float            # -1.0 (too far left) to 1.0 (too far right), 0.0 is centered
-    goal_detected: bool
-    goal_center_x: int | None   # X coordinate of goal center in frame
-    goal_area: float            # Area of detected goal in pixels
+    detected: bool
+    center_x: int | None   # X coordinate of goal center in frame
+    area: float            # Area of detected goal in pixels
     distance_mm: float | None   # Distance to goal in millimeters
-    goal_height_pixels: float   # Height of detected goal in pixels
+    height_pixels: float   # Height of detected goal in pixels
     _rect: tuple[int, int, int, int] | None = None  # Cached bounding rect (x, y, w, h) for visualization
 
 @dataclass
@@ -49,7 +46,7 @@ def detect_goal_alignment_with_rect(
     )
     
     detections = []
-    if result.goal_detected and result.goal_center_x is not None:
+    if result.detected and result.center_x is not None:
         x, y, w, h = result._rect if result._rect is not None else _get_goal_bounding_rect(hsv_frame, goal_color, calibration, min_area)
         if w > 0 and h > 0:
             object_type = f"goal_{goal_color.lower()}"
@@ -59,7 +56,7 @@ def detect_goal_alignment_with_rect(
                 y=y,
                 width=w,
                 height=h,
-                confidence=min(1.0, result.goal_area / 50000.0)
+                confidence=min(1.0, result.area / 50000.0)
             ))
     
     return result, detections
@@ -86,11 +83,11 @@ def _detect_goal_alignment_internal(
     if (x, y, w, h) == (0, 0, 0, 0):
         return GoalDetectionResult(
             alignment=0.0,
-            goal_detected=False,
-            goal_center_x=None,
-            goal_area=0.0,
+            detected=False,
+            center_x=None,
+            area=0.0,
             distance_mm=None,
-            goal_height_pixels=0.0
+            height_pixels=0.0
         )
 
     goal_area = w * h
@@ -110,11 +107,11 @@ def _detect_goal_alignment_internal(
 
     result = GoalDetectionResult(
         alignment=alignment,
-        goal_detected=True,
-        goal_center_x=goal_center_x,
-        goal_area=goal_area,
+        detected=True,
+        center_x=goal_center_x,
+        area=goal_area,
         distance_mm=distance_mm,
-        goal_height_pixels=float(goal_height_pixels)
+        height_pixels=float(goal_height_pixels)
     )
     result._rect = (x, y, w, h)
     return result
@@ -138,15 +135,20 @@ def _get_goal_bounding_rect(
         calibration = GoalColorCalibration()
     
     if goal_color.lower() == "yellow":
-        lower = calibration.yellow_lower
-        upper = calibration.yellow_upper
+        ranges = calibration.yellow_ranges
     elif goal_color.lower() == "blue":
-        lower = calibration.blue_lower
-        upper = calibration.blue_upper
+        ranges = calibration.blue_ranges
     else:
         return 0, 0, 0, 0
     
-    mask = cv2.inRange(hsv_frame, lower, upper)
+    # Combine masks from all ranges with OR logic
+    mask = None
+    for lower, upper in ranges:
+        range_mask = cv2.inRange(hsv_frame, lower, upper)
+        mask = range_mask if mask is None else cv2.bitwise_or(mask, range_mask)
+    
+    if mask is None:
+        return 0, 0, 0, 0
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
@@ -170,7 +172,7 @@ def get_position_estimate() -> PositionEstimate | None:
     goal_result = shared_data.get_goal_detection_result()
     hardware_data = shared_data.get_hardware_data()
     
-    if not goal_result or not goal_result.goal_detected or goal_result.distance_mm is None:
+    if not goal_result or not goal_result.detected or goal_result.distance_mm is None:
         return None
     
     if not hardware_data or hardware_data.compass.heading is None:
@@ -187,7 +189,7 @@ def get_position_estimate() -> PositionEstimate | None:
     x_mm = distance_mm * math.sin(angle_to_goal_rad) * -1
     y_mm = distance_mm * math.cos(angle_to_goal_rad)
     
-    area_confidence = min(1.0, goal_result.goal_area / 50000.0)
+    area_confidence = min(1.0, goal_result.area / 50000.0)
     alignment_confidence = 1.0 - abs(alignment)
     confidence = (area_confidence * 0.6) + (alignment_confidence * 0.4)
     

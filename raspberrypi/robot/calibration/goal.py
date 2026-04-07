@@ -21,12 +21,64 @@ def set_enemy_goal_color(color: str) -> None:
     logger.info(f"Enemy goal color set to: {color.lower()}")
 
 def set_goal_color_range(goal_color: str, lower_hsv: tuple[int, int, int], upper_hsv: tuple[int, int, int]) -> None:
+    """Set a single goal color range (replaces all existing ranges with a single one)."""
     if goal_color.lower() not in ['yellow', 'blue']:
         logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
         return
-    shared_data.set_goal_calibration(goal_color.lower(), list(lower_hsv), list(upper_hsv))
+    shared_data.set_goal_calibration(goal_color.lower(), [(lower_hsv, upper_hsv)])
     save_calibration_data()
-    logger.info(f"Updated {goal_color.lower()} goal HSV ranges: lower={lower_hsv}, upper={upper_hsv}")
+    logger.info(f"Updated {goal_color.lower()} goal HSV range: lower={lower_hsv}, upper={upper_hsv}")
+
+def add_goal_color_range(goal_color: str, lower_hsv: tuple[int, int, int], upper_hsv: tuple[int, int, int]) -> None:
+    """Add an additional goal color range to the existing ranges."""
+    if goal_color.lower() not in ['yellow', 'blue']:
+        logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
+        return
+    existing_ranges = shared_data.get_goal_calibration(goal_color.lower())
+    new_ranges = existing_ranges + [(lower_hsv, upper_hsv)]
+    shared_data.set_goal_calibration(goal_color.lower(), new_ranges)
+    save_calibration_data()
+    logger.info(f"Added {goal_color.lower()} goal color range: lower={lower_hsv}, upper={upper_hsv}")
+
+def set_goal_color_ranges(goal_color: str, ranges: list[tuple[tuple[int, int, int], tuple[int, int, int]]]) -> None:
+    """Set multiple goal color ranges at once.
+    
+    Args:
+        goal_color: 'yellow' or 'blue'
+        ranges: List of tuples, each tuple is (lower_hsv, upper_hsv)
+    """
+    if goal_color.lower() not in ['yellow', 'blue']:
+        logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
+        return
+    shared_data.set_goal_calibration(goal_color.lower(), ranges)
+    save_calibration_data()
+    logger.info(f"Set {len(ranges)} ranges for {goal_color.lower()} goal")
+
+def get_goal_color_ranges(goal_color: str) -> list[tuple[tuple[int, int, int], tuple[int, int, int]]]:
+    """Get all goal color ranges for a specific color."""
+    if goal_color.lower() not in ['yellow', 'blue']:
+        logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
+        return []
+    ranges = shared_data.get_goal_calibration(goal_color.lower())
+    return ranges if ranges is not None else []
+
+def remove_goal_color_range(goal_color: str, index: int) -> bool:
+    """Remove a goal color range by index.
+    
+    Returns:
+        True if range was removed, False if index was invalid
+    """
+    if goal_color.lower() not in ['yellow', 'blue']:
+        logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
+        return False
+    ranges = shared_data.get_goal_calibration(goal_color.lower())
+    if 0 <= index < len(ranges):
+        ranges.pop(index)
+        shared_data.set_goal_calibration(goal_color.lower(), ranges)
+        save_calibration_data()
+        logger.info(f"Removed range {index} from {goal_color.lower()} goal")
+        return True
+    return False
 
 def set_goal_focal_length(focal_length_pixels: float) -> None:
     if focal_length_pixels <= 0:
@@ -114,10 +166,10 @@ def update_goal_distance_calibration(goal_result: GoalDetectionResult) -> None:
         phase = shared_data.goal_distance_calibration_data.get('phase')
         initial_height = shared_data.goal_distance_calibration_data.get('initial_height_pixels')
         
-        if phase == 'initial' and goal_result.goal_detected and goal_result.goal_height_pixels > 0:
-            shared_data.goal_distance_calibration_data['initial_height_pixels'] = goal_result.goal_height_pixels
-            logger.debug(f"Recording initial goal height: {goal_result.goal_height_pixels:.2f} pixels")
-            initial_height = goal_result.goal_height_pixels
+        if phase == 'initial' and goal_result.detected and goal_result.height_pixels > 0:
+            shared_data.goal_distance_calibration_data['initial_height_pixels'] = goal_result.height_pixels
+            logger.debug(f"Recording initial goal height: {goal_result.height_pixels:.2f} pixels")
+            initial_height = goal_result.height_pixels
         
         if phase == 'initial' and initial_height is not None and initial_height > 0:
             shared_data.goal_distance_calibration_data['phase'] = 'driving'
@@ -125,7 +177,7 @@ def update_goal_distance_calibration(goal_result: GoalDetectionResult) -> None:
         
         if phase == 'driving':
             line_detected = line_sensors.get_line_detected()
-            if any(line_detected) and goal_result.goal_detected and goal_result.goal_height_pixels > 0:
-                shared_data.goal_distance_calibration_data['line_height_pixels'] = goal_result.goal_height_pixels
-                logger.info(f"Line detected! Recorded goal height: {goal_result.goal_height_pixels:.2f} pixels.")
+            if any(line_detected) and goal_result.detected and goal_result.height_pixels > 0:
+                shared_data.goal_distance_calibration_data['line_height_pixels'] = goal_result.height_pixels
+                logger.info(f"Line detected! Recorded goal height: {goal_result.height_pixels:.2f} pixels.")
 
