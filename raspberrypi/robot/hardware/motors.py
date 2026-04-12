@@ -110,8 +110,6 @@ class SmartMotorsController(MotorsController):
             ]
             
             lines_detected = line_sensors.get_line_detected()
-            if any(lines_detected):
-                logger.info(f"Line detected: {lines_detected}")
             detected_angles = []
             for i, detected in enumerate(lines_detected):
                 if detected and i < len(LINE_SENSOR_LOCATIONS):
