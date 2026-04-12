@@ -8,7 +8,6 @@ from engineio.packet import base64
 
 import socketio
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
 
 from robot import calibration, utils, vision
 from robot.hardware import line_sensors
@@ -522,9 +521,9 @@ async def get_all_state_machines(sid: str, data: dict | None = None):
 @sio.event
 async def get_autonomous_state(sid: str, data: dict | None = None):
     try:
-        state_machine = autonomous_mode.get_current_state_machine()
+        state_machine = autonomous_mode.get_current_state_machine_name()
         return _ok(
-            state_machine=state_machine.name if state_machine else None,
+            state_machine=state_machine,
             always_face_goal_enabled=shared_data.get_always_facing_goal_enabled(),
             camera_ball_usage_enabled=shared_data.get_camera_ball_usage_enabled(),
         )
