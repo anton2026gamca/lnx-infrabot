@@ -175,9 +175,8 @@ class PushState(State):
             state_machine.transition(ApproachState)
             return
 
-        if data.goal.detected:
+        if data.goal.detected and shared_data.get_always_facing_goal_enabled():
             if data.goal.distance_mm is not None and data.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
-                # state_machine.transition(GoalScoredState)
                 state_machine.transition(IdleState)
                 return
             state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
@@ -194,33 +193,11 @@ class PushState(State):
             move_angle = max(-90, min(90, move_angle))
 
         if data.goal.detected:
-            rotate = data.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
+            rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
             rotate = max(-1.0, min(1.0, rotate))
 
         move_speed *= AUTO_SPEED_MULTIPLIER
         state_machine.motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
-
-
-# ------------------------------------------------------------------
-# State: GOAL_SCORED
-# Goal is scored - wait until the ball isn't in the goal anymore,
-# then return to IDLE.
-# ------------------------------------------------------------------
-class GoalScoredState(State):
-    def tick(self, state_machine: StateMachine) -> None:
-        data = _update_cross_state_data(state_machine)
-
-        state_machine.motors.set_motors(angle=0, speed=0, rotate=0)
-
-        if state_machine.time_in_current_state() <= 0.5:
-            return
-        if data.goal.detected and data.goal.distance_mm is not None and data.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM + 100:
-            return
-        if data.use_cam_ball and data.cam_ball_angle < 30:
-            return
-        if not data.use_cam_ball and data.ir_ball_detected and data.ir_ball_angle < 30:
-            return
-        state_machine.transition(ApproachState)
 
 
 _state_machine = StateMachine(name="Soccer State Machine", initial_state=IdleState, motors=SmartMotorsController())
