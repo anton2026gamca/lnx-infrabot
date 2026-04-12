@@ -1,4 +1,7 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # =============================== API CONFIGURATION ===============================
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "ooops")  # Should be set in environment variables
