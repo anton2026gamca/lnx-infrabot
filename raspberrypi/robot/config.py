@@ -10,7 +10,7 @@ AUTH_TOKEN = os.getenv("AUTH_TOKEN", "ooops")  # Should be set in environment va
 # Camera resolution
 CAMERA_SENSOR_WIDTH = 4608
 CAMERA_SENSOR_HEIGHT = 2592
-CAMERA_FOV_DEG = 120
+CAMERA_FOV_DEG = 90
 
 # Camera performance
 CAMERA_BUFFER_COUNT = 2
