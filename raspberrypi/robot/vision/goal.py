@@ -23,7 +23,7 @@ class GoalDetectionResult:
     area: float            # Area of detected goal in pixels
     distance_mm: float | None   # Distance to goal in millimeters
     height_pixels: float   # Height of detected goal in pixels
-    _rect: tuple[int, int, int, int] | None = None  # Cached bounding rect (x, y, w, h) for visualization
+    _rect: tuple[int, int, int, int, float] | None = None  # Cached bounding rect (x, y, w, h) for visualization
 
 @dataclass
 class PositionEstimate:
@@ -47,7 +47,8 @@ def detect_goal_alignment_with_rect(
     
     detections = []
     if result.detected and result.center_x is not None:
-        x, y, w, h = result._rect if result._rect is not None else _get_goal_bounding_rect(hsv_frame, goal_color, calibration, min_area)
+        rect_data = result._rect if result._rect is not None else _get_goal_bounding_rect(hsv_frame, goal_color, calibration, min_area)
+        x, y, w, h, goal_height = rect_data
         if w > 0 and h > 0:
             object_type = f"goal_{goal_color.lower()}"
             detections.append(DetectedObject(
@@ -73,14 +74,14 @@ def _detect_goal_alignment_internal(
     if calibration is None:
         calibration = GoalColorCalibration()
 
-    x, y, w, h = _get_goal_bounding_rect(
+    x, y, w, h, goal_height = _get_goal_bounding_rect(
         hsv_frame=hsv_frame,
         goal_color=goal_color,
         calibration=calibration,
         min_area=min_area
     )
 
-    if (x, y, w, h) == (0, 0, 0, 0):
+    if (x, y, w, h, goal_height) == (0, 0, 0, 0, 0.0):
         return GoalDetectionResult(
             alignment=0.0,
             detected=False,
@@ -93,7 +94,7 @@ def _detect_goal_alignment_internal(
     goal_area = w * h
 
     goal_center_x = x + w // 2
-    goal_height_pixels = h
+    goal_height_pixels = goal_height
 
     distance_mm = None
     if focal_length_pixels is not None and goal_height_pixels > 0:
@@ -113,7 +114,7 @@ def _detect_goal_alignment_internal(
         distance_mm=distance_mm,
         height_pixels=float(goal_height_pixels)
     )
-    result._rect = (x, y, w, h)
+    result._rect = (x, y, w, h, goal_height)
     return result
 
 
@@ -122,14 +123,15 @@ def _get_goal_bounding_rect(
     goal_color: str = "yellow",
     calibration: GoalColorCalibration | None = None,
     min_area: int = 500
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, float]:
     """
     Get the bounding rectangle for a detected goal.
     NOTE: This function is typically called from detect_goal_alignment_with_rect
     which caches the result. Use the cached value from GoalDetectionResult._rect when available.
 
     Returns:
-        Tuple of (x, y, width, height) or (0, 0, 0, 0) if not detected
+        Tuple of (x, y, width, height, goal_height) or (0, 0, 0, 0, 0.0) if not detected
+        where goal_height is the corrected height from minAreaRect
     """
     if calibration is None:
         calibration = GoalColorCalibration()
@@ -139,16 +141,15 @@ def _get_goal_bounding_rect(
     elif goal_color.lower() == "blue":
         ranges = calibration.blue_ranges
     else:
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, 0.0
     
-    # Combine masks from all ranges with OR logic
     mask = None
     for lower, upper in ranges:
         range_mask = cv2.inRange(hsv_frame, lower, upper)
         mask = range_mask if mask is None else cv2.bitwise_or(mask, range_mask)
     
     if mask is None:
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, 0.0
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
@@ -156,16 +157,25 @@ def _get_goal_bounding_rect(
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, 0.0
     
     largest_contour = max(contours, key=cv2.contourArea)
     goal_area = cv2.contourArea(largest_contour)
     
     if goal_area < min_area:
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, 0.0
     
     x, y, w, h = cv2.boundingRect(largest_contour)
-    return x, y, w, h
+    
+    rect = cv2.minAreaRect(largest_contour)
+    center, (width, height), angle = rect
+    
+    if width < height:
+        width, height = height, width
+    
+    goal_height = float(int(round(height)))
+    
+    return x, y, w, h, goal_height
 
 
 def get_position_estimate() -> PositionEstimate | None:
