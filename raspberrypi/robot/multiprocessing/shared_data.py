@@ -145,27 +145,6 @@ def get_manual_control() -> RobotManualControl:
 
 
 # Autonomous state
-autonomous_state = _manager.dict()
-autonomous_state_lock = multiprocessing.Lock()
-
-def set_autonomous_state(state: str, ball_angle: float, ball_distance: float, goal: GoalDetectionResult, have_ball: bool):
-    state_info = {
-        'state': state,
-        'ball_angle': int(ball_angle) if ball_angle != 999 else None,
-        'ball_distance': int(ball_distance) if ball_distance != 999 else None,
-        'have_ball': have_ball,
-        'goal_detected': goal.detected if goal else False,
-        'goal_alignment': round(goal.alignment, 3) if goal else None,
-        'goal_distance_mm': int(round(goal.distance_mm)) if goal and goal.distance_mm else None,
-    }
-    with autonomous_state_lock:
-        autonomous_state.clear()
-        autonomous_state.update(state_info)
-
-def get_autonomous_state() -> dict:
-    with autonomous_state_lock:
-        return dict(autonomous_state)
-
 state_machine_change_request = multiprocessing.Array('c', b''.ljust(50))
 def request_state_machine_change(name: str) -> None:
     name_bytes = name.encode()[:50].ljust(50)

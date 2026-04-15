@@ -110,8 +110,6 @@ class SmartMotorsController(MotorsController):
             ]
             
             lines_detected = line_sensors.get_line_detected()
-            if any(lines_detected):
-                logger.info(f"Line detected: {lines_detected}")
             detected_angles = []
             for i, detected in enumerate(lines_detected):
                 if detected and i < len(LINE_SENSOR_LOCATIONS):
@@ -190,7 +188,7 @@ class SmartMotorsController(MotorsController):
     def set_functions_enabled(self, rotation_correction_enabled: bool | None = None, line_avoiding_enabled: bool | None = None, position_based_speed_enabled: bool | None = None):
         """
         Enable or disable smart functions. If a parameter is None, it will not change the current state of that function.
-        NOTE: Enabling any of the functions may not actually enable them, if they are disabled globally (via the api)
+        NOTE: Enabling any of the functions may not actually enable them if they are disabled globally (via the api)
         """
         if rotation_correction_enabled is not None:
             self.rotation_correction_enabled = rotation_correction_enabled

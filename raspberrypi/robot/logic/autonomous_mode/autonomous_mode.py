@@ -9,6 +9,8 @@ logger = utils.get_logger("Autonomous Mode")
 
 current_state_machine: StateMachine | None = state_machines.list()[0]
 
+shared_data.set_current_state_machine_name(current_state_machine.name if current_state_machine else "")
+
 
 def tick() -> None:
     if current_state_machine is not None:
@@ -27,6 +29,10 @@ def get_current_state_machine() -> StateMachine | None:
     name = shared_data.get_current_state_machine_name()
     return find_state_machine_by_name(name)
 
+def get_current_state_machine_name() -> str:
+    name = shared_data.get_current_state_machine_name()
+    return name if name else ""
+
 def get_available_state_machines() -> dict[str, StateMachine]:
     return {
         state_machine.name: state_machine
@@ -41,6 +47,7 @@ def _set_current_state_machine_internal(name: str) -> None:
     state_machine = find_state_machine_by_name(name)
     if state_machine is not None:
         current_state_machine = state_machine
+        shared_data.set_current_state_machine_name(name)
     else:
         logger.warning(f"State machine with name '{name}' not found")
 
