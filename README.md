@@ -1,4 +1,4 @@
-# LNX-InfraBot
+# LNX InfraBot
 
 An autonomous soccer robot for **RoboCup Junior** (Infrared/IR version) that seamlessly integrates hardware control and computer vision. The system uses a Raspberry Pi for advanced vision processing and control logic, while a Teensy microcontroller manages real-time motor and sensor operations.
 
@@ -73,7 +73,11 @@ lnx-infrabot/
     - **Raspberry Pi 5** with **Raspberry Pi OS Lite** installed
 
 1. **Configure UART and Camera**  
-   Edit `/boot/firmware/config.txt`:
+   Edit `/boot/firmware/config.txt` using a text editor like `nano`:
+   ```sh
+   sudo nano /boot/firmware/config.txt
+   ```
+   Add or update the following lines:
    ```txt
    # UART 
    dtoverlay=uart0-pi5
@@ -82,7 +86,10 @@ lnx-infrabot/
    camera_auto_detect=0
    dtoverlay=imx708
    ```
+   After editing, press `Ctrl+X` and then `Y` to exit and save.
    Disable the serial console with `sudo raspi-config` if needed. Save and reboot.
+
+   For more info about the camera, see the [official documentation](https://docs.arducam.com/Raspberry-Pi-Camera/Native-camera/12MP-IMX708/#software-configuration)
 
 2. **Install Dependencies**
    ```bash
