@@ -333,6 +333,23 @@ class ApproachState(State):
             move_angle = utils.normalize_angle_deg(data.sensors.ir_ball_angle + data.sensors.heading) * data.sensors.ir_ball_distance * AUTO_IR_BALL_APPROACH_ANGLE_RATIO
             move_angle = max(-180, min(180, move_angle))
 
+        position = vision.get_position_estimate()
+        if position:
+            y_distance = 400 - position.y_mm
+            if y_distance > 0:
+                left_x_boundry = -FIELD_WIDTH_MM / 2 + y_distance / 2
+                right_x_boundry = FIELD_WIDTH_MM / 2 - y_distance / 2
+                
+                in_left_corner = position.x_mm < left_x_boundry
+                in_right_corner = position.x_mm > right_x_boundry
+
+                absolute_move_angle = (move_angle + data.sensors.heading) % 360
+                
+                if in_left_corner and (absolute_move_angle > 225 or absolute_move_angle < 45):
+                    move_speed = 0
+                if in_right_corner and (absolute_move_angle > 315 or absolute_move_angle < 135):
+                    move_speed = 0
+
         move_speed *= AUTO_SPEED_MULTIPLIER
         state_machine.motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
 
