@@ -242,10 +242,16 @@ class LineAvoidingState(State):
                 return 180
 
             elif too_close_to_our_goal_line:
-                if too_far_left and left_detected:
-                    return 45
-                if too_far_right and right_detected:
-                    return -45
+                if too_far_left:
+                    return 45 if left_detected else 0
+                if too_far_right:
+                    return -45 if right_detected else 0
+                ball_angle = data.sensors.cam_ball_angle if data.sensors.use_cam_ball else data.sensors.ir_ball_angle
+                ball_angle_global = utils.normalize_angle_deg(ball_angle + data.sensors.heading)
+                if ball_angle_global >= 30 and ball_angle_global <= 100:
+                    return 60
+                if ball_angle_global <= -30 and ball_angle_global >= -100:
+                    return -60
                 return 0
 
             elif too_far_left:
