@@ -713,6 +713,11 @@ async def set_goal_focal_length(sid: str, data: dict | None = None):
     try:
         d = data or {}
         fl = d.get("focal_length_pixels")
+        if isinstance(fl, str):
+            try:
+                fl = float(fl)
+            except ValueError:
+                return _err("focal_length_pixels must be a positive number")
         if not isinstance(fl, (int, float)) or fl <= 0:
             return _err("focal_length_pixels must be a positive number")
         calibration.set_goal_focal_length(float(fl))
