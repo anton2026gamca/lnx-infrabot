@@ -13,6 +13,75 @@ from robot.config import *
 
 
 
+# Toggle between standard attacker behaviour and goalkeeper behaviour.
+# When enabled, the robot will prioritize defending our goal and only
+# switch to attacking states when a nearby ball can be grabbed.
+GOALKEEPER_MODE_ENABLED = True
+
+# Goalkeeper positioning/behaviour tuning
+GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM = 320.0
+GOALKEEPER_POSITION_TOLERANCE_X_MM = 130.0
+GOALKEEPER_POSITION_TOLERANCE_Y_MM = 120.0
+GOALKEEPER_APPROACH_MAX_SPEED = 0.85
+GOALKEEPER_DEFEND_MAX_SPEED = 0.65
+GOALKEEPER_DEFEND_STOP_RADIUS_MM = 80.0
+GOALKEEPER_NEAR_BALL_CAMERA_DISTANCE_MM = 300.0
+GOALKEEPER_NEAR_BALL_IR_THRESHOLD = AUTO_BALL_CLOSE_THRESHOLD - 150
+GOALKEEPER_NEAR_BALL_ANGLE_THRESHOLD_DEG = 35.0
+GOALKEEPER_BALL_TRACK_X_MM_PER_DEG = 7.5
+GOALKEEPER_BALL_TRACK_MAX_X_MM = 450.0
+GOALKEEPER_NO_POSITION_RETREAT_SPEED = 0.35
+
+
+
+def _clamp(value: float, min_value: float, max_value: float) -> float:
+    return max(min_value, min(max_value, value))
+
+
+def _neutral_state() -> type[State]:
+    return GoalkeeperApproachState if GOALKEEPER_MODE_ENABLED else IdleState
+
+
+def _goalkeeper_should_grab_ball(data: "SoccerStateMachineData") -> bool:
+    if data.sensors.ball_possession or data.sensors.ball_likely_inside_robot:
+        return True
+
+    if (
+        data.sensors.ir_ball_detected
+        and abs(data.sensors.ir_ball_angle) <= GOALKEEPER_NEAR_BALL_ANGLE_THRESHOLD_DEG
+        and data.sensors.ir_ball_distance >= GOALKEEPER_NEAR_BALL_IR_THRESHOLD
+    ):
+        return True
+
+    if (
+        data.sensors.cam_ball_detected
+        and data.sensors.cam_ball_distance <= GOALKEEPER_NEAR_BALL_CAMERA_DISTANCE_MM
+        and abs(data.sensors.cam_ball_angle) <= GOALKEEPER_NEAR_BALL_ANGLE_THRESHOLD_DEG
+    ):
+        return True
+
+    return False
+
+
+def _set_goal_tracking_rotation(state_machine: StateMachine, data: "SoccerStateMachineData") -> float:
+    if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
+        state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
+        state_machine.motors.target_heading = 0
+        return 0.0
+
+    state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
+    rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
+    return _clamp(rotate, -1.0, 1.0)
+
+
+def _field_delta_to_global_angle_deg(delta_x_mm: float, delta_y_mm: float) -> float:
+    return (math.degrees(math.atan2(delta_x_mm, -delta_y_mm)) + 360.0) % 360.0
+
+
+def _global_to_local_angle_deg(global_angle_deg: float, heading_deg: float) -> float:
+    return utils.normalize_angle_deg(global_angle_deg - heading_deg)
+
+
 @dataclass
 class SensorsData:
     heading: float
@@ -141,7 +210,6 @@ def _update_cross_state_data(state_machine: StateMachine) -> SoccerStateMachineD
 
 # -------------------------------------------------------------------
 # State: LINE AVOIDING
-# 
 # -------------------------------------------------------------------
 class LineAvoidingState(State):
     def on_enter(self, state_machine: StateMachine) -> None:
@@ -186,7 +254,7 @@ class LineAvoidingState(State):
             ) if data.lines.detection_history else False
             
             if time_without_detection > self.min_clear_time and not recent_detections_exist:
-                state_machine.transition(IdleState)
+                state_machine.transition(_neutral_state())
                 return
             
             time_since_exit = current_time - self.line_exit_time if self.line_exit_time else 0
@@ -271,7 +339,7 @@ class LineAvoidingState(State):
 
 # ------------------------------------------------------------------
 # State: IDLE
-# No ball visible - hold still.
+# No ball detected - hold still.
 # ------------------------------------------------------------------
 class IdleState(State):
     def tick(self, state_machine: StateMachine) -> None:
@@ -279,8 +347,13 @@ class IdleState(State):
         if data.lines.enter_avoiding_state:
             state_machine.transition(LineAvoidingState)
             return
+
+        if GOALKEEPER_MODE_ENABLED:
+            state_machine.transition(GoalkeeperApproachState)
+            return
+
         if data.sensors.ir_ball_detected or data.sensors.cam_ball_detected or data.sensors.ball_likely_inside_robot:
-            state_machine.transition(ApproachState)
+            state_machine.transition(AttackerApproachState)
             return
         state_machine.motors.set_motors(angle=0.0, speed=0.0, rotate=0.0)
 
@@ -297,7 +370,7 @@ class IdleState(State):
 # Rotation: use goal camera alignment to rotate the whole robot so
 #           the goal stays centred.
 # ------------------------------------------------------------------
-class ApproachState(State):
+class AttackerApproachState(State):
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
@@ -306,11 +379,11 @@ class ApproachState(State):
             return
 
         if data.sensors.ball_possession or data.sensors.ball_likely_inside_robot:
-            state_machine.transition(PushState)
+            state_machine.transition(AttackerPushState)
             return
 
         if not data.sensors.ir_ball_detected and (not data.sensors.cam_ball_detected or not data.sensors.use_cam_ball):
-            state_machine.transition(IdleState)
+            state_machine.transition(_neutral_state())
             return
 
         move_angle = 0.0
@@ -359,7 +432,7 @@ class ApproachState(State):
 # Ball is in the front pocket. Drive straight forward while keeping
 # the goal centred via rotation. If the ball is lost, re-approach.
 # ------------------------------------------------------------------
-class PushState(State):
+class AttackerPushState(State):
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
@@ -368,7 +441,7 @@ class PushState(State):
             return
 
         if not data.sensors.ball_possession and not data.sensors.ball_likely_inside_robot:
-            state_machine.transition(ApproachState)
+            state_machine.transition(GoalkeeperApproachState if GOALKEEPER_MODE_ENABLED else AttackerApproachState)
             return
 
         move_speed = AUTO_PUSH_SPEED
@@ -380,7 +453,7 @@ class PushState(State):
             state_machine.motors.target_heading = 0
         else:
             if data.sensors.goal.distance_mm is not None and data.sensors.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
-                state_machine.transition(IdleState)
+                state_machine.transition(_neutral_state())
                 return
             state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
             rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
@@ -393,10 +466,124 @@ class PushState(State):
         move_speed *= AUTO_SPEED_MULTIPLIER
         state_machine.motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
 
+# ------------------------------------------------------------------
+# State: GOALKEEPER APPROACH
+# Drive toward our goal to prepare for a defensive play.
+# ------------------------------------------------------------------
+class GoalkeeperApproachState(State):
+    def tick(self, state_machine: StateMachine) -> None:
+        data = _update_cross_state_data(state_machine)
+
+        if data.lines.enter_avoiding_state:
+            state_machine.transition(LineAvoidingState)
+            return
+
+        if _goalkeeper_should_grab_ball(data):
+            state_machine.transition(AttackerApproachState)
+            return
+
+        rotate = _set_goal_tracking_rotation(state_machine, data)
+        position = vision.get_position_estimate()
+
+        if position is None:
+            move_speed = GOALKEEPER_NO_POSITION_RETREAT_SPEED * AUTO_SPEED_MULTIPLIER
+            state_machine.motors.set_motors(angle=180.0, speed=move_speed, rotate=rotate)
+            return
+
+        target_x_mm = 0.0
+        target_y_mm = FIELD_LENGTH_MM - GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM
+
+        delta_x = target_x_mm - position.x_mm
+        delta_y = target_y_mm - position.y_mm
+
+        if (
+            abs(delta_x) <= GOALKEEPER_POSITION_TOLERANCE_X_MM
+            and abs(delta_y) <= GOALKEEPER_POSITION_TOLERANCE_Y_MM
+        ):
+            state_machine.transition(GoalkeeperDefendState)
+            return
+
+        global_angle = _field_delta_to_global_angle_deg(delta_x, delta_y)
+        local_move_angle = _global_to_local_angle_deg(global_angle, data.sensors.heading)
+
+        distance_mm = math.sqrt(delta_x * delta_x + delta_y * delta_y)
+        move_speed = _clamp(distance_mm / 700.0, 0.28, GOALKEEPER_APPROACH_MAX_SPEED)
+        move_speed *= AUTO_SPEED_MULTIPLIER
+
+        state_machine.motors.set_motors(angle=local_move_angle, speed=move_speed, rotate=rotate)
+
+
+# ------------------------------------------------------------------
+# State: GOALKEEPER DEFEND
+# Stay in front of the goal and react to the ball's position to block
+# shots. If we get the ball, switch to AttackerPushState and signal
+# to teammate that we're taking possession so they can adjust their
+# behaviour accordingly.
+# ------------------------------------------------------------------
+class GoalkeeperDefendState(State):
+    def tick(self, state_machine: StateMachine) -> None:
+        data = _update_cross_state_data(state_machine)
+
+        if data.lines.enter_avoiding_state:
+            state_machine.transition(LineAvoidingState)
+            return
+
+        if _goalkeeper_should_grab_ball(data):
+            state_machine.transition(AttackerApproachState)
+            return
+
+        rotate = _set_goal_tracking_rotation(state_machine, data)
+        position = vision.get_position_estimate()
+
+        if position is None:
+            move_speed = GOALKEEPER_NO_POSITION_RETREAT_SPEED * AUTO_SPEED_MULTIPLIER
+            state_machine.motors.set_motors(angle=180.0, speed=move_speed, rotate=rotate)
+            return
+
+        target_y_mm = FIELD_LENGTH_MM - GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM
+
+        ball_angle = None
+        if data.sensors.use_cam_ball and data.sensors.cam_ball_detected:
+            ball_angle = data.sensors.cam_ball_angle
+        elif data.sensors.ir_ball_detected:
+            ball_angle = data.sensors.ir_ball_angle
+
+        target_x_mm = 0.0
+        if ball_angle is not None:
+            target_x_mm = position.x_mm + ball_angle * GOALKEEPER_BALL_TRACK_X_MM_PER_DEG
+            target_x_mm = _clamp(target_x_mm, -GOALKEEPER_BALL_TRACK_MAX_X_MM, GOALKEEPER_BALL_TRACK_MAX_X_MM)
+
+        delta_x = target_x_mm - position.x_mm
+        delta_y = target_y_mm - position.y_mm
+
+        if (
+            abs(delta_x) > GOALKEEPER_POSITION_TOLERANCE_X_MM * 2.0
+            or abs(delta_y) > GOALKEEPER_POSITION_TOLERANCE_Y_MM * 2.0
+        ):
+            state_machine.transition(GoalkeeperApproachState)
+            return
+
+        distance_mm = math.sqrt(delta_x * delta_x + delta_y * delta_y)
+        if distance_mm < GOALKEEPER_DEFEND_STOP_RADIUS_MM:
+            state_machine.motors.set_motors(angle=0.0, speed=0.0, rotate=rotate)
+            return
+
+        global_angle = _field_delta_to_global_angle_deg(delta_x, delta_y)
+        local_move_angle = _global_to_local_angle_deg(global_angle, data.sensors.heading)
+
+        move_speed = _clamp(distance_mm / 500.0, 0.18, GOALKEEPER_DEFEND_MAX_SPEED)
+        move_speed *= AUTO_SPEED_MULTIPLIER
+
+        state_machine.motors.set_motors(angle=local_move_angle, speed=move_speed, rotate=rotate)
+
 
 _motors = SmartMotorsController()
 _motors.set_functions_enabled(line_avoiding_enabled=False)
-_state_machine = StateMachine(name="Soccer State Machine", initial_state=IdleState, motors=_motors)
+_state_machine = StateMachine(
+    name="Soccer State Machine",
+    initial_state=GoalkeeperApproachState if GOALKEEPER_MODE_ENABLED else IdleState,
+    motors=_motors
+)
 
 def get_state_machine() -> StateMachine:
     return _state_machine

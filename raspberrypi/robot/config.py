@@ -104,7 +104,7 @@ FIELD_LENGTH_MM = 2190.0
 
 # --- Approach ---
 # Forward speed component while approaching the ball
-AUTO_APPROACH_SPEED = 0.7
+AUTO_APPROACH_SPEED = 1.0
 # The ratio between the ball angle & distance and the angle that the robot should move in
 # while approaching the ball. This value is multiplied with the IR ball angle and distance to
 # calculate the movement angle for approaching. A higher value means the robot will move
