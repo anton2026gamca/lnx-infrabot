@@ -1,7 +1,9 @@
 import time
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 
-from robot import utils
+from robot import utils, vision
+from robot.hardware import line_sensors
 from robot.logic.autonomous_mode.state_machine import State, StateMachine, CrossStateData
 from robot.multiprocessing import shared_data
 
@@ -12,7 +14,7 @@ from robot.config import *
 
 
 @dataclass
-class SensorsData(CrossStateData):
+class SensorsData:
     heading: float
     goal: GoalDetectionResult
     
@@ -33,9 +35,21 @@ class SensorsData(CrossStateData):
     _ball_possession_ticks: int
     ball_likely_inside_robot: bool
 
+@dataclass
+class LinesData:
+    detected: list[bool]
+    enter_avoiding_state: bool
+    detection_history: list[tuple[list[bool], float]] = field(default_factory=list)  # History of recent detections with timestamps
 
-def _update_cross_state_data(state_machine: StateMachine) -> SensorsData:
-    prev_data        = state_machine.cross_state_data if isinstance(state_machine.cross_state_data, SensorsData) else None
+
+@dataclass
+class SoccerStateMachineData(CrossStateData):
+    sensors: SensorsData
+    lines: LinesData
+
+
+def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
+    prev_data        = state_machine.cross_state_data.sensors if isinstance(state_machine.cross_state_data, SoccerStateMachineData) else None
 
     goal             = shared_data.get_goal_detection_result() or GoalDetectionResult(0.0, False, None, 0.0, None, 0.0)
     hardware         = shared_data.get_hardware_data()
@@ -73,7 +87,7 @@ def _update_cross_state_data(state_machine: StateMachine) -> SensorsData:
         and (not ir_ball_detected or abs(ir_ball_angle) > AUTO_BALL_INSIDE_ROBOT_IR_ANGLE_RANGE_DEG)
     )
 
-    data = SensorsData(
+    return SensorsData(
         heading,
         goal,
         
@@ -94,9 +108,159 @@ def _update_cross_state_data(state_machine: StateMachine) -> SensorsData:
         _ball_possession_ticks,
         ball_likely_inside_robot
     )
+
+
+def _update_lines_data(state_machine: StateMachine) -> LinesData:
+    prev_data = state_machine.cross_state_data.lines if isinstance(state_machine.cross_state_data, SoccerStateMachineData) else None
+
+    detected = line_sensors.get_line_detected()
+    enter_avoiding_state = any(detected) and shared_data.get_line_avoiding_enabled()
+    
+    current_time = time.time()
+    history = prev_data.detection_history if prev_data and prev_data.detection_history else []
+    history.append((detected.copy(), current_time))
+    
+    history_max_age = 0.5
+    history = [(d, t) for d, t in history if current_time - t < history_max_age]
+    
+    return LinesData(
+        detected=detected,
+        enter_avoiding_state=enter_avoiding_state,
+        detection_history=history
+    )
+
+
+def _update_cross_state_data(state_machine: StateMachine) -> SoccerStateMachineData:
+    data = SoccerStateMachineData(
+        sensors=_update_sensors_data(state_machine),
+        lines=_update_lines_data(state_machine)
+    )
     state_machine.cross_state_data = data
     return data
 
+
+# -------------------------------------------------------------------
+# State: LINE AVOIDING
+# 
+# -------------------------------------------------------------------
+class LineAvoidingState(State):
+    def on_enter(self, state_machine: StateMachine) -> None:
+        self.min_clear_time = 0.5
+        self.clear_time_start = None
+        self.line_exit_time = None
+        self.slow_duration = 1.0
+        self.absolute_avoid_direction = None
+        
+    def tick(self, state_machine: StateMachine) -> None:
+        data = _update_cross_state_data(state_machine)
+        position = vision.get_position_estimate()
+        current_time = time.time()
+
+        rotate = 0.0
+        if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
+            state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
+            state_machine.motors.target_heading = 0
+        else:
+            state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
+            rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
+            rotate = max(-1.0, min(1.0, rotate))
+        
+        currently_detected = any(data.lines.detected)
+        
+        if currently_detected:
+            self.absolute_avoid_direction = self._calculate_absolute_avoid_direction(data, position)
+            relative_avoid_direction = (self.absolute_avoid_direction - data.sensors.heading + 360) % 360
+            self.clear_time_start = None
+            self.line_exit_time = None
+            state_machine.motors.set_motors(angle=relative_avoid_direction, speed=1.0, rotate=rotate)
+        else:
+            if self.clear_time_start is None:
+                self.clear_time_start = current_time
+                self.line_exit_time = current_time
+            
+            time_without_detection = current_time - self.clear_time_start
+            
+            recent_detections_exist = any(
+                any(detections) for detections, timestamp in data.lines.detection_history
+                if current_time - timestamp < 0.2
+            ) if data.lines.detection_history else False
+            
+            if time_without_detection > self.min_clear_time and not recent_detections_exist:
+                state_machine.transition(IdleState)
+                return
+            
+            time_since_exit = current_time - self.line_exit_time if self.line_exit_time else 0
+            if time_since_exit < self.slow_duration and self.absolute_avoid_direction is not None:
+                relative_avoid_direction = (self.absolute_avoid_direction - data.sensors.heading + 360) % 360
+                state_machine.motors.set_motors(angle=relative_avoid_direction, speed=0.7, rotate=rotate)
+            else:
+                state_machine.motors.set_motors(angle=0.0, speed=0.0, rotate=0.0)
+
+    def _calculate_absolute_avoid_direction(self, data: SoccerStateMachineData, position) -> float:
+        detected_angles = []
+
+        hardware_data = shared_data.get_hardware_data()
+        robot_heading = hardware_data.compass.heading if hardware_data else 0
+
+        for i, detected in enumerate(data.lines.detected):
+            if detected and i < len(LINE_SENSOR_LOCATIONS):
+                detected_angles.append((LINE_SENSOR_LOCATIONS[i] + robot_heading) % 360)
+
+        current_time = time.time()
+        for detections, timestamp in data.lines.detection_history:
+            if current_time - timestamp < 0.3:
+                for i, detected in enumerate(detections):
+                    if detected and i < len(LINE_SENSOR_LOCATIONS):
+                        detected_angles.append((LINE_SENSOR_LOCATIONS[i] + robot_heading) % 360)
+
+        detected_angles = list(set(detected_angles))
+
+        if not detected_angles:
+            return 0.0
+
+        if position:
+            too_close_to_enemy_goal_line = position.y_mm < 400
+            too_close_to_our_goal_line = (FIELD_LENGTH_MM - position.y_mm) < 400
+
+            too_far_left  = position.x_mm < 400 - FIELD_WIDTH_MM / 2
+            too_far_right = position.x_mm > FIELD_WIDTH_MM / 2 - 400
+
+            left_detected = any(
+                (angle >= 45 and angle <= 135)
+                for angle in detected_angles
+            )
+            right_detected = any(
+                (angle >= 225 and angle <= 315)
+                for angle in detected_angles
+            )
+
+            if too_close_to_enemy_goal_line:
+                if too_far_left and left_detected:
+                    return 135
+                if too_far_right and right_detected:
+                    return 225
+                return 180
+
+            elif too_close_to_our_goal_line:
+                if too_far_left and left_detected:
+                    return 45
+                if too_far_right and right_detected:
+                    return -45
+                return 0
+
+            elif too_far_left:
+                return 90
+
+            elif too_far_right:
+                return -90
+
+        angles_rad = [math.radians(a) for a in detected_angles]
+        x = sum(math.cos(a) for a in angles_rad)
+        y = sum(math.sin(a) for a in angles_rad)
+        avg_angle = (math.degrees(math.atan2(y, x)) + 360) % 360
+        
+        avoid_angle = (avg_angle + 180) % 360
+        return avoid_angle
 
 
 # ------------------------------------------------------------------
@@ -106,7 +270,10 @@ def _update_cross_state_data(state_machine: StateMachine) -> SensorsData:
 class IdleState(State):
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
-        if data.ir_ball_detected or data.cam_ball_detected or data.ball_likely_inside_robot:
+        if data.lines.enter_avoiding_state:
+            state_machine.transition(LineAvoidingState)
+            return
+        if data.sensors.ir_ball_detected or data.sensors.cam_ball_detected or data.sensors.ball_likely_inside_robot:
             state_machine.transition(ApproachState)
             return
         state_machine.motors.set_motors(angle=0.0, speed=0.0, rotate=0.0)
@@ -128,35 +295,37 @@ class ApproachState(State):
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
-        if data.ball_possession or data.ball_likely_inside_robot:
+        if data.lines.enter_avoiding_state:
+            state_machine.transition(LineAvoidingState)
+            return
+
+        if data.sensors.ball_possession or data.sensors.ball_likely_inside_robot:
             state_machine.transition(PushState)
             return
 
-        if not data.ir_ball_detected and (not data.cam_ball_detected or not data.use_cam_ball):
+        if not data.sensors.ir_ball_detected and (not data.sensors.cam_ball_detected or not data.sensors.use_cam_ball):
             state_machine.transition(IdleState)
             return
-
-        if not data.goal.detected:
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
-            state_machine.motors.target_heading = 0
-        else:
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
 
         move_angle = 0.0
         move_speed = AUTO_APPROACH_SPEED
         rotate = 0.0
 
-        if data.use_cam_ball:
-            if abs(data.cam_ball_angle) > AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:
-                move_angle = data.cam_ball_angle * AUTO_CAM_BALL_APPROACH_ANGLE_RATIO
+        if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
+            state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
+            state_machine.motors.target_heading = 0
+        else:
+            state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
+            rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
+            rotate = max(-1.0, min(1.0, rotate))
+
+        if data.sensors.use_cam_ball:
+            if abs(data.sensors.cam_ball_angle) > AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:
+                move_angle = data.sensors.cam_ball_angle * AUTO_CAM_BALL_APPROACH_ANGLE_RATIO
                 move_angle = max(-180, min(180, move_angle))
         else:
-            move_angle = utils.normalize_angle_deg(data.ir_ball_angle + data.heading) * data.ir_ball_distance * AUTO_IR_BALL_APPROACH_ANGLE_RATIO
+            move_angle = utils.normalize_angle_deg(data.sensors.ir_ball_angle + data.sensors.heading) * data.sensors.ir_ball_distance * AUTO_IR_BALL_APPROACH_ANGLE_RATIO
             move_angle = max(-180, min(180, move_angle))
-
-        if data.goal.detected:
-            rotate = data.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
-            rotate = max(-1.0, min(1.0, rotate))
 
         move_speed *= AUTO_SPEED_MULTIPLIER
         state_machine.motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
@@ -171,36 +340,40 @@ class PushState(State):
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
-        if not data.ball_possession and not data.ball_likely_inside_robot:
-            state_machine.transition(ApproachState)
+        if data.lines.enter_avoiding_state:
+            state_machine.transition(LineAvoidingState)
             return
 
-        if data.goal.detected and shared_data.get_always_facing_goal_enabled():
-            if data.goal.distance_mm is not None and data.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
-                state_machine.transition(IdleState)
-                return
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
-        else:
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
-            state_machine.motors.target_heading = 0
+        if not data.sensors.ball_possession and not data.sensors.ball_likely_inside_robot:
+            state_machine.transition(ApproachState)
+            return
 
         move_speed = AUTO_PUSH_SPEED
         move_angle = 0.0
         rotate = 0.0
 
-        if data.use_cam_ball:
-            move_angle = -data.cam_ball_angle / (AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0) * AUTO_PUSH_STEERING_MAX_ANGLE_DEG
-            move_angle = max(-90, min(90, move_angle))
-
-        if data.goal.detected:
+        if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
+            state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
+            state_machine.motors.target_heading = 0
+        else:
+            if data.sensors.goal.distance_mm is not None and data.sensors.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
+                state_machine.transition(IdleState)
+                return
+            state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
             rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
             rotate = max(-1.0, min(1.0, rotate))
+
+        if data.sensors.use_cam_ball:
+            move_angle = -data.sensors.cam_ball_angle / (AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0) * AUTO_PUSH_STEERING_MAX_ANGLE_DEG
+            move_angle = max(-90, min(90, move_angle))
 
         move_speed *= AUTO_SPEED_MULTIPLIER
         state_machine.motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
 
 
-_state_machine = StateMachine(name="Soccer State Machine", initial_state=IdleState, motors=SmartMotorsController())
+_motors = SmartMotorsController()
+_motors.set_functions_enabled(line_avoiding_enabled=False)
+_state_machine = StateMachine(name="Soccer State Machine", initial_state=IdleState, motors=_motors)
 
 def get_state_machine() -> StateMachine:
     return _state_machine

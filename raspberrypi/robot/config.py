@@ -82,7 +82,6 @@ DETECTION_FRAME_SIZE_SCALE = 0.5
 DETECTION_FRAME_WIDTH = int(FRAME_WIDTH * DETECTION_FRAME_SIZE_SCALE)
 DETECTION_FRAME_HEIGHT = int(FRAME_HEIGHT * DETECTION_FRAME_SIZE_SCALE)
 
-
 # ========================= GOAL DETECTION SETTINGS ===============================
 # Real-world goal height in millimeters
 GOAL_HEIGHT_MM = 100.0
@@ -99,6 +98,9 @@ DEFAULT_ROTATION_CORRECTION_ENABLED = True
 AUTO_SPEED_MULTIPLIER = 1.0
 # Angle offset to apply to the ball angle (degrees)
 IR_BALL_ANGLE_OFFSET_DEG = -10.0
+# The field dimensions in millimeters
+FIELD_WIDTH_MM = 1580.0
+FIELD_LENGTH_MM = 2190.0
 
 # --- Approach ---
 # Forward speed component while approaching the ball
