@@ -93,7 +93,8 @@ lnx-infrabot/
 
 2. **Install Dependencies**
    ```bash
-   sudo apt install git python3.13-dev libcap-dev libgl1
+   sudo apt install git python3.13-dev libcap-dev libgl1 libcamera-apps python3-libcamera
+   sudo apt install python3-picamera2 --no-install-recommends
    ```
 
 3. **Clone the Repository**
