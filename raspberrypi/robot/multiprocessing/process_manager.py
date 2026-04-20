@@ -3,6 +3,7 @@ import multiprocessing
 
 from robot import utils
 from robot.api import api_process
+from robot.bluetooth import bluetooth_process
 from robot.hardware import hardware_process
 from robot.logic import logic_process
 from robot.vision import camera_capture_process, camera_processing_process
@@ -41,6 +42,7 @@ processes: list[Process] = [
     Process("Camera Capture Process", camera_capture_process.run),
     Process("Camera Processing Process", camera_processing_process.run),
     Process("Logic Process", logic_process.run),
+    Process("Bluetooth Process", bluetooth_process.run),
     Process("API Process", api_process.run),
 ]
 
