@@ -40,7 +40,6 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         pass
-    logger.info("Stopping...")
 
     process_manager.stop_all_processes()
 
