@@ -28,8 +28,8 @@ volatile bool run = false;           // Overall run state
 #define RASPBERRY_SERIAL Serial8
 #define RASPBERRY_SERIAL_SPEED DATA_STRING_LENGTH * 10 * TARGET_MESSAGES_PER_SECOND  // = 84000
 
-#define DEBUG_PRINTS_ENABLED false
-#define DEBUG_LOGS_ENABLED true
+#define DEBUG_PRINTS_ENABLED true
+#define DEBUG_LOGS_ENABLED false
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
@@ -293,7 +293,7 @@ void stop_motors() {
 
 // ========== Sensor Reading Functions ==========
 bool bno_initialize() {
-  if (bno.begin()) {
+  if (bno.begin(OPERATION_MODE_IMUPLUS)) {
     debug_log(DEBUG_INFO, "BNO055 initialized successfully");
     bno_initialized = true;
     bno.setExtCrystalUse(true);
