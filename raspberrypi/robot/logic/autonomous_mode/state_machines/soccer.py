@@ -12,6 +12,51 @@ from robot.hardware.motors import SmartMotorsController
 from robot.config import *
 
 
+# ===================== AUTONOMOUS SOCCER SETTINGS =====================
+
+# --- General ---
+# The field dimensions in millimeters
+FIELD_WIDTH_MM = 1580.0
+FIELD_LENGTH_MM = 2190.0
+
+# --- Approach ---
+# Forward speed component while approaching the ball
+AUTO_APPROACH_SPEED = 1.0
+# The ratio between the ball angle & distance and the angle that the robot should move in
+# while approaching the ball.
+AUTO_IR_BALL_APPROACH_ANGLE_RATIO = 0.001
+# Similar ratio for camera-based ball tracking, using the camera ball angle instead of IR.
+AUTO_CAM_BALL_APPROACH_ANGLE_RATIO = 1.3
+# The threshold distance to consider the ball "close enough" to initiate pushing (3000 nearest, 0 farthest)
+AUTO_BALL_CLOSE_THRESHOLD = 2500
+# Angular window around 0° where ball is considered "in front" of the robot
+AUTO_BALL_FRONT_THRESHOLD_DEG = 15.0
+
+# --- Pushing ---
+# Speed when pushing the ball toward the goal
+AUTO_PUSH_SPEED = 1.0
+# Maximum angle to apply for steering while pushing (deg, when ball is at edge of possession area)
+AUTO_PUSH_STEERING_MAX_ANGLE_DEG = 45.0
+# Distance at which we consider the goal "scored" (stop pushing)
+AUTO_GOAL_SCORED_DISTANCE_MM = 600.0
+
+# --- Ball possession camera check ---
+AUTO_BALL_POSSESSION_AREA_WIDTH_DEG = CAMERA_FOV_DEG * AUTO_BALL_POSSESSION_AREA_WIDTH_PERCENT / 100.0
+# IR angle range considered "inside" the robot if the ball was possessed by camera in previous frame (deg)
+AUTO_BALL_INSIDE_ROBOT_IR_ANGLE_RANGE_DEG = 40.0
+
+# --- Camera-based ball tracking (for approach state) ---
+# Use camera detection as primary up to this distance (mm), then fall back to IR
+AUTO_CAMERA_BALL_TRACKING_MAX_DISTANCE_MM = 1000.0
+# Max allowed angle difference between camera and IR ball angles to use camera tracking
+AUTO_CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG = 45.0
+
+# --- Goal-tracking rotation ---
+# Gain applied to goal alignment error to produce rotation command while approaching/pushing
+AUTO_GOAL_TRACK_ROTATE_GAIN = 0.7
+# Rotation speed used while searching for the goal (no goal visible)
+AUTO_GOAL_SEARCH_ROTATE_SPEED = 1.0
+
 
 # Toggle between standard attacker behaviour and goalkeeper behaviour.
 # When enabled, the robot will prioritize defending our goal and only
@@ -224,14 +269,7 @@ class LineAvoidingState(State):
         position = vision.get_position_estimate()
         current_time = time.time()
 
-        rotate = 0.0
-        if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
-            state_machine.motors.target_heading = 0
-        else:
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
-            rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
-            rotate = max(-1.0, min(1.0, rotate))
+        rotate = _set_goal_tracking_rotation(state_machine, data)
         
         currently_detected = any(data.lines.detected)
         
@@ -388,15 +426,7 @@ class AttackerApproachState(State):
 
         move_angle = 0.0
         move_speed = AUTO_APPROACH_SPEED
-        rotate = 0.0
-
-        if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
-            state_machine.motors.target_heading = 0
-        else:
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
-            rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
-            rotate = max(-1.0, min(1.0, rotate))
+        rotate = _set_goal_tracking_rotation(state_machine, data)
 
         if data.sensors.use_cam_ball:
             if abs(data.sensors.cam_ball_angle) > AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:
@@ -446,18 +476,12 @@ class AttackerPushState(State):
 
         move_speed = AUTO_PUSH_SPEED
         move_angle = 0.0
-        rotate = 0.0
 
-        if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
-            state_machine.motors.target_heading = 0
-        else:
-            if data.sensors.goal.distance_mm is not None and data.sensors.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
-                state_machine.transition(_neutral_state())
-                return
-            state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
-            rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
-            rotate = max(-1.0, min(1.0, rotate))
+        if data.sensors.goal.distance_mm is not None and data.sensors.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
+            state_machine.transition(_neutral_state())
+            return
+
+        rotate = _set_goal_tracking_rotation(state_machine, data)
 
         if data.sensors.use_cam_ball:
             move_angle = -data.sensors.cam_ball_angle / (AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0) * AUTO_PUSH_STEERING_MAX_ANGLE_DEG
