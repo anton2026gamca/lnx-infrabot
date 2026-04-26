@@ -7,7 +7,7 @@ from robot.hardware import line_sensors
 from robot.logic.autonomous_mode.state_machine import State, StateMachine, CrossStateData
 from robot.multiprocessing import shared_data
 
-from robot.vision import GoalDetectionResult
+from robot.vision import GoalDetectionResult, ball
 from robot.hardware.motors import SmartMotorsController
 from robot.config import *
 
@@ -67,14 +67,14 @@ GOALKEEPER_MODE_ENABLED = True
 GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM = 320.0
 GOALKEEPER_POSITION_TOLERANCE_X_MM = 130.0
 GOALKEEPER_POSITION_TOLERANCE_Y_MM = 120.0
-GOALKEEPER_APPROACH_MAX_SPEED = 0.85
+GOALKEEPER_APPROACH_MAX_SPEED = 1.0
 GOALKEEPER_DEFEND_MAX_SPEED = 0.65
 GOALKEEPER_DEFEND_STOP_RADIUS_MM = 80.0
 GOALKEEPER_NEAR_BALL_CAMERA_DISTANCE_MM = 300.0
 GOALKEEPER_NEAR_BALL_IR_THRESHOLD = AUTO_BALL_CLOSE_THRESHOLD - 150
 GOALKEEPER_NEAR_BALL_ANGLE_THRESHOLD_DEG = 35.0
-GOALKEEPER_BALL_TRACK_X_MM_PER_DEG = 7.5
-GOALKEEPER_BALL_TRACK_MAX_X_MM = 450.0
+GOALKEEPER_BALL_TRACK_X_MM_PER_DEG = 10.0
+GOALKEEPER_BALL_TRACK_MAX_X_MM = 550.0
 GOALKEEPER_NO_POSITION_RETREAT_SPEED = 0.35
 
 
@@ -567,7 +567,7 @@ class GoalkeeperDefendState(State):
         target_y_mm = FIELD_LENGTH_MM - GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM
 
         ball_angle = None
-        if data.sensors.use_cam_ball and data.sensors.cam_ball_detected:
+        if data.sensors.use_cam_ball:
             ball_angle = data.sensors.cam_ball_angle
         elif data.sensors.ir_ball_detected:
             ball_angle = data.sensors.ir_ball_angle
@@ -591,6 +591,9 @@ class GoalkeeperDefendState(State):
         if distance_mm < GOALKEEPER_DEFEND_STOP_RADIUS_MM:
             state_machine.motors.set_motors(angle=0.0, speed=0.0, rotate=rotate)
             return
+
+        if ball_angle is not None and abs(ball_angle) > 90:
+            pass
 
         global_angle = _field_delta_to_global_angle_deg(delta_x, delta_y)
         local_move_angle = _global_to_local_angle_deg(global_angle, data.sensors.heading)
