@@ -655,4 +655,10 @@ def cleanup() -> None:
         frame_buffer.unlink()
     except Exception as e:
         _logger.error(f"Error closing/unlinking frame buffer: {e}")
+    
+    try:
+        _manager.shutdown()
+        _logger.debug("Manager shut down successfully")
+    except Exception as e:
+        _logger.warning(f"Error shutting down manager: {e}")
 
