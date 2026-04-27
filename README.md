@@ -87,17 +87,45 @@ lnx-infrabot/
    dtoverlay=imx708
    ```
    After editing, press `Ctrl+X` and then `Y` to exit and save.
-   Disable the serial console with `sudo raspi-config` if needed. Save and reboot.
+   Disable the serial console with `sudo raspi-config` if needed.
+
+   ```bash
+   sudo reboot
+   ```
 
    For more info about the camera, see the [official documentation](https://docs.arducam.com/Raspberry-Pi-Camera/Native-camera/12MP-IMX708/#software-configuration)
 
-2. **Install Dependencies**
+2. **Add yourself to the `bluetooth` group**
+   ```bash
+   sudo usermod -aG bluetooth $USER
+   ```
+
+   Relogin or reboot
+   ```bash
+   sudo reboot
+   ```
+
+3. **(Optional) Enable Passwordless Bluetooth Discoverability**
+
+   Some Bluetooth operations (like making the device discoverable) require root privileges. To allow the robot software to set Bluetooth discoverable mode without prompting for a password, you can configure passwordless sudo only for the `hciconfig` command:
+
+   1. Open the sudoers file for editing:
+      ```bash
+      sudo visudo
+      ```
+   2. Add the following line at the end (replace `pi` with your username if different):
+      ```
+      pi ALL=NOPASSWD: /usr/bin/hciconfig
+      ```
+   3. Save and exit. Now, the robot software can run `sudo hciconfig ...` without a password prompt.
+
+4. **Install Dependencies**
    ```bash
    sudo apt install git python3.13-dev libcap-dev libgl1 libcamera-apps python3-libcamera
    sudo apt install python3-picamera2 --no-install-recommends
    ```
 
-3. **Clone the Repository**
+5. **Clone the Repository**
    ```bash
    git clone --no-checkout https://github.com/anton2026gamca/lnx-infrabot
    cd lnx-infrabot
@@ -106,25 +134,25 @@ lnx-infrabot/
    git checkout main
    ```
 
-4. **Set Up Python Virtual Environment**
+6. **Set Up Python Virtual Environment**
    ```bash
    cd raspberrypi
    python3 -m venv .venv
    source .venv/bin/activate
    ```
 
-5. **Install Python Dependencies**
+7. **Install Python Dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-6. **Set Environment Variables**
+8. **Set Environment Variables**
    Create a `.env` file:
    ```
    AUTH_TOKEN=your-secure-token     # Defaults to `ooops` if not set
    ```
 
-7. **Enable Auto-Start**
+9. **Enable Auto-Start**
    ```bash
    sudo ln -s "$(pwd)/robot.service" /etc/systemd/system/
    sudo systemctl daemon-reload

@@ -51,7 +51,10 @@ def _create_calibration_data() -> dict:
             },
             "ball_distance": {
                 "calibration_constant": shared_data.get_camera_ball_calibration_constant()
-            }
+            },
+            "bluetooth": {
+                "other_robot": shared_data.get_bluetooth_other_robot_info(),
+            },
         }
     }
 
@@ -153,6 +156,12 @@ def load_calibration_data() -> None:
             calibration_constant = ball_distance_data.get("calibration_constant")
             if calibration_constant is not None and isinstance(calibration_constant, (int, float)) and calibration_constant > 0:
                 shared_data.set_camera_ball_calibration_constant(float(calibration_constant))
+
+        bluetooth_data = calibrations.get("bluetooth", {}) if isinstance(calibrations, dict) else {}
+        if bluetooth_data:
+            other_robot = bluetooth_data.get("other_robot")
+            if isinstance(other_robot, dict):
+                shared_data.set_bluetooth_other_robot_info(other_robot)
 
         logger.info("Calibration data loaded")
     except Exception as e:

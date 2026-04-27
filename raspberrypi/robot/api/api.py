@@ -10,6 +10,7 @@ import socketio
 from fastapi import FastAPI
 
 from robot import calibration, utils, vision
+import robot.bluetooth.utils as bluetooth_utils
 from robot.hardware import line_sensors
 from robot.logic import autonomous_mode
 from robot.multiprocessing import shared_data
@@ -713,6 +714,11 @@ async def set_goal_focal_length(sid: str, data: dict | None = None):
     try:
         d = data or {}
         fl = d.get("focal_length_pixels")
+        if isinstance(fl, str):
+            try:
+                fl = float(fl)
+            except ValueError:
+                return _err("focal_length_pixels must be a positive number")
         if not isinstance(fl, (int, float)) or fl <= 0:
             return _err("focal_length_pixels must be a positive number")
         calibration.set_goal_focal_length(float(fl))
@@ -1023,6 +1029,255 @@ async def compute_hsv_from_regions(sid: str, data: dict | None = None):
     except Exception as exc:
         logger.error(f"compute_hsv_from_regions: {exc}", exc_info=True)
         return _err("Internal server error")
+
+
+
+# ---------------------------------------------------------------------------
+# Bluetooth
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def get_bluetooth_state(sid: str, data: dict | None = None):
+    """Get Bluetooth process/device status and selected peer robot metadata."""
+    try:
+        return _ok(
+            process_alive=bluetooth_utils.is_bluetooth_process_alive(),
+            local_device=bluetooth_utils.get_local_device_info(),
+            connected_devices=bluetooth_utils.get_connected_devices(),
+            paired_devices=bluetooth_utils.get_paired_devices(),
+            other_robot=bluetooth_utils.get_other_robot_info(),
+        )
+    except Exception as exc:
+        logger.error(f"get_bluetooth_state: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_other_robot(sid: str, data: dict | None = None):
+    """Set metadata for the selected remote robot (name/mac/etc)."""
+    try:
+        d = data or {}
+        if d.get("clear") is True:
+            bluetooth_utils.clear_other_robot_info()
+            return _ok(other_robot={})
+
+        mac_address = d.get("mac_address")
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return _err("mac_address is required")
+
+        info = {
+            "mac_address": mac_address.strip(),
+            "name": d.get("name"),
+            "hostname": d.get("hostname"),
+            "ip_address": d.get("ip_address"),
+            "note": d.get("note"),
+        }
+        info = {k: v for k, v in info.items() if v is not None}
+
+        bluetooth_utils.set_other_robot_info(info)
+        return _ok(other_robot=bluetooth_utils.get_other_robot_info())
+    except Exception as exc:
+        logger.error(f"set_other_robot: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def bluetooth_connect_other_robot(sid: str, data: dict | None = None):
+    """Connect to selected robot (or explicit mac_address) via Bluetooth."""
+    try:
+        d = data or {}
+        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return _err("mac_address is required (or set other_robot first)")
+
+        result = bluetooth_utils.connect(mac_address.strip())
+        if not result.get("success", False):
+            return _err(result.get("error") or "Failed to connect")
+
+        return _ok(result=result, connected_devices=bluetooth_utils.get_connected_devices())
+    except Exception as exc:
+        logger.error(f"bluetooth_connect_other_robot: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def bluetooth_disconnect_other_robot(sid: str, data: dict | None = None):
+    """Disconnect from selected robot (or explicit mac_address)."""
+    try:
+        d = data or {}
+        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return _err("mac_address is required (or set other_robot first)")
+
+        result = bluetooth_utils.disconnect(mac_address.strip())
+        if not result.get("success", False):
+            return _err(result.get("error") or "Failed to disconnect")
+
+        return _ok(result=result, connected_devices=bluetooth_utils.get_connected_devices())
+    except Exception as exc:
+        logger.error(f"bluetooth_disconnect_other_robot: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def bluetooth_send_message(sid: str, data: dict | None = None):
+    """Send a custom Bluetooth message to selected robot or explicit mac_address."""
+    try:
+        d = data or {}
+        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        message_type = d.get("message_type")
+        content = d.get("content")
+
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return _err("mac_address is required (or set other_robot first)")
+        if not isinstance(message_type, str) or not message_type.strip():
+            return _err("message_type is required")
+        if content is None:
+            return _err("content is required")
+
+        result = bluetooth_utils.send_message(
+            mac_address=mac_address.strip(),
+            message_type=message_type.strip(),
+            content=str(content),
+        )
+        if not result.get("success", False):
+            return _err(result.get("error") or "Failed to send message")
+
+        return _ok(result=result)
+    except Exception as exc:
+        logger.error(f"bluetooth_send_message: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def get_bluetooth_messages(sid: str, data: dict | None = None):
+    """Get Bluetooth incoming/outgoing message history."""
+    try:
+        d = data or {}
+        clear = bool(d.get("clear", False))
+        limit_raw = d.get("limit")
+        limit = limit_raw if isinstance(limit_raw, int) and limit_raw > 0 else None
+
+        return _ok(
+            received=bluetooth_utils.get_received_messages(clear=clear, limit=limit),
+            sent=bluetooth_utils.get_sent_messages(clear=clear, limit=limit),
+        )
+    except Exception as exc:
+        logger.error(f"get_bluetooth_messages: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def bluetooth_list_pairable_devices(sid: str, data: dict | None = None):
+    """List discoverable Bluetooth devices available for pairing."""
+    try:
+        d = data or {}
+        timeout_raw = d.get("timeout_seconds", 6)
+        if not isinstance(timeout_raw, int) or timeout_raw <= 0:
+            return _err("timeout_seconds must be a positive integer")
+
+        result = bluetooth_utils.list_pairable_devices(timeout_seconds=timeout_raw)
+        if not result.get("success", False):
+            return _err(result.get("error") or "Failed to list pairable devices")
+
+        devices = result.get("data", {}).get("devices", [])
+        return _ok(result=result, devices=devices)
+    except Exception as exc:
+        logger.error(f"bluetooth_list_pairable_devices: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def bluetooth_pair_device(sid: str, data: dict | None = None):
+    """Pair a Bluetooth device and store its metadata."""
+    try:
+        d = data or {}
+        mac_address = d.get("mac_address")
+        name = d.get("name")
+        
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return _err("mac_address is required")
+        if not isinstance(name, str) or not name.strip():
+            return _err("name is required")
+        
+        hostname = d.get("hostname")
+        ip_address = d.get("ip_address")
+        
+        result = bluetooth_utils.add_paired_device(
+            name=name.strip(),
+            mac_address=mac_address.strip(),
+            hostname=hostname.strip() if hostname else None,
+            ip_address=ip_address.strip() if ip_address else None,
+        )
+        
+        if not result.get("success", False):
+            return _err(result.get("error") or "Failed to pair device")
+        
+        return _ok(result=result, paired_devices=bluetooth_utils.get_paired_devices())
+    except Exception as exc:
+        logger.error(f"bluetooth_pair_device: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def bluetooth_unpair_device(sid: str, data: dict | None = None):
+    """Unpair a Bluetooth device."""
+    try:
+        d = data or {}
+        mac_address = d.get("mac_address")
+        
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return _err("mac_address is required")
+        
+        result = bluetooth_utils.remove_paired_device(mac_address.strip())
+        
+        if not result.get("success", False):
+            return _err(result.get("error") or "Failed to unpair device")
+        
+        return _ok(result=result, paired_devices=bluetooth_utils.get_paired_devices())
+    except Exception as exc:
+        logger.error(f"bluetooth_unpair_device: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_bluetooth_discoverable(sid: str, data: dict | None = None):
+    """Make this robot discoverable via Bluetooth."""
+    try:
+        d = data or {}
+        duration_raw = d.get("duration_seconds")
+        duration_seconds = None
+        
+        if duration_raw is not None:
+            if not isinstance(duration_raw, int) or duration_raw <= 0:
+                return _err("duration_seconds must be a positive integer or null")
+            duration_seconds = duration_raw
+        
+        result = bluetooth_utils.set_discoverable(duration_seconds=duration_seconds)
+        
+        if not result.get("success", False):
+            return _err(result.get("error") or "Failed to set discoverable")
+        
+        return _ok(result=result, discoverable=True)
+    except Exception as exc:
+        logger.error(f"set_bluetooth_discoverable: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_bluetooth_not_discoverable(sid: str, data: dict | None = None):
+    """Make this robot non-discoverable via Bluetooth."""
+    try:
+        result = bluetooth_utils.set_not_discoverable()
+        
+        if not result.get("success", False):
+            return _err(result.get("error") or "Failed to set non-discoverable")
+        
+        return _ok(result=result, discoverable=False)
+    except Exception as exc:
+        logger.error(f"set_bluetooth_not_discoverable: {exc}", exc_info=True)
+        return _err("Internal server error")
+
 
 
 # ---------------------------------------------------------------------------

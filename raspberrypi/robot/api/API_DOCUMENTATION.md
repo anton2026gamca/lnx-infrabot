@@ -19,7 +19,8 @@ This is a comprehensive WebSocket/HTTP API for controlling and monitoring a robo
 3. [Sensor & State Queries](#sensor--state-queries)
 4. [Robot Control (Mutations)](#robot-control-mutations)
 5. [Calibration Procedures](#calibration-procedures)
-6. [Video Streaming](#video-streaming)
+6. [Bluetooth Communication](#bluetooth-communication)
+7. [Video Streaming](#video-streaming)
 
 ---
 
@@ -1104,6 +1105,423 @@ Analyze selected image regions and compute HSV ranges.
   - Saturation: ±20
   - Value: ±20
 - Returns union of all regions
+
+---
+
+## Bluetooth Communication
+
+Bluetooth is handled by a dedicated background process. The API exposes state and messaging helpers for robot-to-robot communication.
+
+### `get_bluetooth_state`
+
+Get Bluetooth process status, local device identity, connected devices, paired devices, and selected peer robot metadata.
+
+**Request:**
+```typescript
+{
+  event: "get_bluetooth_state",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok",
+  process_alive: boolean,
+  local_device: {
+    device_id?: string,
+    hostname?: string,
+    ip_address?: string
+  },
+  connected_devices: Array<{
+    name: string,
+    mac_address: string,
+    hostname?: string,
+    ip_address?: string,
+    last_connected?: number,
+    is_connected: boolean,
+    device_id?: string
+  }>,
+  paired_devices: Array<{
+    name: string,
+    mac_address: string,
+    hostname?: string,
+    ip_address?: string,
+    last_connected?: number,
+    is_connected: boolean,
+    device_id?: string
+  }>,
+  other_robot: {
+    mac_address?: string,
+    name?: string,
+    hostname?: string,
+    ip_address?: string,
+    note?: string
+  }
+}
+```
+
+### `set_other_robot`
+
+Set or clear metadata for the selected "other robot".
+
+**Request (set):**
+```typescript
+{
+  event: "set_other_robot",
+  data: {
+    mac_address: string,
+    name?: string,
+    hostname?: string,
+    ip_address?: string,
+    note?: string
+  }
+}
+```
+
+**Request (clear):**
+```typescript
+{
+  event: "set_other_robot",
+  data: {
+    clear: true
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  other_robot?: object,
+  error?: string
+}
+```
+
+### `bluetooth_connect_other_robot`
+
+Connect to the selected robot (or explicit `mac_address`).
+
+**Request:**
+```typescript
+{
+  event: "bluetooth_connect_other_robot",
+  data: {
+    mac_address?: string
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  result?: {
+    command_id: number,
+    success: boolean,
+    data: object,
+    error?: string,
+    timestamp: number
+  },
+  connected_devices?: object[],
+  error?: string
+}
+```
+
+### `bluetooth_disconnect_other_robot`
+
+Disconnect from the selected robot (or explicit `mac_address`).
+
+**Request:**
+```typescript
+{
+  event: "bluetooth_disconnect_other_robot",
+  data: {
+    mac_address?: string
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  result?: {
+    command_id: number,
+    success: boolean,
+    data: object,
+    error?: string,
+    timestamp: number
+  },
+  connected_devices?: object[],
+  error?: string
+}
+```
+
+### `bluetooth_send_message`
+
+Send a custom Bluetooth message to the selected robot or an explicit `mac_address`.
+
+**Request:**
+```typescript
+{
+  event: "bluetooth_send_message",
+  data: {
+    mac_address?: string,
+    message_type: string,
+    content: string
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  result?: {
+    command_id: number,
+    success: boolean,
+    data: {
+      mac_address: string,
+      message_id: string
+    },
+    error?: string,
+    timestamp: number
+  },
+  error?: string
+}
+```
+
+### `get_bluetooth_messages`
+
+Get sent and received Bluetooth message history.
+
+**Request:**
+```typescript
+{
+  event: "get_bluetooth_messages",
+  data: {
+    clear?: boolean, // default false
+    limit?: number   // optional last N messages
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok",
+  received: Array<{
+    message_type: string,
+    content: string,
+    sender_id?: string,
+    sender_mac?: string,
+    timestamp?: number,
+    message_id?: string
+  }>,
+  sent: Array<{
+    message_type: string,
+    content: string,
+    sender_id?: string,
+    target_mac?: string,
+    timestamp?: number,
+    message_id?: string
+  }>
+}
+```
+
+### `bluetooth_list_pairable_devices`
+
+List nearby discoverable Bluetooth devices that are available for pairing.
+
+**Request:**
+```typescript
+{
+  event: "bluetooth_list_pairable_devices",
+  data: {
+    timeout_seconds?: number  // Scan duration in seconds (default: 6, must be > 0)
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  result?: {
+    command_id: number,
+    success: boolean,
+    data: {
+      devices: Array<{
+        name: string,
+        mac_address: string,
+        is_paired: boolean
+      }>,
+      timeout_seconds: number
+    },
+    error?: string,
+    timestamp: number
+  },
+  devices?: Array<{
+    name: string,
+    mac_address: string,
+    is_paired: boolean
+  }>,
+  error?: string
+}
+```
+
+**Notes:**
+- Requires `bluetoothctl` and sufficient permissions on the Raspberry Pi
+- `timeout_seconds` controls how long active discovery runs before returning results
+- `is_paired` indicates whether the discovered device already exists in the saved paired devices list
+
+### `bluetooth_pair_device`
+
+Pair a new Bluetooth device and store its metadata.
+
+**Request:**
+```typescript
+{
+  event: "bluetooth_pair_device",
+  data: {
+    mac_address: string,
+    name: string,
+    hostname?: string,
+    ip_address?: string
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  result?: {
+    command_id: number,
+    success: boolean,
+    data: object,
+    error?: string,
+    timestamp: number
+  },
+  paired_devices?: Array<{
+    name: string,
+    mac_address: string,
+    hostname?: string,
+    ip_address?: string,
+    last_connected?: number,
+    is_connected: boolean,
+    device_id?: string
+  }>,
+  error?: string
+}
+```
+
+### `bluetooth_unpair_device`
+
+Unpair a previously paired Bluetooth device.
+
+**Request:**
+```typescript
+{
+  event: "bluetooth_unpair_device",
+  data: {
+    mac_address: string
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  result?: {
+    command_id: number,
+    success: boolean,
+    data: object,
+    error?: string,
+    timestamp: number
+  },
+  paired_devices?: Array<{
+    name: string,
+    mac_address: string,
+    hostname?: string,
+    ip_address?: string,
+    last_connected?: number,
+    is_connected: boolean,
+    device_id?: string
+  }>,
+  error?: string
+}
+```
+
+### `set_bluetooth_discoverable`
+
+Make this robot discoverable via Bluetooth, allowing other devices to find it.
+
+**Request:**
+```typescript
+{
+  event: "set_bluetooth_discoverable",
+  data: {
+    duration_seconds?: number  // Optional duration in seconds (null/omitted = indefinite, typically ~120s)
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  result?: {
+    command_id: number,
+    success: boolean,
+    data: object,
+    error?: string,
+    timestamp: number
+  },
+  discoverable?: boolean,
+  error?: string
+}
+```
+
+**Notes:**
+- Requires root/sudo access on the Raspberry Pi
+- `duration_seconds` is optional; if not specified, the device remains discoverable for ~120 seconds (system default)
+- If `duration_seconds` is 0 or negative, an error is returned
+
+### `set_bluetooth_not_discoverable`
+
+Make this robot non-discoverable via Bluetooth, preventing other devices from finding it.
+
+**Request:**
+```typescript
+{
+  event: "set_bluetooth_not_discoverable",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  result?: {
+    command_id: number,
+    success: boolean,
+    data: object,
+    error?: string,
+    timestamp: number
+  },
+  discoverable?: boolean,
+  error?: string
+}
+```
+
+**Notes:**
+- Requires root/sudo access on the Raspberry Pi
+- Immediately disables discoverable mode
 
 ---
 

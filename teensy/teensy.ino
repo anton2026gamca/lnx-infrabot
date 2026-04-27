@@ -29,7 +29,8 @@ volatile bool run = false;           // Overall run state
 #define RASPBERRY_SERIAL_SPEED DATA_STRING_LENGTH * 10 * TARGET_MESSAGES_PER_SECOND  // = 84000
 
 #define DEBUG_PRINTS_ENABLED false
-#define DEBUG_LOGS_ENABLED true
+#define DEBUG_LOGS_ENABLED false
+#define DEBUG_PERFORMANCE_ENABLED true
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
@@ -71,6 +72,16 @@ void debug_log(DebugLevel level, const T& msg) {
     case DEBUG_ERROR: DEBUG_SERIAL.print("[ERROR] "); break;
   }
   DEBUG_SERIAL.println(msg);
+#endif
+}
+
+void debug_time_spent(String label = "") {
+#if DEBUG_PERFORMANCE_ENABLED
+  static unsigned long last_time = 0;
+  unsigned long current_time = millis();
+  unsigned long time_diff = current_time - last_time;
+  debug_log(DEBUG_INFO, label + String(time_diff) + " ms");
+  last_time = current_time;
 #endif
 }
 
@@ -293,7 +304,7 @@ void stop_motors() {
 
 // ========== Sensor Reading Functions ==========
 bool bno_initialize() {
-  if (bno.begin()) {
+  if (bno.begin(OPERATION_MODE_IMUPLUS)) {
     debug_log(DEBUG_INFO, "BNO055 initialized successfully");
     bno_initialized = true;
     bno.setExtCrystalUse(true);
@@ -558,10 +569,14 @@ void setup() {
 
   debug_println("=== Initialization complete ===");
   debug_println();
+
+  debug_log(DEBUG_INFO, "ASDADASDASDASD: " + String(RASPBERRY_SERIAL.availableForWrite()));
 }
 
 
 void loop() {
+  debug_time_spent("start loop: ");
+
   unsigned long current_time = millis();
 
   static unsigned long last_switch_time = 0;
@@ -586,18 +601,35 @@ void loop() {
     debug_log(DEBUG_INFO, use_bluetooth_module ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
   }
 
+  debug_time_spent("after switch checks: ");
+
   if (last_module_switch_time + 1000 < current_time && last_switch_time + 1000 < current_time && last_running_state_transmit_time + 1000 < current_time) {
     transmit_running_state();
     last_running_state_transmit_time = current_time;
   }
 
+  debug_time_spent("after running state transmit: ");
+
   read_ir_sensor();
+  debug_time_spent("after IR read: ");
   read_compass();
+  debug_time_spent("after compass read: ");
   read_line_sensors();
+  debug_time_spent("after line reads: ");
   update_sensor_data_struct();
 
-  build_sensor_message();
-  transmit_sensor_data();
+  debug_time_spent("after sensor reads: ");
+
+  // debug_log(DEBUG_INFO, "ASDADASDASDASD: " + String(RASPBERRY_SERIAL.availableForWrite()));
+
+  // if (RASPBERRY_SERIAL.availableForWrite() > 0) {
+    build_sensor_message();
+    transmit_sensor_data();
+  // }
+
+  // debug_log(DEBUG_INFO, "ASDADASDASDASD: " + String(RASPBERRY_SERIAL.availableForWrite()));
+
+  debug_time_spent("after communication: ");
 
   #if DEBUG_LOGS_ENABLED
     static int messages_sent = 0;
@@ -612,9 +644,9 @@ void loop() {
     }
   #endif
 
-  if (RASPBERRY_SERIAL.available() > 0) {
-    parse_motor_command();
-  }
+  parse_motor_command();
+
+  debug_time_spent("after command parsing: ");
 
   digitalWrite(SWITCH_LED_PIN, switch_value);
   digitalWrite(MODULE_LED_PIN, module_value);
@@ -622,6 +654,8 @@ void loop() {
 
   run = (switch_value && module_value);
   digitalWrite(LED_BUILTIN, run);
+  
+  debug_time_spent("after LED updates: ");
 
   if (run) {
     set_all_motors_speed(motors_data.motor_speed);

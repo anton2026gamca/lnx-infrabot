@@ -28,7 +28,8 @@ logger = utils.get_logger()
 
 
 def main():
-    shared_data.set_robot_mode(RobotMode.IDLE)
+    shared_data.set_robot_mode(RobotMode.AUTONOMOUS)
+    shared_data.set_position_based_speed_enabled(False)
     calibration.load_calibration_data()
 
     process_manager.start_all_processes()
@@ -39,7 +40,6 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         pass
-    logger.info("Stopping...")
 
     process_manager.stop_all_processes()
 

@@ -35,6 +35,7 @@ def init():
         queue = False,
     )
     picam.configure(camera_config)
+    picam.set_controls({"AwbEnable": False})
     picam.start()
 
 def capture_frame() -> FrameData:
