@@ -14,6 +14,7 @@ from robot.config import *
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     messages_received = 0
     messages_sent = 0
+    corrupted_messages = 0
     last_log_time = time.time()
 
     compass_offset: dict[str, int] = {
@@ -40,11 +41,16 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
                         line_type = teensy.get_line_type(line)
 
-                        if line_type == teensy.LineType.SENSOR_DATA:
-                            data = teensy.parse_sensor_data_line(line)
-                        elif line_type == teensy.LineType.RUNNING_STATE:
-                            state = teensy.parse_running_state_line(line)
-                            shared_data.set_running_state(state)
+                        try:
+                            if line_type == teensy.LineType.SENSOR_DATA:
+                                data = teensy.parse_sensor_data_line(line)
+                            elif line_type == teensy.LineType.RUNNING_STATE:
+                                state = teensy.parse_running_state_line(line)
+                                shared_data.set_running_state(state)
+                            else:
+                                corrupted_messages += 1
+                        except ValueError:
+                            corrupted_messages += 1
                         
                         communicator.send_motors_message(shared_data.get_motor_speeds(), shared_data.get_kicker_state())
                         messages_sent += 1
@@ -78,10 +84,10 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                             compass_offset["roll"] += data.compass.roll
 
                     if time.time() > last_log_time + 1:
-                        logger.debug(f"Messages received per second: {messages_received}")
-                        logger.debug(f"Messages sent per second: {messages_sent}")
+                        logger.debug(f"Messages - Recieved: {messages_received}, Sent: {messages_sent}, Corrupted: {corrupted_messages}")
                         messages_received = 0
                         messages_sent = 0
+                        corrupted_messages = 0
                         last_log_time = time.time()
 
                     time_elapsed = time.time() - start_time
