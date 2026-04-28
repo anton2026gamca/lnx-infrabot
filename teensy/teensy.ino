@@ -651,6 +651,7 @@ void loop() {
 
   // if (RASPBERRY_SERIAL.availableForWrite() > 0) {
     build_sensor_message();
+    reset_line_values(); // Set min to 1023 and max to 0 for new line loop
     debug_time_spent("after building message: ");
     transmit_sensor_data();
   // }
