@@ -26,10 +26,10 @@ volatile bool run = false;           // Overall run state
 #define TARGET_MESSAGES_PER_SECOND 120
 
 #define RASPBERRY_SERIAL Serial8
-#define RASPBERRY_SERIAL_SPEED DATA_STRING_LENGTH * 10 * TARGET_MESSAGES_PER_SECOND  // = 84000
+#define RASPBERRY_SERIAL_SPEED 1000000//DATA_STRING_LENGTH * 10 * TARGET_MESSAGES_PER_SECOND  // = 84000
 
 #define DEBUG_PRINTS_ENABLED false
-#define DEBUG_LOGS_ENABLED false
+#define DEBUG_LOGS_ENABLED true
 #define DEBUG_PERFORMANCE_ENABLED true
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
@@ -158,6 +158,8 @@ const int line_pin[LINE_SENSOR_COUNT] = {
 
 struct LineData {
   int16_t sensor_line[LINE_SENSOR_COUNT];  // Analog values (0-1023)
+  int16_t sensor_line_min[LINE_SENSOR_COUNT];  // Analog values (0-1023)
+  int16_t sensor_line_max[LINE_SENSOR_COUNT];  // Analog values (0-1023)
 };
 LineData line_data = { { 0 } };
 
@@ -224,9 +226,19 @@ void print_sensor_debug_info() {
   debug_println(sensor_data.ir_data.status);
 
   // Line sensors
-  debug_print("Line: ");
+  debug_print("Line: Value: ");
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     debug_print(sensor_data.line_data.sensor_line[i]);
+    debug_print(" ");
+  }
+  debug_print("Min: ");
+  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
+    debug_print(sensor_data.line_data.sensor_line_min[i]);
+    debug_print(" ");
+  }
+  debug_print("Max: ");
+  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
+    debug_print(sensor_data.line_data.sensor_line_max[i]);
     debug_print(" ");
   }
   debug_println();
@@ -390,6 +402,17 @@ void read_ir_sensor() {
 void read_line_sensors() {
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     line_data.sensor_line[i] = analogRead(line_pin[i]);
+    if (line_data.sensor_line_max[i] < line_data.sensor_line[i])
+      line_data.sensor_line_max[i] = line_data.sensor_line[i];
+    if (line_data.sensor_line_min[i] > line_data.sensor_line[i])
+      line_data.sensor_line_min[i] = line_data.sensor_line[i];
+  }
+}
+
+void reset_line_values() {
+  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
+    line_data.sensor_line_max[i] = 0;
+    line_data.sensor_line_min[i] = 1023;
   }
 }
 
@@ -560,12 +583,16 @@ void setup() {
   // Initialize I2C for IR sensor
   Wire.begin();
   debug_println("IR sensor initialized (MRM-IR-Finder3)");
+  Wire.setClock(400000); // 400 kHz (Fast Mode)
+  debug_println("I2C initialized (400 kHz)");
 
   // Initialize line sensor pins
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     pinMode(line_pin[i], INPUT);
   }
   debug_println("Line sensors initialized");
+
+  reset_line_values();
 
   debug_println("=== Initialization complete ===");
   debug_println();
@@ -624,6 +651,7 @@ void loop() {
 
   // if (RASPBERRY_SERIAL.availableForWrite() > 0) {
     build_sensor_message();
+    debug_time_spent("after building message: ");
     transmit_sensor_data();
   // }
 
@@ -678,5 +706,5 @@ void loop() {
   print_sensor_debug_info();
 #endif
 
-  delay(1);
+  //delay(1);
 }
