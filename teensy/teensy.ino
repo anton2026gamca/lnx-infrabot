@@ -8,39 +8,55 @@
 // =                Definitions                   =
 // ================================================
 
-// ========== Control Switches ==========
-#define SWITCH_PIN 31
-#define SWITCH_LED_PIN 28
-#define MODULE_SWITCH_PIN 32
-#define MODULE_SWITCH_LED_PIN 29
-#define MODULE_PIN 33
-#define MODULE_LED_PIN 30
 
-// Control state variables
-volatile bool use_bluetooth_module = true;
-volatile bool switch_value = false;  // Manual switch state
-volatile bool module_value = true;   // Bluetooth module state
-volatile bool run = false;           // Overall run state
+struct Button {
+  int pin;
+  int lastState;
+  int state;
+  unsigned long lastDebounceTime;
+};
 
-// ========== Serial Communication ==========
-#define TARGET_MESSAGES_PER_SECOND 120
-
-#define RASPBERRY_SERIAL Serial8
-#define RASPBERRY_SERIAL_SPEED 230400
-
-#define DEBUG_PRINTS_ENABLED false
-#define DEBUG_LOGS_ENABLED true
-#define DEBUG_PERFORMANCE_ENABLED true
-#define DEBUG_SERIAL Serial
-#define DEBUG_SERIAL_SPEED 38400
-
-
-// ========== Debugging Utilities ==========
 enum DebugLevel {
   DEBUG_INFO,
   DEBUG_WARN,
   DEBUG_ERROR
 };
+
+
+#define TARGET_UPS 120
+#define INTERVAL_US (1000000 / TARGET_UPS)
+
+
+// ========== Control Switches ==========
+#define MAIN_SWITCH_PIN 31
+#define MAIN_SWITCH_LED_PIN 28
+#define MODULE_SWITCH_PIN 32
+#define MODULE_SWITCH_LED_PIN 29
+#define MODULE_PIN 33
+#define MODULE_LED_PIN 30
+
+volatile bool module_value = true;
+volatile bool is_running = false;
+
+Button main_switch = {MODULE_SWITCH_PIN, HIGH, HIGH, 0};
+Button module_switch = {MAIN_SWITCH_PIN, HIGH, HIGH, 0};
+
+
+// ========== Serial Communication ==========
+#define RASPBERRY_SERIAL Serial8
+#define RASPBERRY_SERIAL_SPEED 230400
+
+#define RASPBERRY_SERIAL_BUFFER_SIZE 128
+char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
+
+#define SENSOR_DATA_MESSAGE_LENGTH 43
+
+
+#define DEBUG_PRINTS_ENABLED false
+#define DEBUG_LOGS_ENABLED true
+#define DEBUG_PERFORMANCE_ENABLED false
+#define DEBUG_SERIAL Serial
+#define DEBUG_SERIAL_SPEED 38400
 
 #if DEBUG_PRINTS_ENABLED
   template<typename T>
@@ -79,9 +95,9 @@ enum DebugLevel {
 #if DEBUG_PERFORMANCE_ENABLED
   inline void DEBUG_TIME_SPENT(String label = "") {
     static unsigned long last_time = 0;
-    unsigned long current_time = millis();
+    unsigned long current_time = micros();
     unsigned long time_diff = current_time - last_time;
-    DEBUG_LOG(DEBUG_INFO, label + String(time_diff) + " ms");
+    DEBUG_SERIAL.println(label + String(time_diff) + " us");
     last_time = current_time;
   }
 #else
@@ -97,19 +113,18 @@ enum DebugLevel {
 #define KICKER_OUT 1
 #define KICKER_IN 0
 
-// Motor pin configuration: [PWM_PIN, DIR_PIN]
-const int motor_pin[MOTOR_COUNT][2] = {
-  { 6, 5 },   // M1: PWM=6, DIR=5
-  { 8, 7 },   // M2: PWM=8, DIR=7
-  { 10, 9 },  // M3: PWM=10, DIR=9
-  { 12, 11 }  // M4: PWM=12, DIR=11
+// [PWM_PIN, DIR_PIN]
+const int motor_pin_config[MOTOR_COUNT][2] = {
+  { 6, 5 },
+  { 8, 7 },
+  { 10, 9 },
+  { 12, 11 },
 };
 const int kicker_pin = 4;
 
-// Motor state structure
 struct MotorsData {
   int16_t motor_speed[MOTOR_COUNT];
-  int8_t kicker_position;  // 0=in, 1=out
+  int8_t kicker_position;
 };
 
 MotorsData motors_data = { { 0, 0, 0, 0 }, KICKER_IN };
@@ -160,9 +175,9 @@ const int line_pin[LINE_SENSOR_COUNT] = {
 };
 
 struct LineData {
-  int16_t sensor_line[LINE_SENSOR_COUNT];  // Analog values (0-1023)
-  int16_t sensor_line_min[LINE_SENSOR_COUNT];  // Analog values (0-1023)
-  int16_t sensor_line_max[LINE_SENSOR_COUNT];  // Analog values (0-1023)
+  uint16_t sensor_line[LINE_SENSOR_COUNT];  // Analog values (0-1023)
+  uint16_t sensor_line_min[LINE_SENSOR_COUNT];  // Analog values (0-1023)
+  uint16_t sensor_line_max[LINE_SENSOR_COUNT];  // Analog values (0-1023)
 };
 LineData line_data = { { 0 } };
 
@@ -179,7 +194,6 @@ struct SensorData {
 };
 
 SensorData sensor_data;
-char tx_message_buffer[DATA_STRING_LENGTH];
 
 
 
@@ -187,10 +201,31 @@ char tx_message_buffer[DATA_STRING_LENGTH];
 // =                 Functions                    =
 // ================================================
 
+// ========== Button Functions ==========
+bool isButtonPressed(Button &b) {
+  int currentReading = digitalRead(b.pin);
+  bool clicked = false;
+  const unsigned long debounceDelay = 50;
+
+  if (currentReading != b.lastState) {
+    b.lastDebounceTime = millis();
+  }
+
+  if ((millis() - b.lastDebounceTime) > debounceDelay) {
+    if (currentReading == LOW && b.state == HIGH) {
+      clicked = true;
+    }
+    b.state = currentReading;
+  }
+
+  b.lastState = currentReading;
+  return clicked;
+}
+
 // ========== Control State Management ==========
 void update_running_state() {
-  module_value = use_bluetooth_module ? (digitalRead(MODULE_PIN) == HIGH) : true;
-  run = (switch_value && module_value);
+  module_value = module_switch.state ? (digitalRead(MODULE_PIN) == HIGH) : true;
+  is_running = (main_switch.state && module_value);
 }
 
 // ========== Debug Functions ==========
@@ -248,52 +283,13 @@ void print_sensor_debug_info() {
   DEBUG_PRINTLN("========================================");
 }
 
-// ========== String Formatting Helpers ==========
-void format_number_with_sign(float input_number, char final_string[], int width) {
-  int number = round(input_number);
-  final_string[0] = (number < 0) ? '-' : '+';
-  int value = abs(number);
-
-  for (int i = width; i > 0; i--) {
-    final_string[i] = (value % 10) + '0';
-    value /= 10;
-  }
-}
-
-void format_number(float input_number, char final_string[], int width) {
-  int number = round(input_number);
-  int value = abs(number);
-
-  for (int i = width - 1; i >= 0; i--) {
-    final_string[i] = (value % 10) + '0';
-    value /= 10;
-  }
-}
-
-inline int append_number_to_string(float number, char* target_string, int position, int number_string_length, bool with_sign) {
-  if (with_sign) {
-    format_number_with_sign(number, target_string + position, number_string_length);
-    position += number_string_length + 1;
-  } else {
-    format_number(number, target_string + position, number_string_length);
-    position += number_string_length;
-  }
-  target_string[position++] = ',';
-  return position;
-}
-
-inline int append_char_to_string(char c, char* target_string, int position) {
-  target_string[position] = c;
-  return position + 1;
-}
-
 // ========== Motor Control Functions ==========
 void set_motor_speed(int motor_ID, int speed) {
   if (motor_ID < 0 || motor_ID >= MOTOR_COUNT) return;
 
   int pwm = constrain(abs(speed), 0, 255);
-  digitalWrite(motor_pin[motor_ID][DIR_INDEX], (speed >= 0) ? HIGH : LOW);
-  analogWrite(motor_pin[motor_ID][PWM_INDEX], pwm);
+  digitalWrite(motor_pin_config[motor_ID][DIR_INDEX], (speed >= 0) ? HIGH : LOW);
+  analogWrite(motor_pin_config[motor_ID][PWM_INDEX], pwm);
 }
 
 void set_all_motors_speed(int16_t m_speed[MOTOR_COUNT]) {
@@ -403,16 +399,20 @@ void read_ir_sensor() {
 
 
 void read_line_sensors() {
+  auto *line = line_data.sensor_line;
+  auto *minv = line_data.sensor_line_min;
+  auto *maxv = line_data.sensor_line_max;
+
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
-    line_data.sensor_line[i] = analogRead(line_pin[i]);
-    if (line_data.sensor_line_max[i] < line_data.sensor_line[i])
-      line_data.sensor_line_max[i] = line_data.sensor_line[i];
-    if (line_data.sensor_line_min[i] > line_data.sensor_line[i])
-      line_data.sensor_line_min[i] = line_data.sensor_line[i];
+    uint16_t v = analogRead(line_pin[i]);
+    line[i] = v;
+
+    if (v > maxv[i]) maxv[i] = v;
+    if (v < minv[i]) minv[i] = v;
   }
 }
 
-void reset_line_values() {
+void reset_line_min_max_values() {
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     line_data.sensor_line_max[i] = 0;
     line_data.sensor_line_min[i] = 1023;
@@ -491,199 +491,249 @@ inline void update_sensor_data_struct() {
 }
 
 
-void build_sensor_message() {
-  int pos = 0;
+void build_sensor_message(char* msg) {
+  memset(msg, 0, RASPBERRY_SERIAL_BUFFER_SIZE);
 
-  // JSON wrapper start: {"a"="
-  pos = append_char_to_string('{', tx_message_buffer, pos);
-  pos = append_char_to_string('"', tx_message_buffer, pos);
-  pos = append_char_to_string('a', tx_message_buffer, pos);
-  pos = append_char_to_string('"', tx_message_buffer, pos);
-  pos = append_char_to_string('=', tx_message_buffer, pos);
-  pos = append_char_to_string('"', tx_message_buffer, pos);
+  msg[0] = '{';
+  msg[1] = 0x01; // Message type
 
-  // Compass data: HHH,±PPP,±RRR,
-  pos = append_number_to_string(sensor_data.compass_data.heading, tx_message_buffer, pos, 3, false);
-  pos = append_number_to_string(sensor_data.compass_data.pitch, tx_message_buffer, pos, 3, true);
-  pos = append_number_to_string(sensor_data.compass_data.roll, tx_message_buffer, pos, 3, true);
+  auto write16 = [&](int idx, int16_t value) {
+    msg[idx]     = value & 0xFF;
+    msg[idx + 1] = (value >> 8) & 0xFF;
+  };
 
-  // IR data: AAA,DDDD,V1,...V12,S,
-  pos = append_number_to_string(sensor_data.ir_data.angle, tx_message_buffer, pos, 3, false);
-  pos = append_number_to_string(sensor_data.ir_data.distance, tx_message_buffer, pos, 4, false);
-  for (int i = 0; i < IR_SENSOR_COUNT; i++) {
-    pos = append_number_to_string(sensor_data.ir_data.sensor_IR[i], tx_message_buffer, pos, 3, false);
+  write16(2,  sensor_data.compass_data.heading);
+  write16(4,  sensor_data.compass_data.pitch);
+  write16(6,  sensor_data.compass_data.roll);
+
+  write16(8,  sensor_data.ir_data.angle);
+  write16(10, sensor_data.ir_data.distance);
+
+  uint16_t s_min[12] = {
+    (uint16_t)sensor_data.line_data.sensor_line_min[0],
+    (uint16_t)sensor_data.line_data.sensor_line_min[1],
+    (uint16_t)sensor_data.line_data.sensor_line_min[2],
+    (uint16_t)sensor_data.line_data.sensor_line_min[3],
+    (uint16_t)sensor_data.line_data.sensor_line_min[4],
+    (uint16_t)sensor_data.line_data.sensor_line_min[5],
+    (uint16_t)sensor_data.line_data.sensor_line_min[6],
+    (uint16_t)sensor_data.line_data.sensor_line_min[7],
+    (uint16_t)sensor_data.line_data.sensor_line_min[8],
+    (uint16_t)sensor_data.line_data.sensor_line_min[9],
+    (uint16_t)sensor_data.line_data.sensor_line_min[10],
+    (uint16_t)sensor_data.line_data.sensor_line_min[11]
+  };
+  uint16_t s_max[12] = {
+    (uint16_t)sensor_data.line_data.sensor_line_max[0],
+    (uint16_t)sensor_data.line_data.sensor_line_max[1],
+    (uint16_t)sensor_data.line_data.sensor_line_max[2],
+    (uint16_t)sensor_data.line_data.sensor_line_max[3],
+    (uint16_t)sensor_data.line_data.sensor_line_max[4],
+    (uint16_t)sensor_data.line_data.sensor_line_max[5],
+    (uint16_t)sensor_data.line_data.sensor_line_max[6],
+    (uint16_t)sensor_data.line_data.sensor_line_max[7],
+    (uint16_t)sensor_data.line_data.sensor_line_max[8],
+    (uint16_t)sensor_data.line_data.sensor_line_max[9],
+    (uint16_t)sensor_data.line_data.sensor_line_max[10],
+    (uint16_t)sensor_data.line_data.sensor_line_max[11]
+  };
+  msg[11 + 0] |= (uint8_t)(s_min[0] << 0);
+  msg[11 + 1] |= (uint8_t)(s_min[0] >> 8);
+  msg[11 + 1] |= (uint8_t)(s_max[0] << 2);
+  msg[11 + 2] |= (uint8_t)(s_max[0] >> 6);
+  msg[11 + 2] |= (uint8_t)(s_min[1] << 4);
+  msg[11 + 3] |= (uint8_t)(s_min[1] >> 4);
+  msg[11 + 3] |= (uint8_t)(s_max[1] << 6);
+  msg[11 + 4] |= (uint8_t)(s_max[1] >> 2);
+  msg[11 + 5] |= (uint8_t)(s_min[2] << 0);
+  msg[11 + 6] |= (uint8_t)(s_min[2] >> 8);
+  msg[11 + 6] |= (uint8_t)(s_max[2] << 2);
+  msg[11 + 7] |= (uint8_t)(s_max[2] >> 6);
+  msg[11 + 7] |= (uint8_t)(s_min[3] << 4);
+  msg[11 + 8] |= (uint8_t)(s_min[3] >> 4);
+  msg[11 + 8] |= (uint8_t)(s_max[3] << 6);
+  msg[11 + 9] |= (uint8_t)(s_max[3] >> 2);
+  msg[11 +10] |= (uint8_t)(s_min[4] << 0);
+  msg[11 +11] |= (uint8_t)(s_min[4] >> 8);
+  msg[11 +11] |= (uint8_t)(s_max[4] << 2);
+  msg[11 +12] |= (uint8_t)(s_max[4] >> 6);
+  msg[11 +12] |= (uint8_t)(s_min[5] << 4);
+  msg[11 +13] |= (uint8_t)(s_min[5] >> 4);
+  msg[11 +13] |= (uint8_t)(s_max[5] << 6);
+  msg[11 +14] |= (uint8_t)(s_max[5] >> 2);
+  msg[11 +15] |= (uint8_t)(s_min[6] << 0);
+  msg[11 +16] |= (uint8_t)(s_min[6] >> 8);
+  msg[11 +16] |= (uint8_t)(s_max[6] << 2);
+  msg[11 +17] |= (uint8_t)(s_max[6] >> 6);
+  msg[11 +17] |= (uint8_t)(s_min[7] << 4);
+  msg[11 +18] |= (uint8_t)(s_min[7] >> 4);
+  msg[11 +18] |= (uint8_t)(s_max[7] << 6);
+  msg[11 +19] |= (uint8_t)(s_max[7] >> 2);
+  msg[11 +20] |= (uint8_t)(s_min[8] << 0);
+  msg[11 +21] |= (uint8_t)(s_min[8] >> 8);
+  msg[11 +21] |= (uint8_t)(s_max[8] << 2);
+  msg[11 +22] |= (uint8_t)(s_max[8] >> 6);
+  msg[11 +22] |= (uint8_t)(s_min[9] << 4);
+  msg[11 +23] |= (uint8_t)(s_min[9] >> 4);
+  msg[11 +23] |= (uint8_t)(s_max[9] << 6);
+  msg[11 +24] |= (uint8_t)(s_max[9] >> 2);
+  msg[11 +25] |= (uint8_t)(s_min[10] << 0);
+  msg[11 +26] |= (uint8_t)(s_min[10] >> 8);
+  msg[11 +26] |= (uint8_t)(s_max[10] << 2);
+  msg[11 +27] |= (uint8_t)(s_max[10] >> 6);
+  msg[11 +27] |= (uint8_t)(s_min[11] << 4);
+  msg[11 +28] |= (uint8_t)(s_min[11] >> 4);
+  msg[11 +28] |= (uint8_t)(s_max[11] << 6);
+  msg[11 +29] |= (uint8_t)(s_max[11] >> 2);
+
+  uint8_t checksum = 0;
+  for (int i = 0; i < 11 + 36; ++i) {
+    checksum += msg[i];
   }
-  pos = append_number_to_string(sensor_data.ir_data.status, tx_message_buffer, pos, 1, false);
-
-  // Line sensor data: L1,...L12
-  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
-    pos = append_number_to_string(sensor_data.line_data.sensor_line[i], tx_message_buffer, pos, 4, false);
-  }
-
-  // JSON wrapper end: "} (remove trailing comma)
-  pos--;
-  pos = append_char_to_string('"', tx_message_buffer, pos);
-  pos = append_char_to_string('}', tx_message_buffer, pos);
-  tx_message_buffer[pos] = '\0';
+  msg[41] = checksum;
+  msg[42] = '}';
 }
 
-void transmit_sensor_data() {
-  RASPBERRY_SERIAL.println(tx_message_buffer);
+void build_running_state_message(char* msg) {
+  memset(msg, 0, RASPBERRY_SERIAL_BUFFER_SIZE);
+
+  msg[0] = '{';
+  msg[1] = 0x02;
+  msg[2] = is_running | (module_switch.state << 1) | (main_switch.state << 2) | (module_value << 3);
+  msg[3] = '}';
+}
+
+
+inline bool can_send_message_to_rpi(int length) {
+  return RASPBERRY_SERIAL.availableForWrite() > length;
+}
+
+template<typename T> void send_message_to_rpi(T message) {
+  RASPBERRY_SERIAL.println(message);
   DEBUG_PRINT("TX: ");
-  DEBUG_PRINTLN(tx_message_buffer);
-}
-
-
-void transmit_running_state() {
-  String switch_message = "{\"b\"=\"";
-  switch_message += (run ? 'R' : 'S');
-  switch_message += (use_bluetooth_module ? 'B' : 'N');
-  switch_message += (switch_value ? 'S' : 's');
-  switch_message += (module_value ? 'M' : 'm');
-  switch_message += "\"}";
-
-  RASPBERRY_SERIAL.println(switch_message);
+  DEBUG_PRINTLN(message);
 }
 
 
 
 // ========== Setup & Main Loop ==========
 void setup() {
-  // Initialize LED pins
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(MODULE_LED_PIN, OUTPUT);
   pinMode(MODULE_SWITCH_LED_PIN, OUTPUT);
-  pinMode(SWITCH_LED_PIN, OUTPUT);
+  pinMode(MAIN_SWITCH_LED_PIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
-  // Initialize serial communication
   DEBUG_SERIAL.begin(DEBUG_SERIAL_SPEED);
   RASPBERRY_SERIAL.begin(RASPBERRY_SERIAL_SPEED);
-  delay(100);
+  static char extra_buffer[RASPBERRY_SERIAL_BUFFER_SIZE - 39];
+  RASPBERRY_SERIAL.addMemoryForWrite(extra_buffer, sizeof(extra_buffer));
+  DEBUG_LOG(DEBUG_INFO, "RASPBERRY_SERIAL.availableForWrite(): " + String(RASPBERRY_SERIAL.availableForWrite()));
+
   DEBUG_PRINTLN("\n=== LNX Infrabot Teensy Controller ===");
   DEBUG_PRINTLN("Initializing...");
 
-  // Initialize control pins and interrupts
   pinMode(MODULE_PIN, INPUT);
-  pinMode(SWITCH_PIN, INPUT_PULLUP);
+  pinMode(MAIN_SWITCH_PIN, INPUT_PULLUP);
   pinMode(MODULE_SWITCH_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(MODULE_PIN), update_running_state, CHANGE);
   update_running_state();
   DEBUG_PRINTLN("Control switches initialized");
 
-  // Initialize motor pins
   for (int i = 0; i < MOTOR_COUNT; i++) {
-    pinMode(motor_pin[i][PWM_INDEX], OUTPUT);
-    pinMode(motor_pin[i][DIR_INDEX], OUTPUT);
+    pinMode(motor_pin_config[i][PWM_INDEX], OUTPUT);
+    pinMode(motor_pin_config[i][DIR_INDEX], OUTPUT);
   }
   pinMode(kicker_pin, OUTPUT);
-  stop_motors();  // Ensure motors start stopped
+  stop_motors();
   DEBUG_PRINTLN("Motors initialized");
 
-  // Initialize BNO055 compass
   bno_initialize();
 
-  // Initialize I2C for IR sensor
   Wire.begin();
   DEBUG_PRINTLN("IR sensor initialized (MRM-IR-Finder3)");
-  Wire.setClock(400000); // 400 kHz (Fast Mode)
+  Wire.setClock(400000);
   DEBUG_PRINTLN("I2C initialized (400 kHz)");
 
-  // Initialize line sensor pins
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     pinMode(line_pin[i], INPUT);
   }
   DEBUG_PRINTLN("Line sensors initialized");
 
-  reset_line_values();
+  reset_line_min_max_values();
 
   DEBUG_PRINTLN("=== Initialization complete ===");
   DEBUG_PRINTLN();
-
-  DEBUG_LOG(DEBUG_INFO, "ASDADASDASDASD: " + String(RASPBERRY_SERIAL.availableForWrite()));
 }
 
 
-void loop() {
-  DEBUG_TIME_SPENT("start loop: ");
+int messages_sent = 0;
+int line_sensor_readings = 0;
 
-  unsigned long current_time = millis();
+void target_ups_loop() {
+  DEBUG_TIME_SPENT("=== Target UPS Loop start === ");
 
-  static unsigned long last_switch_time = 0;
-  static unsigned long last_module_switch_time = 0;
-  static unsigned long last_running_state_transmit_time = 0;
-
-  if (!digitalRead(SWITCH_PIN) && (current_time - last_switch_time > 200)) {
-    switch_value = !switch_value;
+  if (isButtonPressed(main_switch)) {
+    main_switch.state = !main_switch.state;
     update_running_state();
-    transmit_running_state();
-
-    last_switch_time = current_time;
-    DEBUG_LOG(DEBUG_INFO, switch_value ? "Manual switch: ON" : "Manual switch: OFF");
+    build_running_state_message(message_buffer);
+    send_message_to_rpi(message_buffer);
+    DEBUG_LOG(DEBUG_INFO, main_switch.state ? "Manual switch: ON" : "Manual switch: OFF");
   }
 
-  if (!digitalRead(MODULE_SWITCH_PIN) && (current_time - last_module_switch_time > 200)) {
-    use_bluetooth_module = !use_bluetooth_module;
+  if (isButtonPressed(module_switch)) {
+    module_switch.state = !module_switch.state;
     update_running_state();
-    transmit_running_state();
-
-    last_module_switch_time = current_time;
-    DEBUG_LOG(DEBUG_INFO, use_bluetooth_module ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
+    build_running_state_message(message_buffer);
+    send_message_to_rpi(message_buffer);
+    DEBUG_LOG(DEBUG_INFO, module_switch.state ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
   }
 
   DEBUG_TIME_SPENT("after switch checks: ");
 
-  if (last_module_switch_time + 1000 < current_time && last_switch_time + 1000 < current_time && last_running_state_transmit_time + 1000 < current_time) {
-    transmit_running_state();
-    last_running_state_transmit_time = current_time;
+#if DEBUG_LOGS_ENABLED
+  static unsigned long last_sent_message_time = 0;
+  unsigned long current_time = millis();
+  if (current_time - last_sent_message_time >= 1000) {
+    DEBUG_LOG(DEBUG_INFO, "MSGs/s: " + String(messages_sent));
+    DEBUG_LOG(DEBUG_INFO, "Line sensor reads: " + String(line_sensor_readings));
+    last_sent_message_time = current_time;
+    messages_sent = 0;
+    line_sensor_readings = 0;
   }
+#endif
 
-  DEBUG_TIME_SPENT("after running state transmit: ");
+  if (can_send_message_to_rpi(SENSOR_DATA_MESSAGE_LENGTH)) {
+    read_ir_sensor();
+    DEBUG_TIME_SPENT("after IR read: ");
+    read_compass();
+    DEBUG_TIME_SPENT("after compass read: ");
+    update_sensor_data_struct();
+    build_sensor_message(message_buffer);
+    reset_line_min_max_values();
+    DEBUG_TIME_SPENT("after building message: ");
 
-  read_ir_sensor();
-  DEBUG_TIME_SPENT("after IR read: ");
-  read_compass();
-  DEBUG_TIME_SPENT("after compass read: ");
-  read_line_sensors();
-  DEBUG_TIME_SPENT("after line reads: ");
-  update_sensor_data_struct();
-
-  DEBUG_TIME_SPENT("after sensor reads: ");
-
-  build_sensor_message();
-  reset_line_values();
-  DEBUG_TIME_SPENT("after building message: ");
-  transmit_sensor_data();
-
-  DEBUG_TIME_SPENT("after communication: ");
-
-  #if DEBUG_LOGS_ENABLED
-    static int messages_sent = 0;
-    static unsigned long last_sent_message_time = 0;
-
+    send_message_to_rpi(message_buffer);
+#if DEBUG_LOGS_ENABLED
     messages_sent++;
+#endif
 
-    if (current_time - last_sent_message_time >= 1000) {
-      DEBUG_LOG(DEBUG_INFO, "MSGs/s: " + String(messages_sent));
-      last_sent_message_time = current_time;
-      messages_sent = 0;
-    }
-  #endif
+    DEBUG_TIME_SPENT("after communication: ");
+  }
 
   parse_motor_command();
 
   DEBUG_TIME_SPENT("after command parsing: ");
 
-  digitalWrite(SWITCH_LED_PIN, switch_value);
+  digitalWrite(MAIN_SWITCH_LED_PIN, main_switch.state);
   digitalWrite(MODULE_LED_PIN, module_value);
-  digitalWrite(MODULE_SWITCH_LED_PIN, !use_bluetooth_module);
+  digitalWrite(MODULE_SWITCH_LED_PIN, !module_switch.state);
 
-  run = (switch_value && module_value);
-  digitalWrite(LED_BUILTIN, run);
+  update_running_state();
+  digitalWrite(LED_BUILTIN, is_running);
   
   DEBUG_TIME_SPENT("after LED updates: ");
 
-  if (run) {
+  if (is_running) {
     set_all_motors_speed(motors_data.motor_speed);
     set_kicker_position(motors_data.kicker_position);
     DEBUG_PRINT(">>> RUNNING");
@@ -694,15 +744,39 @@ void loop() {
 
 #if DEBUG_PRINTS_ENABLED
   DEBUG_PRINT(" | SW=");
-  DEBUG_PRINT(switch_value);
+  DEBUG_PRINT(main_switch.state);
   DEBUG_PRINT(" BT_SW=");
-  DEBUG_PRINT(use_bluetooth_module);
+  DEBUG_PRINT(module_switch.state);
   DEBUG_PRINT(" BT=");
   DEBUG_PRINT(module_value);
   DEBUG_PRINTLN();
 
   print_sensor_debug_info();
 #endif
+}
 
-  //delay(1);
+void fastest_loop() {
+  read_line_sensors();
+#if DEBUG_LOGS_ENABLED
+  line_sensor_readings++;
+#endif
+}
+
+
+void loop() {
+  DEBUG_TIME_SPENT("=== Loop start === ");
+
+  unsigned long current_time = micros();
+
+  fastest_loop();
+
+  DEBUG_TIME_SPENT("after fastest loop: ");
+
+  static unsigned long last_sensor_data_send_time = 0;
+  if (current_time - last_sensor_data_send_time >= INTERVAL_US) {
+    last_sensor_data_send_time = current_time;
+    target_ups_loop();
+  }
+
+  DEBUG_TIME_SPENT("after target UPS loop: ");
 }
