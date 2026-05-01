@@ -163,8 +163,9 @@ lnx-infrabot/
 ### Teensy Setup
 
 1. Open `teensy/teensy.ino` in Arduino IDE
-2. Select Board: **Teensy 4.1**
-3. Upload the sketch to your Teensy board
+2. Install library dependency: **teensy4_i2c** by Richard Gemmell
+3. Select Board: **Teensy 4.1**
+4. Upload the sketch to your Teensy board
 
 ---
 
@@ -203,4 +204,3 @@ LNX-InfraBot is designed for the **RoboCup Junior Soccer - Infrared (IR) League*
 ## License
 
 See [LICENSE](LICENSE)
-

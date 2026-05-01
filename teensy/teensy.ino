@@ -1,6 +1,5 @@
-#include <Adafruit_BNO055.h>
-#include <Adafruit_Sensor.h>
-#include <Wire.h>
+#include <i2c_driver.h>
+#include "imx_rt1060/imx_rt1060_i2c_driver.h"
 #include <math.h>
 #include <string.h>
 
@@ -113,10 +112,16 @@ char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
   static unsigned long last_timing_print = 0;
   static unsigned long last_line_reading_time = 0;
   static unsigned long last_message_send_time = 0;
+  static unsigned long last_compass_read_time = 0;
+  static unsigned long last_ir_read_time = 0;
   static unsigned long min_interval_line_readings = 0;
   static unsigned long max_interval_line_readings = 0;
   static unsigned long min_interval_message_sends = 0;
   static unsigned long max_interval_message_sends = 0;
+  static unsigned long min_interval_compass_reads = 0;
+  static unsigned long max_interval_compass_reads = 0;
+  static unsigned long min_interval_ir_reads = 0;
+  static unsigned long max_interval_ir_reads = 0;
 
   int get_or_create_profiling_point(const char* name) {
     for (int i = 0; i < profiling_data.count; i++) {
@@ -173,6 +178,34 @@ char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
       }
     }
     last_message_send_time = now;
+  }
+
+  inline void DEBUG_TIME_MARK_COMPASS_READ() {
+    unsigned long now = micros();
+    if (last_compass_read_time > 0) {
+      unsigned long interval = now - last_compass_read_time;
+      if (interval < min_interval_compass_reads) {
+        min_interval_compass_reads = interval;
+      }
+      if (interval > max_interval_compass_reads) {
+        max_interval_compass_reads = interval;
+      }
+    }
+    last_compass_read_time = now;
+  }
+
+  inline void DEBUG_TIME_MARK_IR_READ() {
+    unsigned long now = micros();
+    if (last_ir_read_time > 0) {
+      unsigned long interval = now - last_ir_read_time;
+      if (interval < min_interval_ir_reads) {
+        min_interval_ir_reads = interval;
+      }
+      if (interval > max_interval_ir_reads) {
+        max_interval_ir_reads = interval;
+      }
+    }
+    last_ir_read_time = now;
   }
 
   void DEBUG_TIME_PRINT_IF_READY() {
@@ -268,6 +301,42 @@ char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
       DEBUG_SERIAL.print(msg_interval_max);
       DEBUG_SERIAL.println(" │           │");
       
+      DEBUG_SERIAL.print("│ Max interval (compass)│         │ ");
+      unsigned long compass_interval_min = min_interval_compass_reads;
+      if (compass_interval_min < 10) DEBUG_SERIAL.print("      ");
+      else if (compass_interval_min < 100) DEBUG_SERIAL.print("     ");
+      else if (compass_interval_min < 1000) DEBUG_SERIAL.print("    ");
+      else if (compass_interval_min < 10000) DEBUG_SERIAL.print("   ");
+      else if (compass_interval_min < 100000) DEBUG_SERIAL.print("  ");
+      DEBUG_SERIAL.print(compass_interval_min);
+      DEBUG_SERIAL.print(" │ ");
+      unsigned long compass_interval_max = max_interval_compass_reads;
+      if (compass_interval_max < 10) DEBUG_SERIAL.print("      ");
+      else if (compass_interval_max < 100) DEBUG_SERIAL.print("     ");
+      else if (compass_interval_max < 1000) DEBUG_SERIAL.print("    ");
+      else if (compass_interval_max < 10000) DEBUG_SERIAL.print("   ");
+      else if (compass_interval_max < 100000) DEBUG_SERIAL.print("  ");
+      DEBUG_SERIAL.print(compass_interval_max);
+      DEBUG_SERIAL.println(" │           │");
+      
+      DEBUG_SERIAL.print("│ Max interval (IR)     │         │ ");
+      unsigned long ir_interval_min = min_interval_ir_reads;
+      if (ir_interval_min < 10) DEBUG_SERIAL.print("      ");
+      else if (ir_interval_min < 100) DEBUG_SERIAL.print("     ");
+      else if (ir_interval_min < 1000) DEBUG_SERIAL.print("    ");
+      else if (ir_interval_min < 10000) DEBUG_SERIAL.print("   ");
+      else if (ir_interval_min < 100000) DEBUG_SERIAL.print("  ");
+      DEBUG_SERIAL.print(ir_interval_min);
+      DEBUG_SERIAL.print(" │ ");
+      unsigned long ir_interval_max = max_interval_ir_reads;
+      if (ir_interval_max < 10) DEBUG_SERIAL.print("      ");
+      else if (ir_interval_max < 100) DEBUG_SERIAL.print("     ");
+      else if (ir_interval_max < 1000) DEBUG_SERIAL.print("    ");
+      else if (ir_interval_max < 10000) DEBUG_SERIAL.print("   ");
+      else if (ir_interval_max < 100000) DEBUG_SERIAL.print("  ");
+      DEBUG_SERIAL.print(ir_interval_max);
+      DEBUG_SERIAL.println(" │           │");
+      
       DEBUG_SERIAL.println("└───────────────────────┴─────────┴─────────┴─────────┴───────────┘");
       
       for (int i = 0; i < profiling_data.count; i++) {
@@ -275,6 +344,8 @@ char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
       }
       max_interval_line_readings = 0;
       max_interval_message_sends = 0;
+      max_interval_compass_reads = 0;
+      max_interval_ir_reads = 0;
     }
   }
 #else
@@ -283,6 +354,8 @@ char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
   inline void DEBUG_TIME_RECORD(unsigned long, const char*) {}
   inline void DEBUG_TIME_MARK_LINE_READING() {}
   inline void DEBUG_TIME_MARK_MESSAGE_SEND() {}
+  inline void DEBUG_TIME_MARK_COMPASS_READ() {}
+  inline void DEBUG_TIME_MARK_IR_READ() {}
   void DEBUG_TIME_PRINT_IF_READY() {}
 #endif
 
@@ -313,14 +386,26 @@ MotorsData motors_data = { { 0, 0, 0, 0 }, KICKER_IN };
 
 
 // ========== BNO055 Compass Sensor ==========
-#define BNO055_SENSOR_ID 55
-Adafruit_BNO055 bno = Adafruit_BNO055(BNO055_SENSOR_ID);
+#define BNO055_I2C_ADDRESS 0x28
+#define BNO055_CHIP_ID 0xA0
+#define BNO055_CHIP_ID_ADDR 0x00
+#define BNO055_EULER_H_LSB_ADDR 0x1A
+#define BNO055_OPR_MODE_ADDR 0x3D
+#define BNO055_PWR_MODE_ADDR 0x3E
+#define BNO055_SYS_TRIGGER_ADDR 0x3F
+#define BNO055_PAGE_ID_ADDR 0x07
+#define BNO055_OPR_MODE_CONFIG 0x00
+#define BNO055_OPR_MODE_NDOF 0x08
+#define BNO055_POWER_MODE_NORMAL 0x00
+
+I2CMaster& i2c_master = Master;
 bool bno_initialized = false;
+unsigned long bno_next_retry_at_ms = 0;
 
 struct CompassData {
-  float heading;  // 0-360 degrees
-  float pitch;    // -180 to +180 degrees
-  float roll;     // -180 to +180 degrees
+  float heading;
+  float pitch;
+  float roll;
 };
 CompassData compass_data = { 0.0, 0.0, 0.0 };
 
@@ -340,9 +425,63 @@ struct IRData {
   uint16_t angle;
   uint16_t distance;
   uint8_t sensor_IR[IR_SENSOR_COUNT];
-  uint8_t status;
 };
-IRData ir_data = { IR_NO_SIGNAL, 0, { 0 }, 0 };
+IRData ir_data = { IR_NO_SIGNAL, 0, { 0 } };
+
+
+// ========== I2C State Machine ==========
+#define I2C_ASYNC_TIMEOUT_MS 10
+#define I2C_BNO_RETRY_DEBOUNCE_MS 500
+#define I2C_BNO_RESET_DELAY_MS 700
+#define I2C_BNO_MODE_SWITCH_DELAY_MS 30
+
+enum AsyncI2CState {
+  I2C_STATE_WAIT_FOR_REQUEST = 0,
+  I2C_STATE_BNO_CHECK_ID_SET_REGISTER,
+  I2C_STATE_BNO_CHECK_ID_READ,
+  I2C_STATE_BNO_SET_CONFIG_MODE,
+  I2C_STATE_BNO_RESET,
+  I2C_STATE_BNO_WAIT_AFTER_RESET,
+  I2C_STATE_BNO_WAIT_ID_SET_REGISTER,
+  I2C_STATE_BNO_WAIT_ID_READ,
+  I2C_STATE_BNO_SET_POWER_MODE,
+  I2C_STATE_BNO_SET_PAGE,
+  I2C_STATE_BNO_SET_SYS_TRIGGER,
+  I2C_STATE_BNO_SET_IMUPLUS_MODE,
+  I2C_STATE_BNO_WAIT_AFTER_OP_MODE,
+  I2C_STATE_IR_SET_ANGLE_REGISTER,
+  I2C_STATE_IR_READ_ANGLE,
+  I2C_STATE_IR_SET_RAW_REGISTER,
+  I2C_STATE_IR_READ_RAW,
+  I2C_STATE_BNO_SET_EULER_REGISTER,
+  I2C_STATE_BNO_READ_EULER
+};
+
+enum AsyncI2CReadKind {
+  I2C_READ_NONE = 0,
+  I2C_READ_BNO_ID,
+  I2C_READ_IR_ANGLE_DISTANCE,
+  I2C_READ_IR_RAW,
+  I2C_READ_BNO_EULER
+};
+
+AsyncI2CState i2c_state = I2C_STATE_BNO_CHECK_ID_SET_REGISTER;
+AsyncI2CState i2c_next_state = I2C_STATE_BNO_CHECK_ID_SET_REGISTER;
+AsyncI2CReadKind i2c_read_kind = I2C_READ_NONE;
+bool i2c_op_in_progress = false;
+unsigned long i2c_op_started_at_ms = 0;
+unsigned long i2c_state_started_at_ms = 0;
+uint8_t i2c_tx_byte = 0;
+uint8_t i2c_tx_buffer[2] = { 0, 0 };
+uint8_t bno_chip_id_buffer[1] = { 0 };
+uint8_t bno_euler_buffer[6] = { 0 };
+uint8_t ir_angle_distance_buffer[IR_ANGLE_AND_DISTANCE_BYTES_COUNT] = { 0 };
+uint8_t ir_raw_buffer[IR_RAW_BYTES_COUNT] = { 0 };
+
+bool compass_read_requested = false;
+bool ir_read_requested = false;
+bool ir_read_completed = false;
+bool compass_read_completed = false;
 
 
 // ========== Line Sensors ==========
@@ -437,8 +576,7 @@ void print_sensor_debug_info() {
     DEBUG_PRINT(sensor_data.ir_data.sensor_IR[i]);
     DEBUG_PRINT(" ");
   }
-  DEBUG_PRINT("| Status=");
-  DEBUG_PRINTLN(sensor_data.ir_data.status);
+  DEBUG_PRINTLN();
 
   // Line sensors
   DEBUG_PRINT("Line: Value: ");
@@ -491,103 +629,333 @@ void stop_motors() {
 }
 
 // ========== Sensor Reading Functions ==========
-bool bno_initialize() {
-  if (bno.begin(OPERATION_MODE_IMUPLUS)) {
-    DEBUG_LOG(DEBUG_INFO, "BNO055 initialized successfully");
-    bno_initialized = true;
-    bno.setExtCrystalUse(true);
-    return true;
-  } else {
-    DEBUG_LOG(DEBUG_WARN, "BNO055 not found");
+inline void set_compass_invalid() {
+  if (bno_initialized) {
+    bno_next_retry_at_ms = millis() + (
+      i2c_state == I2C_STATE_BNO_SET_EULER_REGISTER ||
+      i2c_state == I2C_STATE_BNO_READ_EULER
+      ? I2C_BNO_RETRY_DEBOUNCE_MS
+      : 0
+    );
     bno_initialized = false;
-    return false;
   }
+
+  compass_data.heading = 999;
+  compass_data.pitch = 999;
+  compass_data.roll = 999;
 }
 
-void read_compass() {
-#if DEBUG_PROFILING_ENABLED
-  unsigned long compass_start = 0;
-  DEBUG_TIME_START(compass_start);
-#endif
-
-  if (!bno_initialized) {
-    compass_data.heading = 999;
-    compass_data.pitch = 999;
-    compass_data.roll = 999;
-    bno_initialize();
-    return;
-  }
-
-  sensors_event_t event;
-  bno.getEvent(&event);
-
-  compass_data.heading = fmod(event.orientation.x + 360.0, 360.0);
-  compass_data.pitch = event.orientation.y;
-  compass_data.roll = event.orientation.z;
-
-  if (compass_data.heading == 0 && compass_data.pitch == 0 && compass_data.roll == 0) {
-    uint8_t system_status, self_test_result, system_error;
-    bno.getSystemStatus(&system_status, &self_test_result, &system_error);
-
-    if (system_error != 0) {
-      DEBUG_LOG(DEBUG_ERROR, "BNO055 error detected during read: " + String(system_error));
-      bno_initialized = false;
-      compass_data.heading = 999;
-      compass_data.pitch = 999;
-      compass_data.roll = 999;
-    }
-  }
-
-#if DEBUG_PROFILING_ENABLED
-  DEBUG_TIME_RECORD(compass_start, "Compass Read");
-#endif
-}
-
-void read_ir_sensor() {
-#if DEBUG_PROFILING_ENABLED
-  unsigned long ir_start = 0;
-  DEBUG_TIME_START(ir_start);
-#endif
-
-  Wire.beginTransmission(IR_I2C_ADDRESS);
-  Wire.write(IR_ANGLE_AND_DISTANCE_REGISTER);
-  if (Wire.endTransmission() != 0) {
-    DEBUG_LOG(DEBUG_ERROR, "IR sensor communication error");
-    ir_data.angle = IR_NO_SIGNAL;
-    ir_data.distance = 0;
-    return;
-  }
-
-  Wire.requestFrom(IR_I2C_ADDRESS, IR_ANGLE_AND_DISTANCE_BYTES_COUNT);
-  if (Wire.available() >= IR_ANGLE_AND_DISTANCE_BYTES_COUNT) {
-    uint16_t angle = (Wire.read() << 8) | Wire.read();
-    uint16_t distance = (Wire.read() << 8) | Wire.read();
-
-    if (angle == IR_NO_SIGNAL_ANGLE && distance == IR_NO_SIGNAL_DISTANCE) {
-      ir_data.angle = IR_NO_SIGNAL;
-      ir_data.distance = 0;
-    } else {
-      ir_data.angle = angle;
-      ir_data.distance = distance;
-    }
-  } else {
-    ir_data.angle = IR_NO_SIGNAL;
-    ir_data.distance = 0;
-  }
-
-  Wire.beginTransmission(IR_I2C_ADDRESS);
-  Wire.write(IR_RAW_REGISTER);
-  Wire.endTransmission();
-  Wire.requestFrom(IR_I2C_ADDRESS, IR_RAW_BYTES_COUNT);
-
+inline void set_ir_no_signal_data() {
+  ir_data.angle = IR_NO_SIGNAL;
+  ir_data.distance = 0;
   for (int i = 0; i < IR_SENSOR_COUNT; i++) {
-    ir_data.sensor_IR[i] = Wire.available() ? Wire.read() : 0;
+    ir_data.sensor_IR[i] = 0;
   }
+}
 
-  ir_data.status = Wire.available() ? Wire.read() : 0;
+inline void reset_i2c_state_machine() {
+  DEBUG_LOG(DEBUG_INFO, "Resetting State Machine");
+  i2c_op_in_progress = false;
+  i2c_read_kind = I2C_READ_NONE;
+  i2c_state = I2C_STATE_WAIT_FOR_REQUEST;
+  i2c_next_state = I2C_STATE_WAIT_FOR_REQUEST;
+  i2c_state_started_at_ms = 0;
+  // i2c_master.end();
+  // delayMicroseconds(100);
+  // i2c_master.begin(100000);
+}
+
+inline bool is_bno_state(int state) {
+  return state == (int)I2C_STATE_BNO_CHECK_ID_SET_REGISTER ||
+         state == (int)I2C_STATE_BNO_CHECK_ID_READ ||
+         state == (int)I2C_STATE_BNO_SET_CONFIG_MODE ||
+         state == (int)I2C_STATE_BNO_RESET ||
+         state == (int)I2C_STATE_BNO_WAIT_AFTER_RESET ||
+         state == (int)I2C_STATE_BNO_WAIT_ID_SET_REGISTER ||
+         state == (int)I2C_STATE_BNO_WAIT_ID_READ ||
+         state == (int)I2C_STATE_BNO_SET_POWER_MODE ||
+         state == (int)I2C_STATE_BNO_SET_PAGE ||
+         state == (int)I2C_STATE_BNO_SET_SYS_TRIGGER ||
+         state == (int)I2C_STATE_BNO_SET_IMUPLUS_MODE ||
+         state == (int)I2C_STATE_BNO_WAIT_AFTER_OP_MODE ||
+         state == (int)I2C_STATE_BNO_SET_EULER_REGISTER ||
+         state == (int)I2C_STATE_BNO_READ_EULER;
+}
+
+inline void start_i2c_write(uint8_t address, const uint8_t* buffer, size_t length, bool send_stop, int next_state) {
+  i2c_master.write_async(address, buffer, length, send_stop);
+  i2c_op_in_progress = true;
+  i2c_read_kind = I2C_READ_NONE;
+  i2c_next_state = (AsyncI2CState)next_state;
+  i2c_op_started_at_ms = millis();
+}
+
+inline void start_i2c_read(uint8_t address, uint8_t* buffer, size_t length, bool send_stop, int read_kind, int next_state) {
+  i2c_master.read_async(address, buffer, length, send_stop);
+  i2c_op_in_progress = true;
+  i2c_read_kind = (AsyncI2CReadKind)read_kind;
+  i2c_next_state = (AsyncI2CState)next_state;
+  i2c_op_started_at_ms = millis();
+}
+
+inline void request_ir_compass_read() {
+  compass_read_requested = true;
+  ir_read_requested = true;
+  ir_read_completed = false;
+  compass_read_completed = false;
+}
+
+inline bool are_ir_compass_reads_completed() {
+  return ir_read_completed && compass_read_completed;
+}
+
+void process_i2c_async() {
+#if DEBUG_PROFILING_ENABLED
+  unsigned long i2c_start = 0;
+  DEBUG_TIME_START(i2c_start);
+#endif
+
+  if (i2c_op_in_progress) {
+    if (!i2c_master.finished()) {
+      if (millis() - i2c_op_started_at_ms > I2C_ASYNC_TIMEOUT_MS) {
+        DEBUG_LOG(DEBUG_ERROR, "Async I2C transaction timeout, read_kind=" + String(i2c_read_kind) + " i2c_state=" + String(i2c_state) + " is_bno=" + String(is_bno_state(i2c_state)));
+        if (is_bno_state(i2c_state)) {
+          set_compass_invalid();
+        } else {
+          set_ir_no_signal_data();
+        }
+        reset_i2c_state_machine();
+      }
+#if DEBUG_PROFILING_ENABLED
+      DEBUG_TIME_RECORD(i2c_start, "I2C Async");
+#endif
+      return;
+    }
+
+    i2c_op_in_progress = false;
+
+    if (i2c_master.has_error()) {
+      DEBUG_LOG(DEBUG_ERROR, "Async I2C transaction failed, code=" + String((int)i2c_master.error()) + " read_kind=" + String(i2c_read_kind) + " i2c_state=" + String(i2c_state) + " is_bno=" + String(is_bno_state(i2c_state)));
+      if (is_bno_state(i2c_state) || i2c_read_kind == I2C_READ_BNO_ID || i2c_read_kind == I2C_READ_BNO_EULER) {
+        set_compass_invalid();
+      } else {
+        set_ir_no_signal_data();
+      }
+      reset_i2c_state_machine();
+#if DEBUG_PROFILING_ENABLED
+      DEBUG_TIME_RECORD(i2c_start, "I2C Async");
+#endif
+      return;
+    }
+
+    if (i2c_read_kind == I2C_READ_BNO_ID) {
+      if (bno_chip_id_buffer[0] != BNO055_CHIP_ID) {
+        set_compass_invalid();
+        i2c_state = I2C_STATE_WAIT_FOR_REQUEST;
+        i2c_read_kind = I2C_READ_NONE;
+#if DEBUG_PROFILING_ENABLED
+        DEBUG_TIME_RECORD(i2c_start, "I2C Async");
+#endif
+        return;
+      }
+    } else if (i2c_read_kind == I2C_READ_IR_ANGLE_DISTANCE) {
+      uint16_t angle = ((uint16_t)ir_angle_distance_buffer[0] << 8) | ir_angle_distance_buffer[1];
+      uint16_t distance = ((uint16_t)ir_angle_distance_buffer[2] << 8) | ir_angle_distance_buffer[3];
+      if (angle == IR_NO_SIGNAL_ANGLE && distance == IR_NO_SIGNAL_DISTANCE) {
+        ir_data.angle = IR_NO_SIGNAL;
+        ir_data.distance = 0;
+      } else {
+        ir_data.angle = angle;
+        ir_data.distance = distance;
+      }
+      DEBUG_LOG(DEBUG_INFO, "Recieved valid ir angle data");
+    } else if (i2c_read_kind == I2C_READ_IR_RAW) {
+      for (int i = 0; i < IR_SENSOR_COUNT; i++) {
+        ir_data.sensor_IR[i] = ir_raw_buffer[i];
+      }
+#if DEBUG_PROFILING_ENABLED
+      DEBUG_TIME_MARK_IR_READ();
+#endif
+      DEBUG_LOG(DEBUG_INFO, "Recieved valid ir raw data");
+    } else if (i2c_read_kind == I2C_READ_BNO_EULER) {
+      int16_t heading_raw = ((int16_t)bno_euler_buffer[1] << 8) | bno_euler_buffer[0];
+      int16_t pitch_raw = ((int16_t)bno_euler_buffer[3] << 8) | bno_euler_buffer[2];
+      int16_t roll_raw = ((int16_t)bno_euler_buffer[5] << 8) | bno_euler_buffer[4];
+
+      compass_data.heading = fmod(((float)heading_raw / 16.0f) + 360.0f, 360.0f);
+      compass_data.pitch = ((float)pitch_raw / 16.0f);
+      compass_data.roll = ((float)roll_raw / 16.0f);
+
+      bno_initialized = true;
 
 #if DEBUG_PROFILING_ENABLED
-  DEBUG_TIME_RECORD(ir_start, "IR Sensor Read");
+      DEBUG_TIME_MARK_COMPASS_READ();
+#endif
+      DEBUG_LOG(DEBUG_INFO, "Recieved valid compass data: " + String(compass_data.heading));
+    }
+
+    i2c_read_kind = I2C_READ_NONE;
+    i2c_state = i2c_next_state;
+  }
+
+  switch (i2c_state) {
+    case I2C_STATE_WAIT_FOR_REQUEST:
+      if (ir_read_requested) {
+        i2c_state = I2C_STATE_IR_SET_ANGLE_REGISTER;
+        ir_read_requested = false;
+        break;
+      } else {
+        ir_read_completed = true;
+      }
+
+      if (compass_read_requested) {
+        i2c_state = I2C_STATE_BNO_SET_EULER_REGISTER;
+        compass_read_requested = false;
+      } else {
+        compass_read_completed = true;
+      }
+      
+      if (!bno_initialized && millis() >= bno_next_retry_at_ms) {
+        i2c_state = I2C_STATE_BNO_CHECK_ID_SET_REGISTER;
+        break;
+      }
+
+      break;
+
+    case I2C_STATE_BNO_CHECK_ID_SET_REGISTER:
+      DEBUG_LOG(DEBUG_INFO, "Initializing BNO");
+      i2c_tx_byte = BNO055_CHIP_ID_ADDR;
+      start_i2c_write(BNO055_I2C_ADDRESS, &i2c_tx_byte, 1, true, I2C_STATE_BNO_CHECK_ID_READ);
+      break;
+
+    case I2C_STATE_BNO_CHECK_ID_READ:
+      start_i2c_read(BNO055_I2C_ADDRESS, bno_chip_id_buffer, sizeof(bno_chip_id_buffer), true, I2C_READ_BNO_ID, I2C_STATE_BNO_SET_CONFIG_MODE);
+      break;
+
+    case I2C_STATE_BNO_SET_CONFIG_MODE: {
+      i2c_tx_buffer[0] = BNO055_OPR_MODE_ADDR;
+      i2c_tx_buffer[1] = BNO055_OPR_MODE_CONFIG;
+      start_i2c_write(BNO055_I2C_ADDRESS, i2c_tx_buffer, sizeof(i2c_tx_buffer), true, I2C_STATE_BNO_RESET);
+      break;
+    }
+
+    case I2C_STATE_BNO_RESET: {
+      i2c_tx_buffer[0] = BNO055_SYS_TRIGGER_ADDR;
+      i2c_tx_buffer[1] = 0x20;
+      start_i2c_write(BNO055_I2C_ADDRESS, i2c_tx_buffer, sizeof(i2c_tx_buffer), true, I2C_STATE_BNO_WAIT_AFTER_RESET);
+      i2c_state_started_at_ms = millis();
+      break;
+    }
+
+    case I2C_STATE_BNO_WAIT_AFTER_RESET:
+      if (i2c_state_started_at_ms == 0) {
+        i2c_state_started_at_ms = millis();
+      }
+      if (millis() - i2c_state_started_at_ms >= I2C_BNO_RESET_DELAY_MS) {
+        i2c_state = I2C_STATE_BNO_WAIT_ID_SET_REGISTER;
+        i2c_state_started_at_ms = 0;
+      }
+      break;
+
+    case I2C_STATE_BNO_WAIT_ID_SET_REGISTER:
+      i2c_tx_byte = BNO055_CHIP_ID_ADDR;
+      start_i2c_write(BNO055_I2C_ADDRESS, &i2c_tx_byte, 1, true, I2C_STATE_BNO_WAIT_ID_READ);
+      break;
+
+    case I2C_STATE_BNO_WAIT_ID_READ:
+      start_i2c_read(BNO055_I2C_ADDRESS, bno_chip_id_buffer, sizeof(bno_chip_id_buffer), true, I2C_READ_BNO_ID, I2C_STATE_BNO_SET_POWER_MODE);
+      break;
+
+    case I2C_STATE_BNO_SET_POWER_MODE: {
+      i2c_tx_buffer[0] = BNO055_PWR_MODE_ADDR;
+      i2c_tx_buffer[1] = BNO055_POWER_MODE_NORMAL;
+      start_i2c_write(BNO055_I2C_ADDRESS, i2c_tx_buffer, sizeof(i2c_tx_buffer), true, I2C_STATE_BNO_SET_PAGE);
+      break;
+    }
+
+    case I2C_STATE_BNO_SET_PAGE: {
+      i2c_tx_buffer[0] = BNO055_PAGE_ID_ADDR;
+      i2c_tx_buffer[1] = 0x00;
+      start_i2c_write(BNO055_I2C_ADDRESS, i2c_tx_buffer, sizeof(i2c_tx_buffer), true, I2C_STATE_BNO_SET_SYS_TRIGGER);
+      break;
+    }
+
+    case I2C_STATE_BNO_SET_SYS_TRIGGER: {
+      i2c_tx_buffer[0] = BNO055_SYS_TRIGGER_ADDR;
+      i2c_tx_buffer[1] = 0x00;
+      start_i2c_write(BNO055_I2C_ADDRESS, i2c_tx_buffer, sizeof(i2c_tx_buffer), true, I2C_STATE_BNO_SET_IMUPLUS_MODE);
+      break;
+    }
+
+    case I2C_STATE_BNO_SET_IMUPLUS_MODE: {
+      i2c_tx_buffer[0] = BNO055_OPR_MODE_ADDR;
+      i2c_tx_buffer[1] = BNO055_OPR_MODE_NDOF;
+      start_i2c_write(BNO055_I2C_ADDRESS, i2c_tx_buffer, sizeof(i2c_tx_buffer), true, I2C_STATE_BNO_WAIT_AFTER_OP_MODE);
+      i2c_state_started_at_ms = millis();
+      break;
+    }
+
+    case I2C_STATE_BNO_WAIT_AFTER_OP_MODE:
+      if (i2c_state_started_at_ms == 0) {
+        i2c_state_started_at_ms = millis();
+      }
+      if (millis() - i2c_state_started_at_ms >= I2C_BNO_MODE_SWITCH_DELAY_MS) {
+        i2c_state = I2C_STATE_WAIT_FOR_REQUEST;
+        i2c_state_started_at_ms = 0;
+        bno_initialized = true;
+      }
+      break;
+
+    case I2C_STATE_IR_SET_ANGLE_REGISTER:
+      i2c_tx_byte = IR_ANGLE_AND_DISTANCE_REGISTER;
+      start_i2c_write(IR_I2C_ADDRESS, &i2c_tx_byte, 1, true, I2C_STATE_IR_READ_ANGLE);
+      break;
+
+    case I2C_STATE_IR_READ_ANGLE:
+      start_i2c_read(IR_I2C_ADDRESS, ir_angle_distance_buffer, sizeof(ir_angle_distance_buffer), true, I2C_READ_IR_ANGLE_DISTANCE, I2C_STATE_IR_SET_RAW_REGISTER);
+      break;
+
+    case I2C_STATE_IR_SET_RAW_REGISTER:
+      i2c_tx_byte = IR_RAW_REGISTER;
+      start_i2c_write(IR_I2C_ADDRESS, &i2c_tx_byte, 1, true, I2C_STATE_IR_READ_RAW);
+      break;
+
+    case I2C_STATE_IR_READ_RAW:
+      start_i2c_read(
+        IR_I2C_ADDRESS,
+        ir_raw_buffer,
+        sizeof(ir_raw_buffer),
+        true,
+        I2C_READ_IR_RAW,
+        I2C_STATE_WAIT_FOR_REQUEST
+      );
+      if (ir_read_requested) {
+        ir_read_requested = false;
+      }
+      break;
+
+    case I2C_STATE_BNO_SET_EULER_REGISTER:
+      i2c_tx_byte = BNO055_EULER_H_LSB_ADDR;
+      start_i2c_write(BNO055_I2C_ADDRESS, &i2c_tx_byte, 1, true, I2C_STATE_BNO_READ_EULER);
+      break;
+
+    case I2C_STATE_BNO_READ_EULER:
+      start_i2c_read(
+        BNO055_I2C_ADDRESS,
+        bno_euler_buffer,
+        sizeof(bno_euler_buffer),
+        true,
+        I2C_READ_BNO_EULER,
+        I2C_STATE_WAIT_FOR_REQUEST
+      );
+      if (compass_read_requested) {
+        compass_read_requested = false;
+      }
+      break;
+  }
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(i2c_start, "I2C Async");
 #endif
 }
 
@@ -869,12 +1237,12 @@ void setup() {
   stop_motors();
   DEBUG_PRINTLN("Motors initialized");
 
-  bno_initialize();
-
-  Wire.begin();
-  DEBUG_PRINTLN("IR sensor initialized (MRM-IR-Finder3)");
-  Wire.setClock(400000);
-  DEBUG_PRINTLN("I2C initialized (400 kHz)");
+  i2c_master.begin(100000);
+  reset_i2c_state_machine();
+  compass_data.heading = 0;
+  compass_data.pitch = 0;
+  compass_data.roll = 0;
+  DEBUG_PRINTLN("Async I2C initialized (100 kHz)");
 
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     pinMode(line_sensors_pin_config[i], INPUT);
@@ -926,8 +1294,12 @@ void target_ups_loop() {
 #endif
   
   if (can_send_message_to_rpi(SENSOR_DATA_MESSAGE_LENGTH)) {
-    read_ir_sensor();
-    read_compass();
+    request_ir_compass_read();
+
+    while (!are_ir_compass_reads_completed()) {
+      fastest_loop();
+    }
+    
     update_sensor_data_struct();
     build_sensor_message(message_buffer);
     reset_line_min_max_values();
@@ -935,9 +1307,6 @@ void target_ups_loop() {
     send_message_to_rpi(message_buffer);
 #if DEBUG_PROFILING_ENABLED
     DEBUG_TIME_MARK_MESSAGE_SEND();
-#endif
-#if DEBUG_LOGS_ENABLED
-    messages_sent++;
 #endif
   }
 
@@ -1004,6 +1373,7 @@ void fastest_loop() {
   DEBUG_TIME_START(fastest_start);
 #endif
 
+  process_i2c_async();
   read_line_sensors();
 
 #if DEBUG_PROFILING_ENABLED
