@@ -543,7 +543,6 @@ void read_compass() {
 #endif
 }
 
-
 void read_ir_sensor() {
 #if DEBUG_PROFILING_ENABLED
   unsigned long ir_start = 0;
@@ -889,9 +888,6 @@ void setup() {
 }
 
 
-int messages_sent = 0;
-int line_sensor_readings = 0;
-
 void target_ups_loop() {
 #if DEBUG_PROFILING_ENABLED
   unsigned long loop_start = 0;
@@ -922,18 +918,6 @@ void target_ups_loop() {
 
 #if DEBUG_PROFILING_ENABLED
   DEBUG_TIME_RECORD(section_start, "Button Checks");
-#endif
-
-#if DEBUG_LOGS_ENABLED
-  static unsigned long last_sent_message_time = 0;
-  unsigned long current_time = millis();
-  if (current_time - last_sent_message_time >= 1000) {
-    DEBUG_LOG(DEBUG_INFO, "MSGs/s: " + String(messages_sent));
-    DEBUG_LOG(DEBUG_INFO, "Line sensor reads: " + String(line_sensor_readings));
-    last_sent_message_time = current_time;
-    messages_sent = 0;
-    line_sensor_readings = 0;
-  }
 #endif
 
   // Sensor reading and communication
@@ -1021,9 +1005,6 @@ void fastest_loop() {
 #endif
 
   read_line_sensors();
-#if DEBUG_LOGS_ENABLED
-  line_sensor_readings++;
-#endif
 
 #if DEBUG_PROFILING_ENABLED
   DEBUG_TIME_RECORD(fastest_start, "Fastest Loop");
