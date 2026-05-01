@@ -2,6 +2,7 @@
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 #include <math.h>
+#include <string.h>
 
 
 // ================================================
@@ -53,8 +54,9 @@ char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
 
 
 #define DEBUG_PRINTS_ENABLED false
-#define DEBUG_LOGS_ENABLED true
-#define DEBUG_PERFORMANCE_ENABLED false
+#define DEBUG_LOGS_ENABLED false
+#define DEBUG_PROFILING_ENABLED true
+#define DEBUG_PROFILING_PRINT_INTERVAL_S 1
 #define DEBUG_SERIAL Serial
 #define DEBUG_SERIAL_SPEED 38400
 
@@ -92,16 +94,196 @@ char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
   template<typename T> inline void DEBUG_LOG(DebugLevel, const T&) {}
 #endif
 
-#if DEBUG_PERFORMANCE_ENABLED
-  inline void DEBUG_TIME_SPENT(String label = "") {
-    static unsigned long last_time = 0;
-    unsigned long current_time = micros();
-    unsigned long time_diff = current_time - last_time;
-    DEBUG_SERIAL.println(label + String(time_diff) + " us");
-    last_time = current_time;
+#if DEBUG_PROFILING_ENABLED
+  struct TimingStat {
+    unsigned long sum = 0;
+    unsigned long min_val = UINT32_MAX;
+    unsigned long max_val = 0;
+    unsigned long count = 0;
+  };
+
+  const int MAX_PROFILING_POINTS = 20;
+  struct ProfilingData {
+    const char* names[MAX_PROFILING_POINTS];
+    TimingStat stats[MAX_PROFILING_POINTS];
+    int count = 0;
+  };
+  
+  ProfilingData profiling_data;
+  static unsigned long last_timing_print = 0;
+  static unsigned long last_line_reading_time = 0;
+  static unsigned long last_message_send_time = 0;
+  static unsigned long min_interval_line_readings = 0;
+  static unsigned long max_interval_line_readings = 0;
+  static unsigned long min_interval_message_sends = 0;
+  static unsigned long max_interval_message_sends = 0;
+
+  int get_or_create_profiling_point(const char* name) {
+    for (int i = 0; i < profiling_data.count; i++) {
+      if (profiling_data.names[i] == name) {
+        return i;
+      }
+    }
+    if (profiling_data.count < MAX_PROFILING_POINTS) {
+      profiling_data.names[profiling_data.count] = name;
+      return profiling_data.count++;
+    }
+    return -1;
+  }
+
+  inline void DEBUG_TIME_START(unsigned long& checkpoint) {
+    checkpoint = micros();
+  }
+
+  inline void DEBUG_TIME_RECORD(unsigned long checkpoint, const char* label) {
+    unsigned long elapsed = micros() - checkpoint;
+    int idx = get_or_create_profiling_point(label);
+    if (idx >= 0) {
+      TimingStat& stat = profiling_data.stats[idx];
+      stat.sum += elapsed;
+      if (elapsed < stat.min_val) stat.min_val = elapsed;
+      if (elapsed > stat.max_val) stat.max_val = elapsed;
+      stat.count++;
+    }
+  }
+
+  inline void DEBUG_TIME_MARK_LINE_READING() {
+    unsigned long now = micros();
+    if (last_line_reading_time > 0) {
+      unsigned long interval = now - last_line_reading_time;
+      if (interval < min_interval_line_readings) {
+        min_interval_line_readings = interval;
+      }
+      if (interval > max_interval_line_readings) {
+        max_interval_line_readings = interval;
+      }
+    }
+    last_line_reading_time = now;
+  }
+
+  inline void DEBUG_TIME_MARK_MESSAGE_SEND() {
+    unsigned long now = micros();
+    if (last_message_send_time > 0) {
+      unsigned long interval = now - last_message_send_time;
+      if (interval < min_interval_message_sends) {
+        min_interval_message_sends = interval;
+      }
+      if (interval > max_interval_message_sends) {
+        max_interval_message_sends = interval;
+      }
+    }
+    last_message_send_time = now;
+  }
+
+  void DEBUG_TIME_PRINT_IF_READY() {
+    unsigned long current_time = millis();
+    if (current_time - last_timing_print >= DEBUG_PROFILING_PRINT_INTERVAL_S * 1000) {
+      last_timing_print = current_time;
+      
+      DEBUG_SERIAL.println();
+      DEBUG_SERIAL.println("┌───────────────────────┬─────────┬─────────┬─────────┬───────────┐");
+      DEBUG_SERIAL.println("│ Function              │ Avg (µs)│ Min (µs)│ Max (µs)│   Count   │");
+      DEBUG_SERIAL.println("├───────────────────────┼─────────┼─────────┼─────────┼───────────┤");
+      
+      for (int i = 0; i < profiling_data.count; i++) {
+        TimingStat& stat = profiling_data.stats[i];
+        if (stat.count > 0) {
+          DEBUG_SERIAL.print("│ ");
+          DEBUG_SERIAL.print(profiling_data.names[i]);
+          int name_len = strlen(profiling_data.names[i]);
+          for (int j = name_len; j < 21; j++) DEBUG_SERIAL.print(" ");
+          
+          unsigned long avg = stat.sum / stat.count;
+          DEBUG_SERIAL.print(" │ ");
+          if (avg < 10) DEBUG_SERIAL.print("      ");
+          else if (avg < 100) DEBUG_SERIAL.print("     ");
+          else if (avg < 1000) DEBUG_SERIAL.print("    ");
+          else if (avg < 10000) DEBUG_SERIAL.print("   ");
+          else if (avg < 100000) DEBUG_SERIAL.print("  ");
+          DEBUG_SERIAL.print(avg);
+          
+          DEBUG_SERIAL.print(" │ ");
+          if (stat.min_val < 10) DEBUG_SERIAL.print("      ");
+          else if (stat.min_val < 100) DEBUG_SERIAL.print("     ");
+          else if (stat.min_val < 1000) DEBUG_SERIAL.print("    ");
+          else if (stat.min_val < 10000) DEBUG_SERIAL.print("   ");
+          else if (stat.min_val < 100000) DEBUG_SERIAL.print("  ");
+          DEBUG_SERIAL.print(stat.min_val);
+          
+          DEBUG_SERIAL.print(" │ ");
+          if (stat.max_val < 10) DEBUG_SERIAL.print("      ");
+          else if (stat.max_val < 100) DEBUG_SERIAL.print("     ");
+          else if (stat.max_val < 1000) DEBUG_SERIAL.print("    ");
+          else if (stat.max_val < 10000) DEBUG_SERIAL.print("   ");
+          else if (stat.max_val < 100000) DEBUG_SERIAL.print("  ");
+          DEBUG_SERIAL.print(stat.max_val);
+          
+          DEBUG_SERIAL.print(" │ ");
+          if (stat.count < 10) DEBUG_SERIAL.print("        ");
+          else if (stat.count < 100) DEBUG_SERIAL.print("       ");
+          else if (stat.count < 1000) DEBUG_SERIAL.print("      ");
+          else if (stat.count < 10000) DEBUG_SERIAL.print("     ");
+          else if (stat.count < 100000) DEBUG_SERIAL.print("    ");
+          else if (stat.count < 1000000) DEBUG_SERIAL.print("   ");
+          else DEBUG_SERIAL.print(" ");
+          DEBUG_SERIAL.print(stat.count);
+          DEBUG_SERIAL.println(" │");
+        }
+      }
+      
+      DEBUG_SERIAL.println("├───────────────────────┼─────────┼─────────┼─────────┼───────────┤");
+      DEBUG_SERIAL.print("│ Max interval (line)   │         │ ");
+      unsigned long line_interval_min = min_interval_line_readings;
+      if (line_interval_min < 10) DEBUG_SERIAL.print("      ");
+      else if (line_interval_min < 100) DEBUG_SERIAL.print("     ");
+      else if (line_interval_min < 1000) DEBUG_SERIAL.print("    ");
+      else if (line_interval_min < 10000) DEBUG_SERIAL.print("   ");
+      else if (line_interval_min < 100000) DEBUG_SERIAL.print("  ");
+      DEBUG_SERIAL.print(line_interval_min);
+      DEBUG_SERIAL.print(" │ ");
+      unsigned long line_interval_max = max_interval_line_readings;
+      if (line_interval_max < 10) DEBUG_SERIAL.print("      ");
+      else if (line_interval_max < 100) DEBUG_SERIAL.print("     ");
+      else if (line_interval_max < 1000) DEBUG_SERIAL.print("    ");
+      else if (line_interval_max < 10000) DEBUG_SERIAL.print("   ");
+      else if (line_interval_max < 100000) DEBUG_SERIAL.print("  ");
+      DEBUG_SERIAL.print(line_interval_max);
+      DEBUG_SERIAL.println(" │           │");
+      
+      DEBUG_SERIAL.print("│ Max interval (msg)    │         │ ");
+      unsigned long msg_interval_min = min_interval_message_sends;
+      if (msg_interval_min < 10) DEBUG_SERIAL.print("      ");
+      else if (msg_interval_min < 100) DEBUG_SERIAL.print("     ");
+      else if (msg_interval_min < 1000) DEBUG_SERIAL.print("    ");
+      else if (msg_interval_min < 10000) DEBUG_SERIAL.print("   ");
+      else if (msg_interval_min < 100000) DEBUG_SERIAL.print("  ");
+      DEBUG_SERIAL.print(msg_interval_min);
+      DEBUG_SERIAL.print(" │ ");
+      unsigned long msg_interval_max = max_interval_message_sends;
+      if (msg_interval_max < 10) DEBUG_SERIAL.print("      ");
+      else if (msg_interval_max < 100) DEBUG_SERIAL.print("     ");
+      else if (msg_interval_max < 1000) DEBUG_SERIAL.print("    ");
+      else if (msg_interval_max < 10000) DEBUG_SERIAL.print("   ");
+      else if (msg_interval_max < 100000) DEBUG_SERIAL.print("  ");
+      DEBUG_SERIAL.print(msg_interval_max);
+      DEBUG_SERIAL.println(" │           │");
+      
+      DEBUG_SERIAL.println("└───────────────────────┴─────────┴─────────┴─────────┴───────────┘");
+      
+      for (int i = 0; i < profiling_data.count; i++) {
+        profiling_data.stats[i] = {0, UINT32_MAX, 0, 0};
+      }
+      max_interval_line_readings = 0;
+      max_interval_message_sends = 0;
+    }
   }
 #else
-  inline void DEBUG_TIME_SPENT(String = "") {}
+  struct TimingStat {};
+  inline void DEBUG_TIME_START(unsigned long&) {}
+  inline void DEBUG_TIME_RECORD(unsigned long, const char*) {}
+  inline void DEBUG_TIME_MARK_LINE_READING() {}
+  inline void DEBUG_TIME_MARK_MESSAGE_SEND() {}
+  void DEBUG_TIME_PRINT_IF_READY() {}
 #endif
 
 
@@ -150,15 +332,15 @@ CompassData compass_data = { 0.0, 0.0, 0.0 };
 #define IR_RAW_REGISTER 0x01
 #define IR_RAW_BYTES_COUNT 12
 #define IR_SENSOR_COUNT 12
-#define IR_NO_SIGNAL 999  // Special value indicating no ball detected
+#define IR_NO_SIGNAL 999
 #define IR_NO_SIGNAL_ANGLE 180
 #define IR_NO_SIGNAL_DISTANCE 0
 
 struct IRData {
-  uint16_t angle;                      // Ball direction (0-359 degrees, or 999 if no signal)
-  uint16_t distance;                   // Ball distance in cm
-  uint8_t sensor_IR[IR_SENSOR_COUNT];  // Raw values from 12 IR sensors
-  uint8_t status;                      // Status byte from sensor
+  uint16_t angle;
+  uint16_t distance;
+  uint8_t sensor_IR[IR_SENSOR_COUNT];
+  uint8_t status;
 };
 IRData ir_data = { IR_NO_SIGNAL, 0, { 0 }, 0 };
 
@@ -166,26 +348,21 @@ IRData ir_data = { IR_NO_SIGNAL, 0, { 0 }, 0 };
 // ========== Line Sensors ==========
 #define LINE_SENSOR_COUNT 12
 
-// Teensy analog pin mapping for line sensors
-// Note: Non-sequential due to Teensy hardware constraints
-const int line_pin[LINE_SENSOR_COUNT] = {
-  23, 22, 21, 20,  // Sensors 0-3
-  17, 16, 15, 14,  // Sensors 4-7
-  41, 40, 39, 38   // Sensors 8-11
+const int line_sensors_pin_config[LINE_SENSOR_COUNT] = {
+  23, 22, 21, 20,
+  17, 16, 15, 14,
+  41, 40, 39, 38,
 };
 
 struct LineData {
-  uint16_t sensor_line[LINE_SENSOR_COUNT];  // Analog values (0-1023)
-  uint16_t sensor_line_min[LINE_SENSOR_COUNT];  // Analog values (0-1023)
-  uint16_t sensor_line_max[LINE_SENSOR_COUNT];  // Analog values (0-1023)
+  uint16_t sensor_line[LINE_SENSOR_COUNT];
+  uint16_t sensor_line_min[LINE_SENSOR_COUNT];
+  uint16_t sensor_line_max[LINE_SENSOR_COUNT];
 };
 LineData line_data = { { 0 } };
 
 
-// ========== Data Collection & Message Format ==========
-// Message format: {"a"="HHH,±PPP,±RRR,AAA,DDDD,V1,V2,...V12,S,L1,L2,...L12"}
-#define DATA_STRING_LENGTH 141
-
+// ========== Data Collection ==========
 struct SensorData {
   MotorsData motors_data;
   CompassData compass_data;
@@ -328,6 +505,11 @@ bool bno_initialize() {
 }
 
 void read_compass() {
+#if DEBUG_PROFILING_ENABLED
+  unsigned long compass_start = 0;
+  DEBUG_TIME_START(compass_start);
+#endif
+
   if (!bno_initialized) {
     compass_data.heading = 999;
     compass_data.pitch = 999;
@@ -355,10 +537,19 @@ void read_compass() {
       compass_data.roll = 999;
     }
   }
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(compass_start, "Compass Read");
+#endif
 }
 
 
 void read_ir_sensor() {
+#if DEBUG_PROFILING_ENABLED
+  unsigned long ir_start = 0;
+  DEBUG_TIME_START(ir_start);
+#endif
+
   Wire.beginTransmission(IR_I2C_ADDRESS);
   Wire.write(IR_ANGLE_AND_DISTANCE_REGISTER);
   if (Wire.endTransmission() != 0) {
@@ -395,21 +586,35 @@ void read_ir_sensor() {
   }
 
   ir_data.status = Wire.available() ? Wire.read() : 0;
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(ir_start, "IR Sensor Read");
+#endif
 }
 
 
 void read_line_sensors() {
+#if DEBUG_PROFILING_ENABLED
+  unsigned long line_start = 0;
+  DEBUG_TIME_START(line_start);
+  DEBUG_TIME_MARK_LINE_READING();
+#endif
+
   auto *line = line_data.sensor_line;
   auto *minv = line_data.sensor_line_min;
   auto *maxv = line_data.sensor_line_max;
 
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
-    uint16_t v = analogRead(line_pin[i]);
+    uint16_t v = analogRead(line_sensors_pin_config[i]);
     line[i] = v;
 
     if (v > maxv[i]) maxv[i] = v;
     if (v < minv[i]) minv[i] = v;
   }
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(line_start, "Line Sensors");
+#endif
 }
 
 void reset_line_min_max_values() {
@@ -422,6 +627,11 @@ void reset_line_min_max_values() {
 
 // ========== Communication Functions ==========
 bool parse_motor_command() {
+#if DEBUG_PROFILING_ENABLED
+  unsigned long cmd_start = 0;
+  DEBUG_TIME_START(cmd_start);
+#endif
+
   // Expected format: {"a"="±MMMM,±MMMM,±MMMM,±MMMM,K"}
   // MMMM = motor speed (signed, 0 to 255), K = kicker (0 or 1)
 
@@ -480,14 +690,27 @@ bool parse_motor_command() {
   motors_data.kicker_position = data.substring(24, 25).toInt();
   motors_data.kicker_position = constrain(motors_data.kicker_position, KICKER_IN, KICKER_OUT);
 
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(cmd_start, "Parse Command");
+#endif
+
   return true;
 }
 
 inline void update_sensor_data_struct() {
+#if DEBUG_PROFILING_ENABLED
+  unsigned long update_start = 0;
+  DEBUG_TIME_START(update_start);
+#endif
+
   sensor_data.compass_data = compass_data;
   sensor_data.ir_data = ir_data;
   sensor_data.motors_data = motors_data;
   sensor_data.line_data = line_data;
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(update_start, "Update Sensor Struct");
+#endif
 }
 
 
@@ -655,7 +878,7 @@ void setup() {
   DEBUG_PRINTLN("I2C initialized (400 kHz)");
 
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
-    pinMode(line_pin[i], INPUT);
+    pinMode(line_sensors_pin_config[i], INPUT);
   }
   DEBUG_PRINTLN("Line sensors initialized");
 
@@ -670,8 +893,17 @@ int messages_sent = 0;
 int line_sensor_readings = 0;
 
 void target_ups_loop() {
-  DEBUG_TIME_SPENT("=== Target UPS Loop start === ");
+#if DEBUG_PROFILING_ENABLED
+  unsigned long loop_start = 0;
+  DEBUG_TIME_START(loop_start);
+#endif
 
+  // Button checks
+#if DEBUG_PROFILING_ENABLED
+  unsigned long section_start = 0;
+  DEBUG_TIME_START(section_start);
+#endif
+  
   if (isButtonPressed(main_switch)) {
     main_switch.state = !main_switch.state;
     update_running_state();
@@ -688,7 +920,9 @@ void target_ups_loop() {
     DEBUG_LOG(DEBUG_INFO, module_switch.state ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
   }
 
-  DEBUG_TIME_SPENT("after switch checks: ");
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(section_start, "Button Checks");
+#endif
 
 #if DEBUG_LOGS_ENABLED
   static unsigned long last_sent_message_time = 0;
@@ -702,36 +936,53 @@ void target_ups_loop() {
   }
 #endif
 
+  // Sensor reading and communication
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_START(section_start);
+#endif
+  
   if (can_send_message_to_rpi(SENSOR_DATA_MESSAGE_LENGTH)) {
     read_ir_sensor();
-    DEBUG_TIME_SPENT("after IR read: ");
     read_compass();
-    DEBUG_TIME_SPENT("after compass read: ");
     update_sensor_data_struct();
     build_sensor_message(message_buffer);
     reset_line_min_max_values();
-    DEBUG_TIME_SPENT("after building message: ");
 
     send_message_to_rpi(message_buffer);
+#if DEBUG_PROFILING_ENABLED
+    DEBUG_TIME_MARK_MESSAGE_SEND();
+#endif
 #if DEBUG_LOGS_ENABLED
     messages_sent++;
 #endif
-
-    DEBUG_TIME_SPENT("after communication: ");
   }
 
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(section_start, "Sensors+Communication");
+#endif
+
+  // Command parsing
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_START(section_start);
+#endif
+  
   parse_motor_command();
 
-  DEBUG_TIME_SPENT("after command parsing: ");
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(section_start, "Parse Command");
+#endif
 
+  // LED and motor updates
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_START(section_start);
+#endif
+  
   digitalWrite(MAIN_SWITCH_LED_PIN, main_switch.state);
   digitalWrite(MODULE_LED_PIN, module_value);
   digitalWrite(MODULE_SWITCH_LED_PIN, !module_switch.state);
 
   update_running_state();
   digitalWrite(LED_BUILTIN, is_running);
-  
-  DEBUG_TIME_SPENT("after LED updates: ");
 
   if (is_running) {
     set_all_motors_speed(motors_data.motor_speed);
@@ -741,6 +992,10 @@ void target_ups_loop() {
     stop_motors();
     DEBUG_PRINT(">>> STOPPED");
   }
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(section_start, "LED & Motors");
+#endif
 
 #if DEBUG_PRINTS_ENABLED
   DEBUG_PRINT(" | SW=");
@@ -753,24 +1008,38 @@ void target_ups_loop() {
 
   print_sensor_debug_info();
 #endif
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(loop_start, "Target UPS Loop");
+#endif
 }
 
 void fastest_loop() {
+#if DEBUG_PROFILING_ENABLED
+  unsigned long fastest_start = 0;
+  DEBUG_TIME_START(fastest_start);
+#endif
+
   read_line_sensors();
 #if DEBUG_LOGS_ENABLED
   line_sensor_readings++;
+#endif
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(fastest_start, "Fastest Loop");
 #endif
 }
 
 
 void loop() {
-  DEBUG_TIME_SPENT("=== Loop start === ");
+#if DEBUG_PROFILING_ENABLED
+  unsigned long loop_start = 0;
+  DEBUG_TIME_START(loop_start);
+#endif
 
   unsigned long current_time = micros();
 
   fastest_loop();
-
-  DEBUG_TIME_SPENT("after fastest loop: ");
 
   static unsigned long last_sensor_data_send_time = 0;
   if (current_time - last_sensor_data_send_time >= INTERVAL_US) {
@@ -778,5 +1047,8 @@ void loop() {
     target_ups_loop();
   }
 
-  DEBUG_TIME_SPENT("after target UPS loop: ");
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_TIME_RECORD(loop_start, "Main Loop");
+  DEBUG_TIME_PRINT_IF_READY();
+#endif
 }
