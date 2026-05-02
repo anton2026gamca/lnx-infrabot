@@ -2,6 +2,7 @@ import asyncio
 import cv2
 import multiprocessing.synchronize
 import numpy as np
+import threading
 import uvicorn
 import urllib.parse
 from engineio.packet import base64
@@ -1299,16 +1300,23 @@ def start(
     server = uvicorn.Server(config)
     logger.info(f"API server started on {host}:{port}")
 
-    if stop_event:
-        import threading
-
-        def _watch():
-            stop_event.wait()
-            server.should_exit = True
-
-        threading.Thread(target=_watch, daemon=True).start()
-
-    server.run()
+    async def serve():
+        if stop_event is not None:
+            def monitor():
+                if stop_event is None:
+                    return
+                stop_event.wait()
+                server.should_exit = True
+            
+            monitor_thread = threading.Thread(target=monitor, daemon=True)
+            monitor_thread.start()
+        
+        await server.serve()
+    
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        server.should_exit = True
 
 
 if __name__ == "__main__":

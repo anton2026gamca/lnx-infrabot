@@ -18,7 +18,6 @@ class Process:
         self.name = name
         self.function = function
         self.stop_event = multiprocessing.Event()
-        self.stop_event.is_set()
         self.logger = logger
 
     def run(self):
@@ -76,7 +75,7 @@ def stop_process(process: Process) -> None:
     if p.is_alive():
         logger.warning(f"Process {p.name} did not terminate, forcing...")
         p.terminate()
-        p.join()
+        p.join(timeout=2)
 
 def start_all_processes():
     for process in processes:
