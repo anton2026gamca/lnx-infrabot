@@ -104,7 +104,7 @@ module middle_wall(USB_hole = 1) {
                 difference() { // screw holes
                     translate([0,0,20])
                         platform_conection_holes(13, 40-0.2);
-                    platform_conection_holes(6.2);
+                    platform_conection_holes(7);
                 }
                 for (A = [1, -1]) {
                     translate([A*89,0,20])cube([2,70,40-0.2],center=true);
@@ -125,13 +125,15 @@ module middle_wall(USB_hole = 1) {
                 
             
             }
-            intersection() {
+            //back camera moved to center of robot
+            *intersection() {
                 translate([0,110,95])scale([1.7,1,1])
                     sphere(d = 51);
                 translate([0,84,44.9])cube([100,30,100],center = true);
             }
         }
-        translate([0,110,95])scale([1.7,1,1])
+        //back camera moved to center of robot
+        *translate([0,110,95])scale([1.7,1,1])
             sphere(d = 50);
     }
 }
@@ -340,14 +342,16 @@ module upper_part () {
                 cylinder(d=robot_d,h=2,center=true);
                 
                 translate([0,100,19])difference(){
-                    for (A = [1, -1]) {
+                    //back camera moved to center of robot
+                    *for (A = [1, -1]) {
                         translate([A*16.7,-25.5,0])rotate([0,90,0])
                             cylinder(d = 9, h = 8,center=true);
                         translate([A*16.7,-25.5,-10])
                             cube([8,9,20],center=true);
 
                     }
-                    translate([0,-25.5,0])rotate([0,90,0])
+                    //back camera moved to center of robot
+                    *translate([0,-25.5,0])rotate([0,90,0])
                         cylinder(d = 3.3, h = 80,center=true);
                 }
                 /*// SOCCER COMUNICATION MODUL
@@ -364,10 +368,11 @@ module upper_part () {
                 }*/
             }
             // Back camera hole
+            /* //back camera moved to center of robot
             translate([0,100,95])cube([25.4,60,50], center=true);
             translate([0,110,95])scale([1.7,1,1])
                 sphere(d = 50);
-            
+            */
             // BUTTON HOLE
             
             // Motor brackets holes - if mounting it from top
@@ -394,7 +399,7 @@ module upper_part () {
             
             // SOCCER COMUNICATION MODUL 
                         //translate([-73-22.86/2,-34,100])
-            translate([-22.86/2 + 15,50,100]) {
+            translate([-22.86/2,40,100]) {
                 cube([2.54+0.5,6*2.54+0.5,100], center = true);
                 translate([22.86,2.54,0])
                     cube([2.54+0.5,4*2.54+0.5,100],center=true);
@@ -405,13 +410,13 @@ module upper_part () {
                 translate([7 * 2.54,0,0])
                     cube([2.54+0.5,4*2.54+0.5,200],center=true);
             }
-            // Display
-            translate([-15,20,100])
-                cube([2.54+0.5,4*2.54+0.5,100], center = true);
-            // Rpi buttons
-            translate([-35,40,100])
-                cube([2.54+0.5,4*2.54+0.5,100], center = true);
-            
+            // Display & Rpi buttons
+            translate([0,0,0]) {
+                translate([0,65,100])
+                    cube([2.54+0.5,4*2.54+0.5,100], center = true);
+                translate([20,80,100])
+                    cube([2.54+0.5,4*2.54+0.5,100], center = true);
+            }
             // Switch ON / OFF
             translate([-55,65,50])cube([19,13,100], center=true);
             
@@ -462,9 +467,9 @@ module all(){
 upper_part();
 //bottom_part();
 //bottom_wall();
-middle_wall(0);
+*middle_wall(0);
 
-%translate([0,99,115])rotate([0,0,180]){
+*translate([0,99,115])rotate([0,0,180]){
     //camera_bracket_holder();
     camera_bracket();
     camera();
