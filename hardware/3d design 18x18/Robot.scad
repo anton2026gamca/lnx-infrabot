@@ -98,28 +98,33 @@ module platform_conection_holes(diameter = 3.3, height = 500) {
 
 
 module middle_wall(USB_hole = 1) {
-    translate([0,0,55])for(A = [90, 180, 270]) for(B = [1,-1]) {
-        difference() { // screw holes
-            translate([0,0,20])
-                platform_conection_holes(13, 40-0.2);
-            platform_conection_holes(6.2);
-        }
-        for (A = [1, -1]) {
-            translate([A*89,0,20])cube([2,70,40-0.2],center=true);
-        }
-        translate([0,98,20])cube([80,2,40-0.2],center=true);
-        
-        translate([0,30,20])difference() { // wall
-            scale([1,0.855,1])cylinder(h = 40-0.2, d = 180,center=true);
-            scale([1,0.855,1])cylinder(h = 130, d = 175,center=true);
-            translate([0,-50,0])
-                cube([200,100,100],center=true);
-                cube([80,300,100],center=true);
+    difference() {
+        translate([0,0,55])for(A = [90, 180, 270]) for(B = [1,-1]) {
+            difference() { // screw holes
+                translate([0,0,20])
+                    platform_conection_holes(13, 40-0.2);
+                platform_conection_holes(6.2);
+            }
+            for (A = [1, -1]) {
+                translate([A*89,0,20])cube([2,70,40-0.2],center=true);
+            }
+            translate([0,98,20])cube([80,2,40-0.2],center=true);
             
+            translate([0,30,20])difference() { // wall
+                scale([1,0.855,1])cylinder(h = 40-0.2, d = 180,center=true);
+                scale([1,0.855,1])cylinder(h = 130, d = 175,center=true);
+                translate([0,-50,0])
+                    cube([200,100,100],center=true);
+                    cube([80,300,100],center=true);
+                
+                
+                
+            }
             
-        }
         
-    
+        }
+        translate([0,110,95])scale([1.7,1,1])
+            sphere(d = 50);
     }
 }
 
@@ -320,11 +325,23 @@ module middle_part (brackets_support = 1) {
 
 module upper_part () {
     intersection() {
-        translate([0,12,0])rotate([0,0,0])
+        translate([0,12,100])rotate([0,0,0])
             cube([180,180,200],center=true);
         difference() {
             translate([0,0,96]) union() {
                 cylinder(d=robot_d,h=2,center=true);
+                
+                translate([0,100,19])difference(){
+                    for (A = [1, -1]) {
+                        translate([A*16.7,-25.5,0])rotate([0,90,0])
+                            cylinder(d = 9, h = 8,center=true);
+                        translate([A*16.7,-25.5,-10])
+                            cube([8,9,20],center=true);
+
+                    }
+                    translate([0,-25.5,0])rotate([0,90,0])
+                        cylinder(d = 3.3, h = 80,center=true);
+                }
                 /*// SOCCER COMUNICATION MODUL
                 translate([-30-22.86/2,0,10]) {
                     cube([2.54+4,6*2.54+4,20], center = true);
@@ -338,6 +355,11 @@ module upper_part () {
                         cube([2.54+4,4*2.54+4,20],center=true);
                 }*/
             }
+            // Back camera hole
+            translate([0,100,95])cube([25.4,60,50], center=true);
+            translate([0,110,95])scale([1.7,1,1])
+                sphere(d = 50);
+            
             // BUTTON HOLE
             
             // Motor brackets holes - if mounting it from top
@@ -364,7 +386,7 @@ module upper_part () {
             
             // SOCCER COMUNICATION MODUL 
                         //translate([-73-22.86/2,-34,100])
-            translate([-22.86/2,60,100]) {
+            translate([-22.86/2 + 15,50,100]) {
                 cube([2.54+0.5,6*2.54+0.5,100], center = true);
                 translate([22.86,2.54,0])
                     cube([2.54+0.5,4*2.54+0.5,100],center=true);
@@ -375,9 +397,15 @@ module upper_part () {
                 translate([7 * 2.54,0,0])
                     cube([2.54+0.5,4*2.54+0.5,200],center=true);
             }
+            // Display
+            translate([-15,20,100])
+                cube([2.54+0.5,4*2.54+0.5,100], center = true);
+            // Rpi buttons
+            translate([-35,40,100])
+                cube([2.54+0.5,4*2.54+0.5,100], center = true);
             
-            // Button ON / OFF
-            translate([-55,65,50])cube([21,15,100], center=true);
+            // Switch ON / OFF
+            translate([-55,65,50])cube([19,13,100], center=true);
             
             
         }
@@ -426,7 +454,13 @@ module all(){
 *upper_part();
 //bottom_part();
 //bottom_wall();
+middle_wall(0);
 
+%translate([0,99,115])rotate([0,0,180]){
+    //camera_bracket_holder();
+    camera_bracket();
+    camera();
+}
 //ball_zone();
 //kicker_cutout();
 //translate([0,-70,23.1])kicker();
@@ -434,7 +468,6 @@ module all(){
 
 /*
 middle_part(0);
-//middle_wall(0);
 
 %translate([-25,-20,60.4])rotate([0,0,90])
     raspberry_bracket();
@@ -445,7 +478,7 @@ middle_part(0);
 %bottom_wall();
 /**/
 
-bottom_part();
+//bottom_part();
 
 
 
