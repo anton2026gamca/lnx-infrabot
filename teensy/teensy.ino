@@ -38,8 +38,10 @@ enum DebugLevel {
 volatile bool module_value = true;
 volatile bool is_running = false;
 
-Button main_switch = {MODULE_SWITCH_PIN, HIGH, HIGH, 0};
-Button module_switch = {MAIN_SWITCH_PIN, HIGH, HIGH, 0};
+Button main_switch = {MAIN_SWITCH_PIN, HIGH, HIGH, 0};
+bool main_switch_enabled = false;
+Button module_switch = {MODULE_SWITCH_PIN, HIGH, HIGH, 0};
+bool bt_module_enabled = true;
 
 
 // ========== Serial Communication ==========
@@ -540,8 +542,8 @@ bool isButtonPressed(Button &b) {
 
 // ========== Control State Management ==========
 void update_running_state() {
-  module_value = module_switch.state ? (digitalRead(MODULE_PIN) == HIGH) : true;
-  is_running = (main_switch.state && module_value);
+  module_value = bt_module_enabled ? (digitalRead(MODULE_PIN) == HIGH) : true;
+  is_running = (main_switch_enabled && module_value);
 }
 
 // ========== Debug Functions ==========
@@ -1189,7 +1191,7 @@ void build_running_state_message(char* msg) {
 
   msg[0] = '{';
   msg[1] = 0x02;
-  msg[2] = is_running | (module_switch.state << 1) | (main_switch.state << 2) | (module_value << 3);
+  msg[2] = is_running | (bt_module_enabled << 1) | (main_switch_enabled << 2) | (module_value << 3);
   msg[3] = '}';
 }
 
@@ -1269,19 +1271,19 @@ void target_ups_loop() {
 #endif
   
   if (isButtonPressed(main_switch)) {
-    main_switch.state = !main_switch.state;
+    main_switch_enabled = !main_switch_enabled;
     update_running_state();
     build_running_state_message(message_buffer);
     send_message_to_rpi(message_buffer);
-    DEBUG_LOG(DEBUG_INFO, main_switch.state ? "Manual switch: ON" : "Manual switch: OFF");
+    DEBUG_LOG(DEBUG_INFO, main_switch_enabled ? "Manual switch: ON" : "Manual switch: OFF");
   }
 
   if (isButtonPressed(module_switch)) {
-    module_switch.state = !module_switch.state;
+    bt_module_enabled = !bt_module_enabled;
     update_running_state();
     build_running_state_message(message_buffer);
     send_message_to_rpi(message_buffer);
-    DEBUG_LOG(DEBUG_INFO, module_switch.state ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
+    DEBUG_LOG(DEBUG_INFO, bt_module_enabled ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
   }
 
 #if DEBUG_PROFILING_ENABLED
@@ -1330,9 +1332,9 @@ void target_ups_loop() {
   DEBUG_TIME_START(section_start);
 #endif
   
-  digitalWrite(MAIN_SWITCH_LED_PIN, main_switch.state);
+  digitalWrite(MAIN_SWITCH_LED_PIN, main_switch_enabled);
   digitalWrite(MODULE_LED_PIN, module_value);
-  digitalWrite(MODULE_SWITCH_LED_PIN, !module_switch.state);
+  digitalWrite(MODULE_SWITCH_LED_PIN, !bt_module_enabled);
 
   update_running_state();
   digitalWrite(LED_BUILTIN, is_running);
@@ -1351,10 +1353,10 @@ void target_ups_loop() {
 #endif
 
 #if DEBUG_PRINTS_ENABLED
-  DEBUG_PRINT(" | SW=");
-  DEBUG_PRINT(main_switch.state);
+  DEBUG_PRINT(" | M_SW=");
+  DEBUG_PRINT(main_switch_enabled);
   DEBUG_PRINT(" BT_SW=");
-  DEBUG_PRINT(module_switch.state);
+  DEBUG_PRINT(bt_module_enabled);
   DEBUG_PRINT(" BT=");
   DEBUG_PRINT(module_value);
   DEBUG_PRINTLN();
