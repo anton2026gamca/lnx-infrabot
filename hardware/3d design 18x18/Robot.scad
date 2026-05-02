@@ -99,29 +99,37 @@ module platform_conection_holes(diameter = 3.3, height = 500) {
 
 module middle_wall(USB_hole = 1) {
     difference() {
-        translate([0,0,55])for(A = [90, 180, 270]) for(B = [1,-1]) {
-            difference() { // screw holes
-                translate([0,0,20])
-                    platform_conection_holes(13, 40-0.2);
-                platform_conection_holes(6.2);
-            }
-            for (A = [1, -1]) {
-                translate([A*89,0,20])cube([2,70,40-0.2],center=true);
-            }
-            translate([0,98,20])cube([80,2,40-0.2],center=true);
+        union() {
+            translate([0,0,55])for(A = [90, 180, 270]) for(B = [1,-1]) {
+                difference() { // screw holes
+                    translate([0,0,20])
+                        platform_conection_holes(13, 40-0.2);
+                    platform_conection_holes(6.2);
+                }
+                for (A = [1, -1]) {
+                    translate([A*89,0,20])cube([2,70,40-0.2],center=true);
+                }
+                translate([0,98,20])cube([80,2,40-0.2],center=true);
+                
+                translate([0,30,20])difference() { // wall
+                    scale([1,0.855,1])cylinder(h = 40-0.2, d = 180,center=true);
+                    scale([1,0.855,1])cylinder(h = 130, d = 175,center=true);
+                    translate([0,-50,0])
+                        cube([200,100,100],center=true);
+                        cube([80,300,100],center=true);
+                    
+                    
+                    
+                }
+                
+                
             
-            translate([0,30,20])difference() { // wall
-                scale([1,0.855,1])cylinder(h = 40-0.2, d = 180,center=true);
-                scale([1,0.855,1])cylinder(h = 130, d = 175,center=true);
-                translate([0,-50,0])
-                    cube([200,100,100],center=true);
-                    cube([80,300,100],center=true);
-                
-                
-                
             }
-            
-        
+            intersection() {
+                translate([0,110,95])scale([1.7,1,1])
+                    sphere(d = 51);
+                translate([0,84,44.9])cube([100,30,100],center = true);
+            }
         }
         translate([0,110,95])scale([1.7,1,1])
             sphere(d = 50);
@@ -451,7 +459,7 @@ module all(){
 //ball();
 *bottom_part();
 *middle_part();
-*upper_part();
+upper_part();
 //bottom_part();
 //bottom_wall();
 middle_wall(0);
