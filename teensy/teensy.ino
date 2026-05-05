@@ -35,8 +35,8 @@ enum DebugLevel {
 #define MODULE_PIN 33
 #define MODULE_LED_PIN 30
 
-volatile bool module_value = true;
-volatile bool is_running = false;
+bool module_value = true;
+bool is_running = false;
 
 Button main_switch = {MAIN_SWITCH_PIN, HIGH, HIGH, 0};
 bool main_switch_enabled = false;
@@ -51,7 +51,12 @@ bool bt_module_enabled = true;
 #define RASPBERRY_SERIAL_BUFFER_SIZE 128
 char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
 
+#define SENSOR_DATA_MESSAGE_TYPE 0x01
 #define SENSOR_DATA_MESSAGE_LENGTH 43
+#define RUNNING_STATE_MESSAGE_TYPE 0x02
+#define RUNNING_STATE_MESSAGE_LENGTH 4
+#define SET_MOTORS_MESSAGE_TYPE 0xFF
+#define SET_MOTORS_MESSAGE_LENGTH 8
 
 
 #define DEBUG_PRINTS_ENABLED false
@@ -59,7 +64,7 @@ char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
 #define DEBUG_PROFILING_ENABLED true
 #define DEBUG_PROFILING_PRINT_INTERVAL_S 1
 #define DEBUG_SERIAL Serial
-#define DEBUG_SERIAL_SPEED 38400
+
 
 #if DEBUG_PRINTS_ENABLED
   template<typename T>
@@ -372,9 +377,9 @@ uint8_t ir_angle_distance_buffer[IR_ANGLE_AND_DISTANCE_BYTES_COUNT] = { 0 };
 uint8_t ir_raw_buffer[IR_RAW_BYTES_COUNT] = { 0 };
 
 bool compass_read_requested = false;
+bool compass_read_completed = false;
 bool ir_read_requested = false;
 bool ir_read_completed = false;
-bool compass_read_completed = false;
 
 
 // ========== Line Sensors ==========
@@ -901,84 +906,73 @@ void reset_line_min_max_values() {
   }
 }
 
-
-// ========== Communication Functions ==========
-bool parse_motor_command() {
-#if DEBUG_PROFILING_ENABLED
-  unsigned long cmd_start = 0;
-  DEBUG_PROFILING_START(cmd_start);
-#endif
-
-  // Expected format: {"a"="±MMMM,±MMMM,±MMMM,±MMMM,K"}
-  // MMMM = motor speed (signed, 0 to 255), K = kicker (0 or 1)
-
-  String input = "";
-  while (RASPBERRY_SERIAL.available() > 0) {
-    input = RASPBERRY_SERIAL.readStringUntil('\n');
-  }
-
-  if (input.length() == 0) return false;
-
-  DEBUG_PRINT("RX: ");
-  DEBUG_PRINTLN(input.c_str());
-
-  const int EXPECTED_LENGTH = 33;
-  if (input.length() != EXPECTED_LENGTH) {
-    DEBUG_LOG(DEBUG_ERROR, "Invalid message length: \"" + input + "\"");
-    return false;
-  }
-
-  if (input[0] != '{' || input[1] != '"' || input[2] != 'a' || input[3] != '"' || input[4] != '=' || input[5] != '"' || input[31] != '"' || input[32] != '}') {
-    DEBUG_LOG(DEBUG_ERROR, "Invalid JSON structure: \"" + input + "\"");
-    return false;
-  }
-
-  String data = input.substring(6, 31);  // "±MMMM,±MMMM,±MMMM,±MMMM,K"
-
-  if (data[5] != ',' || data[11] != ',' || data[17] != ',' || data[23] != ',') {
-    DEBUG_LOG(DEBUG_ERROR, "Invalid comma positions: \"" + input + "\"");
-    return false;
-  }
-
-  for (int i = 0; i < MOTOR_COUNT; i++) {
-    char sign = data[i * 6];
-    if (sign != '+' && sign != '-') {
-      DEBUG_LOG(DEBUG_ERROR, "Invalid sign character: \"" + input + "\"");
-      return false;
-    }
-
-    for (int j = 1; j <= 4; j++) {
-      if (!isdigit(data[i * 6 + j])) {
-        DEBUG_LOG(DEBUG_ERROR, "Invalid motor value digit: \"" + input + "\"");
-        return false;
-      }
-    }
-  }
-
-  if (!isdigit(data[24])) {
-    DEBUG_LOG(DEBUG_ERROR, "Invalid kicker value: \"" + input + "\"");
-    return false;
-  }
-
-  for (int i = 0; i < MOTOR_COUNT; i++) {
-    motors_data.motor_speed[i] = data.substring(i * 6, i * 6 + 5).toInt();
-  }
-
-  motors_data.kicker_position = data.substring(24, 25).toInt();
-  motors_data.kicker_position = constrain(motors_data.kicker_position, KICKER_IN, KICKER_OUT);
-
-#if DEBUG_PROFILING_ENABLED
-  DEBUG_PROFILING_RECORD(cmd_start, "Parse Command");
-#endif
-
-  return true;
-}
-
 inline void update_sensor_data_struct() {
   sensor_data.compass_data = compass_data;
   sensor_data.ir_data = ir_data;
   sensor_data.motors_data = motors_data;
   sensor_data.line_data = line_data;
+}
+
+
+// ========== Communication Functions ==========
+uint8_t raw_buffer[512];
+int buffer_len = 0;
+
+void check_rpi_commands() {
+#if DEBUG_PROFILING_ENABLED
+  unsigned long cmd_start = 0;
+  DEBUG_PROFILING_START(cmd_start);
+#endif
+
+  while (RASPBERRY_SERIAL.available() > 0 && buffer_len < 512) {
+    raw_buffer[buffer_len++] = RASPBERRY_SERIAL.read();
+  }
+
+  for (int i = 0; i < buffer_len; i++) {
+    if (raw_buffer[i] == '{') {
+      int msg_type = raw_buffer[i + 1];
+      int expected_len = 0;
+      if (msg_type == SET_MOTORS_MESSAGE_TYPE) {
+        expected_len = SET_MOTORS_MESSAGE_LENGTH;
+      } else {
+        continue;
+      }
+      if (i + expected_len <= buffer_len && raw_buffer[i + expected_len - 1] == '}') {
+        process_rpi_command(&raw_buffer[i], expected_len);
+        
+        int consumed = i + expected_len;
+        memmove(raw_buffer, &raw_buffer[consumed], buffer_len - consumed);
+        buffer_len -= consumed;
+        i = -1;
+      }
+    }
+  }
+
+#if DEBUG_PROFILING_ENABLED
+  DEBUG_PROFILING_RECORD(cmd_start, "Process RPI Commands");
+#endif
+}
+
+void process_rpi_command(uint8_t* cmd, int len) {
+  uint8_t cmd_type = cmd[1];
+
+  if (cmd_type == SET_MOTORS_MESSAGE_TYPE) {
+    if (len == SET_MOTORS_MESSAGE_LENGTH) {
+      uint8_t flags = cmd[2];
+      int16_t m_speed[MOTOR_COUNT];
+
+      for (int i = 0; i < MOTOR_COUNT; i++) {
+        uint8_t m_val = cmd[3 + i]; 
+        uint8_t m_dir = (flags >> (1 + i)) & 0x01;
+        m_speed[i] = (int16_t)m_val * (m_dir == 0 ? -1 : 1);
+      }
+
+      bool kicker_state = (flags & 0x01) != 0;
+
+      set_all_motors_speed(m_speed);
+      set_kicker_position(kicker_state ? KICKER_OUT : KICKER_IN);
+    }
+  }
 }
 
 
@@ -991,7 +985,7 @@ void build_sensor_message(char* msg) {
   memset(msg, 0, RASPBERRY_SERIAL_BUFFER_SIZE);
 
   msg[0] = '{';
-  msg[1] = 0x01; // Message type
+  msg[1] = SENSOR_DATA_MESSAGE_TYPE;
 
   auto write16 = [&](int idx, int16_t value) {
     msg[idx]     = value & 0xFF;
@@ -1098,7 +1092,7 @@ void build_running_state_message(char* msg) {
   memset(msg, 0, RASPBERRY_SERIAL_BUFFER_SIZE);
 
   msg[0] = '{';
-  msg[1] = 0x02;
+  msg[1] = RUNNING_STATE_MESSAGE_TYPE;
   msg[2] = is_running | (bt_module_enabled << 1) | (main_switch_enabled << 2) | (module_value << 3);
   msg[3] = '}';
 }
@@ -1108,19 +1102,18 @@ inline bool can_send_message_to_rpi(int length) {
   return RASPBERRY_SERIAL.availableForWrite() > length;
 }
 
-template<typename T> void send_message_to_rpi(T message) {
+template<typename T> void send_message_to_rpi(T message, int length = sizeof(T)) {
 #if DEBUG_PROFILING_ENABLED
     unsigned long msg_checkpoint;
     DEBUG_PROFILING_START(msg_checkpoint);
 #endif
-  RASPBERRY_SERIAL.println(message);
+  RASPBERRY_SERIAL.write(message, length);
   DEBUG_PRINT("TX: ");
   DEBUG_PRINTLN(message);
 #if DEBUG_PROFILING_ENABLED
     DEBUG_PROFILING_RECORD(msg_checkpoint, "Message Send to RPI");
 #endif
 }
-
 
 
 // ========== Setup & Main Loop ==========
@@ -1131,7 +1124,6 @@ void setup() {
   pinMode(MAIN_SWITCH_LED_PIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
-  DEBUG_SERIAL.begin(DEBUG_SERIAL_SPEED);
   RASPBERRY_SERIAL.begin(RASPBERRY_SERIAL_SPEED);
   static char extra_buffer[RASPBERRY_SERIAL_BUFFER_SIZE - 39];
   RASPBERRY_SERIAL.addMemoryForWrite(extra_buffer, sizeof(extra_buffer));
@@ -1189,7 +1181,7 @@ void target_ups_loop() {
     main_switch_enabled = !main_switch_enabled;
     update_running_state();
     build_running_state_message(message_buffer);
-    send_message_to_rpi(message_buffer);
+    send_message_to_rpi(message_buffer, RUNNING_STATE_MESSAGE_LENGTH);
     DEBUG_LOG(DEBUG_INFO, main_switch_enabled ? "Manual switch: ON" : "Manual switch: OFF");
   }
 
@@ -1197,7 +1189,7 @@ void target_ups_loop() {
     bt_module_enabled = !bt_module_enabled;
     update_running_state();
     build_running_state_message(message_buffer);
-    send_message_to_rpi(message_buffer);
+    send_message_to_rpi(message_buffer, RUNNING_STATE_MESSAGE_LENGTH);
     DEBUG_LOG(DEBUG_INFO, bt_module_enabled ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
   }
 
@@ -1216,14 +1208,14 @@ void target_ups_loop() {
     build_sensor_message(message_buffer);
     reset_line_min_max_values();
 
-    send_message_to_rpi(message_buffer);
+    send_message_to_rpi(message_buffer, SENSOR_DATA_MESSAGE_LENGTH);
   }
 #if DEBUG_PROFILING_ENABLED
   DEBUG_PROFILING_RECORD(section_start, "Sensors & Communication");
 #endif
 
   // Command parsing
-  parse_motor_command();
+  check_rpi_commands();
 
   // LED and motor updates
 #if DEBUG_PROFILING_ENABLED
