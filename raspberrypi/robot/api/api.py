@@ -377,8 +377,8 @@ def create_sensor_data() -> dict:
         running_state={
             "running": running_state.running if running_state else False,
             "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
-            "bt_module_state": running_state.bt_module_state if running_state else False,
-            "switch_state": running_state.switch_state if running_state else False,
+            "bt_module_state": running_state.bt_module_value if running_state else False,
+            "switch_state": running_state.main_switch_value if running_state else False,
         } if running_state else None,
         timestamp=hw.timestamp,
     )

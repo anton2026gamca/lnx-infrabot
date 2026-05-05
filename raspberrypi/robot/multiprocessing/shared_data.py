@@ -32,8 +32,8 @@ def set_running_state(state: RunningStateData | None):
         if state:
             running_state['running'] = state.running
             running_state['bt_module_enabled'] = state.bt_module_enabled
-            running_state['bt_module_state'] = state.bt_module_state
-            running_state['switch_state'] = state.switch_state
+            running_state['main_switch_enabled'] = state.main_switch_value
+            running_state['module_value'] = state.bt_module_value
 def get_running_state() -> RunningStateData | None:
     with running_state_lock:
         if not running_state:
@@ -41,8 +41,8 @@ def get_running_state() -> RunningStateData | None:
         return RunningStateData(
             running=running_state.get('running', False),
             bt_module_enabled=running_state.get('bt_module_enabled', False),
-            bt_module_state=running_state.get('bt_module_state', False),
-            switch_state=running_state.get('switch_state', False),
+            main_switch_value=running_state.get('main_switch_enabled', False),
+            bt_module_value=running_state.get('module_value', False),
         )
 
 
@@ -50,47 +50,51 @@ def get_running_state() -> RunningStateData | None:
 hardware_data = _manager.dict()
 hardware_data_lock = multiprocessing.Lock()
 def set_hardware_data(data: ParsedTeensyData | None):
+    dict_data = {
+        'compass': {
+            'heading': data.compass.heading if data else None,
+            'pitch': data.compass.pitch if data else None,
+            'roll': data.compass.roll if data else None,
+        },
+        'ir': {
+            'angle': data.ir.angle if data else None,
+            'distance': data.ir.distance if data else None,
+            'sensors': data.ir.sensors if data else None,
+            'status': data.ir.status if data else None,
+        },
+        'line_sensors': data.line if data else None,
+        'raw': data.raw if data else None,
+        'timestamp': data.timestamp if data else None,
+    }
     with hardware_data_lock:
-        dict_data = {
-            'compass': {
-                'heading': data.compass.heading if data else None,
-                'pitch': data.compass.pitch if data else None,
-                'roll': data.compass.roll if data else None,
-            },
-            'ir': {
-                'angle': data.ir.angle if data else None,
-                'distance': data.ir.distance if data else None,
-                'sensors': data.ir.sensors if data else None,
-                'status': data.ir.status if data else None,
-            },
-            'line_sensors': data.line if data else None,
-            'raw': data.raw if data else None,
-            'timestamp': data.timestamp if data else None,
-        }
         hardware_data.clear()
         hardware_data.update(dict_data)
 
 def get_hardware_data() -> ParsedTeensyData | None:
+    data_dict = None
     with hardware_data_lock:
         if not hardware_data:
             return None
-        data = ParsedTeensyData(
-            compass=CompassData(
-                heading=hardware_data['compass']['heading'],
-                pitch=hardware_data['compass']['pitch'],
-                roll=hardware_data['compass']['roll'],
-            ),
-            ir=IRData(
-                angle=hardware_data['ir']['angle'],
-                distance=hardware_data['ir']['distance'],
-                sensors=hardware_data['ir']['sensors'],
-                status=hardware_data['ir']['status'],
-            ),
-            line=hardware_data['line_sensors'],
-            raw=hardware_data['raw'],
-            timestamp=hardware_data['timestamp'],
-        )
-        return data
+        data_dict = dict(hardware_data)
+    if not data_dict:
+        return None
+    data = ParsedTeensyData(
+        compass=CompassData(
+            heading=data_dict['compass']['heading'],
+            pitch=data_dict['compass']['pitch'],
+            roll=data_dict['compass']['roll'],
+        ),
+        ir=IRData(
+            angle=data_dict['ir']['angle'],
+            distance=data_dict['ir']['distance'],
+            sensors=data_dict['ir']['sensors'],
+            status=data_dict['ir']['status'],
+        ),
+        line=data_dict['line_sensors'],
+        raw=data_dict['raw'],
+        timestamp=data_dict['timestamp'],
+    )
+    return data
 
 
 # Motor and kicker state
@@ -251,7 +255,7 @@ def set_line_detection_thresholds(thresholds: list[list[int]]) -> None:
             line_detection_thresholds[i * 2] = thresholds[i][0]  # min
             line_detection_thresholds[i * 2 + 1] = thresholds[i][1]  # max
 
-line_detected_lock = multiprocessing.Lock()
+# line_detected_lock = multiprocessing.Lock()
 line_detected = multiprocessing.Array('b', [False] * LINE_SENSOR_COUNT)
 line_calibration_min = multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT)
 line_calibration_max = multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT)

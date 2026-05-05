@@ -73,11 +73,11 @@ def stop_line_calibration(cancel: bool = False) -> tuple[list[list[int]], list[f
                         new_max = field_max
 
                         if line_center - field_center > margin:
-                            new_min = 0
+                            new_min = LINE_SENSOR_MIN_VALUE
                             new_max = int(field_max + line_max) // 2
                         elif field_center - line_center > margin:
                             new_min = int(field_min + line_min) // 2
-                            new_max = 1000
+                            new_max = LINE_SENSOR_MAX_VALUE
                         
                         thresholds.append([int(new_min), int(new_max)])
                     else:
@@ -134,8 +134,8 @@ def get_line_calibration_status() -> dict:
         }
 
 def update_line_calibration(data: ParsedTeensyData):
-    with shared_data.line_calibration_lock:
-        if shared_data.line_calibration_phase.value > 0:
+    if shared_data.line_calibration_phase.value > 0:
+        with shared_data.line_calibration_lock:
             for i, value in enumerate(data.line):
                 if i < LINE_SENSOR_COUNT:
                     shared_data.line_calibration_min[i] = min(shared_data.line_calibration_min[i], value)

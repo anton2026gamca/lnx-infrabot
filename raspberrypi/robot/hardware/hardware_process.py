@@ -15,7 +15,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     messages_received = 0
     messages_sent = 0
     corrupted_messages = 0
-    last_log_time = time.time()
+    last_log_time = time.perf_counter()
 
     compass_offset: dict[str, int] = {
         "heading": 0,
@@ -23,80 +23,81 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         "roll": 0
     }
 
-    attempts = 0
-    while True:
-        attempts += 1
-        attemt_start_time = time.time()
+    attempts = 1
+    attempt_start_time = time.perf_counter()
 
-        with TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
-            while True:
-                try:
-                    start_time = time.time()
+    with TeensyCommunicator(port=TEENSY_PORT, baud=TEENSY_BAUD, timeout=TEENSY_TIMEOUT) as communicator:
+        while True:
+            try:
+                start_time = time.perf_counter()
 
-                    line = communicator.read_line()
-                    data = None
+                data = None
 
-                    if line:
-                        messages_received += 1
+                new_messages = communicator.read_messages()
 
-                        line_type = teensy.get_line_type(line)
-
-                        try:
-                            if line_type == teensy.LineType.SENSOR_DATA:
-                                data = teensy.parse_sensor_data_line(line)
-                            elif line_type == teensy.LineType.RUNNING_STATE:
-                                state = teensy.parse_running_state_line(line)
-                                shared_data.set_running_state(state)
-                            else:
-                                corrupted_messages += 1
-                        except ValueError:
-                            corrupted_messages += 1
-                        
-                        communicator.send_motors_message(shared_data.get_motor_speeds(), shared_data.get_kicker_state())
-                        messages_sent += 1
-
-                    if data:
+                if teensy.SENSOR_DATA_MESSAGE_TYPE in new_messages:
+                    try:
+                        data = teensy.parse_sensor_data_binary(new_messages[teensy.SENSOR_DATA_MESSAGE_TYPE])
                         if data.compass.heading != 999:
-                            data.compass.heading -= compass_offset["heading"]
-                            data.compass.pitch -= compass_offset["pitch"]
-                            data.compass.roll -= compass_offset["roll"]
-                            data.compass.heading = int(utils.normalize_angle_deg(data.compass.heading))
-                        
+                            data.compass.heading = int(utils.normalize_angle_deg(data.compass.heading + compass_offset["heading"]))
+                            data.compass.pitch = int(utils.normalize_angle_deg(data.compass.pitch + compass_offset["pitch"]))
+                            data.compass.roll = int(utils.normalize_angle_deg(data.compass.roll + compass_offset["roll"]))
                         if data.ir.angle != 999:
                             data.ir.angle = int(utils.normalize_angle_deg(data.ir.angle + IR_BALL_ANGLE_OFFSET_DEG))
-                        
-                        calibration.update_line_calibration(data)
-                        line_sensors.update_line_detected(data)
                         shared_data.set_hardware_data(data)
+                        line_sensors.update_line_detected(data)
+                        calibration.update_line_calibration(data)
+                        attempt_start_time = 0
+                        messages_received += 1
+                    except ValueError as e:
+                        logger.warning(f"Corrupted message: {new_messages[teensy.SENSOR_DATA_MESSAGE_TYPE]} - {e}")
+                        corrupted_messages += 1
+                        data = None
+                if teensy.RUNNING_STATE_MESSAGE_TYPE in new_messages:
+                    try:
+                        shared_data.set_running_state(teensy.parse_running_state_binary(new_messages[teensy.RUNNING_STATE_MESSAGE_TYPE]))
+                        messages_received += 1
+                    except ValueError as e:
+                        logger.warning(f"Corrupted message: {new_messages[teensy.RUNNING_STATE_MESSAGE_TYPE]} - {e}")
+                        corrupted_messages += 1
 
-                    if not data:
-                        data = shared_data.get_hardware_data()
+                motor_speeds = shared_data.get_motor_speeds()
+                kicker_state = shared_data.get_kicker_state()
+                communicator.send_motors_message(motor_speeds, kicker_state)
+                messages_sent += 1
 
-                    if data is None and attemt_start_time + 0.5 < time.time():
-                        logger.warning(f"No data received from Teensy for 0.5 seconds, retrying connection... (attempt {attempts})")
-                        break
+                if data is None:
+                    data = shared_data.get_hardware_data()
 
-                    if shared_data.check_and_clear_compass_reset():
-                        if data:
-                            logger.info("Resetting compass position")
-                            compass_offset["heading"] += data.compass.heading
-                            compass_offset["pitch"] += data.compass.pitch
-                            compass_offset["roll"] += data.compass.roll
+                if data is None and attempt_start_time != 0 and attempt_start_time + 0.5 < time.perf_counter():
+                    logger.warning(f"No data received from Teensy for 0.5 seconds, retrying connection... (attempt {attempts})")
+                    communicator.close()
+                    time.sleep(0.1)
+                    communicator.connect()
+                    attempt_start_time = time.perf_counter()
+                    attempts += 1
 
-                    if time.time() > last_log_time + 1:
-                        logger.debug(f"Messages - Recieved: {messages_received}, Sent: {messages_sent}, Corrupted: {corrupted_messages}")
-                        messages_received = 0
-                        messages_sent = 0
-                        corrupted_messages = 0
-                        last_log_time = time.time()
+                if shared_data.check_and_clear_compass_reset():
+                    if data:
+                        logger.info("Resetting compass position")
+                        compass_offset["heading"] -= data.compass.heading
+                        compass_offset["pitch"] -= data.compass.pitch
+                        compass_offset["roll"] -= data.compass.roll
 
-                    time_elapsed = time.time() - start_time
-                    if time_elapsed < COMMUNICATION_LOOP_PERIOD:
-                        time.sleep(max(0.0, COMMUNICATION_LOOP_PERIOD - time_elapsed - 0.001))
-                except Exception as e:
-                    logger.error(f"{e}", exc_info=True)
-                    time.sleep(0.05)
+                if time.perf_counter() > last_log_time + 1:
+                    logger.debug(f"Messages - Recieved: {messages_received}, Sent: {messages_sent}, Corrupted: {corrupted_messages}")
+                    messages_received = 0
+                    messages_sent = 0
+                    corrupted_messages = 0
+                    last_log_time = time.perf_counter()
 
-                if stop_event.is_set():
-                    return
+                time_elapsed = time.perf_counter() - start_time
+                if time_elapsed < COMMUNICATION_LOOP_PERIOD:
+                    time.sleep(max(0.0, COMMUNICATION_LOOP_PERIOD - time_elapsed - 0.001))
+            except Exception as e:
+                logger.error(f"{e}", exc_info=True)
+                time.sleep(0.05)
+
+            if stop_event.is_set():
+                return
 

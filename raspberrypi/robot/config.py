@@ -14,7 +14,7 @@ CAMERA_FOV_DEG = 90
 
 # Camera performance
 CAMERA_BUFFER_COUNT = 2
-CAMERA_MAX_FPS = 60
+CAMERA_MAX_FPS = 120
 CAMERA_MIN_FRAME_INTERVAL = 1.0 / CAMERA_MAX_FPS
 
 # Frame size calculations
@@ -25,7 +25,7 @@ FRAME_SIZE_B = FRAME_HEIGHT * FRAME_WIDTH * 3  # RGB888 format (3 bytes per pixe
 # =========================== SERIAL COMMUNICATION ================================
 # Teensy serial port settings
 TEENSY_PORT = "/dev/ttyAMA0"
-TEENSY_BAUD = 168000
+TEENSY_BAUD = 230400
 TEENSY_TIMEOUT = 0.1
 
 COMMUNICATION_LOOP_FREQUENCY = 120
@@ -69,6 +69,9 @@ MOTOR_ACCELERATION_LOGIC_LOOPS = 4
 # =========================== LINE SENSOR SETTINGS ================================
 LINE_SENSOR_COUNT = 12
 LINE_SENSOR_LOCATIONS = [i * (360 / LINE_SENSOR_COUNT) for i in range(LINE_SENSOR_COUNT)]
+
+LINE_SENSOR_MIN_VALUE = 0
+LINE_SENSOR_MAX_VALUE = 4095
 
 # Default values, can be calibrated/changed via API
 DEFAULT_LINE_DETECTION_THRESHOLDS = [[400, 600]] * LINE_SENSOR_COUNT  # Array of [min, max] values

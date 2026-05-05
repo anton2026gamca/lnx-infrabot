@@ -14,20 +14,20 @@ from robot.config import *
 
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     frames_processed = 0
-    last_debug_msg_time = time.time()
+    last_debug_msg_time = time.perf_counter()
     last_frame_timestamp = None
     frame_skip_count = 0
     
     target_period = 1.0 / CAMERA_MAX_FPS
-    last_process_time = time.time()
+    last_process_time = time.perf_counter()
 
     while not stop_event.is_set():
-        elapsed = time.time() - last_process_time
+        elapsed = time.perf_counter() - last_process_time
         if elapsed < target_period * 0.95:
             time.sleep(max(0.0, target_period - elapsed - 0.0005))
             continue
         
-        last_process_time = time.time()
+        last_process_time = time.perf_counter()
 
         frame = shared_data.get_camera_frame()
         if frame is None:
@@ -112,9 +112,9 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
         frames_processed += 1
         
-        if time.time() > last_debug_msg_time + 1:
+        if time.perf_counter() > last_debug_msg_time + 1:
             logger.debug(f"Camera Processing FPS: {frames_processed}")
             frames_processed = 0
-            last_debug_msg_time += 1
+            last_debug_msg_time = time.perf_counter()
 
 
