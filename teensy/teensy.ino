@@ -52,7 +52,7 @@ bool bt_module_enabled = true;
 char message_buffer[RASPBERRY_SERIAL_BUFFER_SIZE];
 
 #define SENSOR_DATA_MESSAGE_TYPE 0x01
-#define SENSOR_DATA_MESSAGE_LENGTH 43
+#define SENSOR_DATA_MESSAGE_LENGTH 14 + LINE_SENSOR_COUNT * 3
 #define RUNNING_STATE_MESSAGE_TYPE 0x02
 #define RUNNING_STATE_MESSAGE_LENGTH 4
 #define SET_MOTORS_MESSAGE_TYPE 0xFF
@@ -384,6 +384,9 @@ bool ir_read_completed = false;
 
 // ========== Line Sensors ==========
 #define LINE_SENSOR_COUNT 12
+#define LINE_SENSOR_READ_RESOLUTION 12
+#define LINE_SENSOR_MIN_VALUE 0
+#define LINE_SENSOR_MAX_VALUE ((1 << LINE_SENSOR_READ_RESOLUTION) - 1)
 
 const int line_sensors_pin_config[LINE_SENSOR_COUNT] = {
   23, 22, 21, 20,
@@ -477,17 +480,13 @@ void print_sensor_debug_info() {
   DEBUG_PRINTLN();
 
   // Line sensors
-  DEBUG_PRINT("Line: Value: ");
+  DEBUG_PRINT("Line: Min:");
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
-    DEBUG_PRINT(sensor_data.line_data.sensor_line[i]);
     DEBUG_PRINT(" ");
-  }
-  DEBUG_PRINT("Min: ");
-  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     DEBUG_PRINT(sensor_data.line_data.sensor_line_min[i]);
-    DEBUG_PRINT(" ");
   }
-  DEBUG_PRINT("Max: ");
+  DEBUG_PRINTLN();
+  DEBUG_PRINT("      Max: ");
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
     DEBUG_PRINT(sensor_data.line_data.sensor_line_max[i]);
     DEBUG_PRINT(" ");
@@ -901,8 +900,8 @@ void read_line_sensors() {
 
 void reset_line_min_max_values() {
   for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
-    line_data.sensor_line_max[i] = 0;
-    line_data.sensor_line_min[i] = 1023;
+    line_data.sensor_line_max[i] = LINE_SENSOR_MIN_VALUE;
+    line_data.sensor_line_min[i] = LINE_SENSOR_MAX_VALUE;
   }
 }
 
@@ -984,104 +983,39 @@ void build_sensor_message(char* msg) {
 
   memset(msg, 0, RASPBERRY_SERIAL_BUFFER_SIZE);
 
-  msg[0] = '{';
-  msg[1] = SENSOR_DATA_MESSAGE_TYPE;
+  int pos = 0;
 
-  auto write16 = [&](int idx, int16_t value) {
-    msg[idx]     = value & 0xFF;
-    msg[idx + 1] = (value >> 8) & 0xFF;
+  auto write16 = [&](int16_t value) {
+    msg[pos++] = value & 0xFF;
+    msg[pos++] = (value >> 8) & 0xFF;
   };
 
-  write16(2,  sensor_data.compass_data.heading);
-  write16(4,  sensor_data.compass_data.pitch);
-  write16(6,  sensor_data.compass_data.roll);
-
-  write16(8,  sensor_data.ir_data.angle);
-  write16(10, sensor_data.ir_data.distance);
-
-  uint16_t s_min[12] = {
-    (uint16_t)sensor_data.line_data.sensor_line_min[0],
-    (uint16_t)sensor_data.line_data.sensor_line_min[1],
-    (uint16_t)sensor_data.line_data.sensor_line_min[2],
-    (uint16_t)sensor_data.line_data.sensor_line_min[3],
-    (uint16_t)sensor_data.line_data.sensor_line_min[4],
-    (uint16_t)sensor_data.line_data.sensor_line_min[5],
-    (uint16_t)sensor_data.line_data.sensor_line_min[6],
-    (uint16_t)sensor_data.line_data.sensor_line_min[7],
-    (uint16_t)sensor_data.line_data.sensor_line_min[8],
-    (uint16_t)sensor_data.line_data.sensor_line_min[9],
-    (uint16_t)sensor_data.line_data.sensor_line_min[10],
-    (uint16_t)sensor_data.line_data.sensor_line_min[11]
+  auto write2x12 = [&](uint16_t first, uint16_t second) {
+    msg[pos++] = first & 0xFF;
+    msg[pos++] = ((first >> 8) & 0x0F) | (second & 0x0F << 4);
+    msg[pos++] = (second >> 4) & 0xFF;
   };
-  uint16_t s_max[12] = {
-    (uint16_t)sensor_data.line_data.sensor_line_max[0],
-    (uint16_t)sensor_data.line_data.sensor_line_max[1],
-    (uint16_t)sensor_data.line_data.sensor_line_max[2],
-    (uint16_t)sensor_data.line_data.sensor_line_max[3],
-    (uint16_t)sensor_data.line_data.sensor_line_max[4],
-    (uint16_t)sensor_data.line_data.sensor_line_max[5],
-    (uint16_t)sensor_data.line_data.sensor_line_max[6],
-    (uint16_t)sensor_data.line_data.sensor_line_max[7],
-    (uint16_t)sensor_data.line_data.sensor_line_max[8],
-    (uint16_t)sensor_data.line_data.sensor_line_max[9],
-    (uint16_t)sensor_data.line_data.sensor_line_max[10],
-    (uint16_t)sensor_data.line_data.sensor_line_max[11]
-  };
-  msg[11 + 0] |= (uint8_t)(s_min[0] << 0);
-  msg[11 + 1] |= (uint8_t)(s_min[0] >> 8);
-  msg[11 + 1] |= (uint8_t)(s_max[0] << 2);
-  msg[11 + 2] |= (uint8_t)(s_max[0] >> 6);
-  msg[11 + 2] |= (uint8_t)(s_min[1] << 4);
-  msg[11 + 3] |= (uint8_t)(s_min[1] >> 4);
-  msg[11 + 3] |= (uint8_t)(s_max[1] << 6);
-  msg[11 + 4] |= (uint8_t)(s_max[1] >> 2);
-  msg[11 + 5] |= (uint8_t)(s_min[2] << 0);
-  msg[11 + 6] |= (uint8_t)(s_min[2] >> 8);
-  msg[11 + 6] |= (uint8_t)(s_max[2] << 2);
-  msg[11 + 7] |= (uint8_t)(s_max[2] >> 6);
-  msg[11 + 7] |= (uint8_t)(s_min[3] << 4);
-  msg[11 + 8] |= (uint8_t)(s_min[3] >> 4);
-  msg[11 + 8] |= (uint8_t)(s_max[3] << 6);
-  msg[11 + 9] |= (uint8_t)(s_max[3] >> 2);
-  msg[11 +10] |= (uint8_t)(s_min[4] << 0);
-  msg[11 +11] |= (uint8_t)(s_min[4] >> 8);
-  msg[11 +11] |= (uint8_t)(s_max[4] << 2);
-  msg[11 +12] |= (uint8_t)(s_max[4] >> 6);
-  msg[11 +12] |= (uint8_t)(s_min[5] << 4);
-  msg[11 +13] |= (uint8_t)(s_min[5] >> 4);
-  msg[11 +13] |= (uint8_t)(s_max[5] << 6);
-  msg[11 +14] |= (uint8_t)(s_max[5] >> 2);
-  msg[11 +15] |= (uint8_t)(s_min[6] << 0);
-  msg[11 +16] |= (uint8_t)(s_min[6] >> 8);
-  msg[11 +16] |= (uint8_t)(s_max[6] << 2);
-  msg[11 +17] |= (uint8_t)(s_max[6] >> 6);
-  msg[11 +17] |= (uint8_t)(s_min[7] << 4);
-  msg[11 +18] |= (uint8_t)(s_min[7] >> 4);
-  msg[11 +18] |= (uint8_t)(s_max[7] << 6);
-  msg[11 +19] |= (uint8_t)(s_max[7] >> 2);
-  msg[11 +20] |= (uint8_t)(s_min[8] << 0);
-  msg[11 +21] |= (uint8_t)(s_min[8] >> 8);
-  msg[11 +21] |= (uint8_t)(s_max[8] << 2);
-  msg[11 +22] |= (uint8_t)(s_max[8] >> 6);
-  msg[11 +22] |= (uint8_t)(s_min[9] << 4);
-  msg[11 +23] |= (uint8_t)(s_min[9] >> 4);
-  msg[11 +23] |= (uint8_t)(s_max[9] << 6);
-  msg[11 +24] |= (uint8_t)(s_max[9] >> 2);
-  msg[11 +25] |= (uint8_t)(s_min[10] << 0);
-  msg[11 +26] |= (uint8_t)(s_min[10] >> 8);
-  msg[11 +26] |= (uint8_t)(s_max[10] << 2);
-  msg[11 +27] |= (uint8_t)(s_max[10] >> 6);
-  msg[11 +27] |= (uint8_t)(s_min[11] << 4);
-  msg[11 +28] |= (uint8_t)(s_min[11] >> 4);
-  msg[11 +28] |= (uint8_t)(s_max[11] << 6);
-  msg[11 +29] |= (uint8_t)(s_max[11] >> 2);
+
+  msg[pos++] = '{';
+  msg[pos++] = SENSOR_DATA_MESSAGE_TYPE;
+
+  write16(sensor_data.compass_data.heading);
+  write16(sensor_data.compass_data.pitch);
+  write16(sensor_data.compass_data.roll);
+
+  write16(sensor_data.ir_data.angle);
+  write16(sensor_data.ir_data.distance);
+
+  for (int i = 0; i < LINE_SENSOR_COUNT; i++) {
+    write2x12(sensor_data.line_data.sensor_line_min[i], sensor_data.line_data.sensor_line_max[i]);
+  }
 
   uint8_t checksum = 0;
-  for (int i = 0; i < 11 + 36; ++i) {
+  for (int i = 0; i < pos; ++i) {
     checksum += msg[i];
   }
-  msg[41] = checksum;
-  msg[42] = '}';
+  msg[pos++] = checksum;
+  msg[pos++] = '}';
 
 #if DEBUG_PROFILING_ENABLED
   DEBUG_PROFILING_RECORD(cmd_start, "Create Sensor Message");
@@ -1102,14 +1036,33 @@ inline bool can_send_message_to_rpi(int length) {
   return RASPBERRY_SERIAL.availableForWrite() > length;
 }
 
-template<typename T> void send_message_to_rpi(T message, int length = sizeof(T)) {
+template<typename T> void send_message_to_rpi(T message, size_t length = sizeof(T)) {
 #if DEBUG_PROFILING_ENABLED
     unsigned long msg_checkpoint;
     DEBUG_PROFILING_START(msg_checkpoint);
 #endif
   RASPBERRY_SERIAL.write(message, length);
-  DEBUG_PRINT("TX: ");
-  DEBUG_PRINTLN(message);
+#if DEBUG_PRINTS_ENABLED
+  DEBUG_PRINT("TX (HEX):  ");
+  for (size_t i = 0; i < length; i++) {
+    if (message[i] <= 0x0F) DEBUG_PRINT("0");
+    DEBUG_PRINT(String(message[i], HEX));
+    DEBUG_PRINT(" ");
+  }
+
+  DEBUG_PRINTLN();
+  DEBUG_PRINT("TX (TEXT): ");
+  for (size_t i = 0; i < length; i++) {
+    uint8_t c = message[i];
+    if (c >= 32 && c <= 126) {
+      DEBUG_PRINT((char)c);
+    } else {
+      DEBUG_PRINT(".");
+    }
+    DEBUG_PRINT("  "); 
+  }
+  DEBUG_PRINTLN();
+#endif
 #if DEBUG_PROFILING_ENABLED
     DEBUG_PROFILING_RECORD(msg_checkpoint, "Message Send to RPI");
 #endif
@@ -1118,6 +1071,8 @@ template<typename T> void send_message_to_rpi(T message, int length = sizeof(T))
 
 // ========== Setup & Main Loop ==========
 void setup() {
+  analogReadResolution(LINE_SENSOR_READ_RESOLUTION);
+
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(MODULE_LED_PIN, OUTPUT);
   pinMode(MODULE_SWITCH_LED_PIN, OUTPUT);
