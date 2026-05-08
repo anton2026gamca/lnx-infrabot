@@ -476,16 +476,16 @@ def get_always_facing_goal_enabled() -> bool:
 
 
 # Bluetooth Communication
-bt_device_info = _manager.dict()  # Current device info: device_id, hostname, ip_address
-bt_devices_info = _manager.list()  # Connected devices info
-bt_paired_devices_info = _manager.list()  # All known paired devices
-bt_received_messages = _manager.list()  # Received messages history
-bt_sent_messages = _manager.list()  # Sent messages history
-bt_commands = _manager.list()  # Commands queued for bluetooth process
-bt_command_results = _manager.dict()  # command_id -> execution result
+bt_device_info = _manager.dict()
+bt_devices_info = _manager.list()
+bt_paired_devices_info = _manager.list()
+bt_received_messages = _manager.list()
+bt_sent_messages = _manager.list()
+bt_commands = _manager.list()
+bt_command_results = _manager.dict()
 bt_next_command_id = multiprocessing.Value('i', 1)
 bt_process_alive = multiprocessing.Value('b', False)
-bt_other_robot_info = _manager.dict()  # Selected peer robot metadata (mac/name/...)
+bt_other_robot_info = _manager.dict()
 bt_lock = multiprocessing.Lock()
 
 
@@ -498,21 +498,18 @@ def get_bluetooth_process_alive() -> bool:
 
 
 def set_bluetooth_device_info(info: dict) -> None:
-    """Set information about this robot's Bluetooth device"""
     with bt_lock:
         bt_device_info.clear()
         bt_device_info.update(info or {})
 
 
 def set_bluetooth_other_robot_info(info: dict) -> None:
-    """Set metadata for the selected peer robot"""
     with bt_lock:
         bt_other_robot_info.clear()
         bt_other_robot_info.update(info or {})
 
 
 def get_bluetooth_other_robot_info() -> dict:
-    """Get metadata for the selected peer robot"""
     with bt_lock:
         return dict(bt_other_robot_info) if bt_other_robot_info else {}
 
@@ -523,45 +520,38 @@ def clear_bluetooth_other_robot_info() -> None:
 
 
 def get_bluetooth_device_info() -> dict:
-    """Get information about this robot's Bluetooth device"""
     with bt_lock:
         return dict(bt_device_info) if bt_device_info else {}
 
 
 def set_bluetooth_devices_info(devices: list[dict]) -> None:
-    """Set list of currently connected remote devices"""
     with bt_lock:
         del bt_devices_info[:]
         bt_devices_info.extend(devices or [])
 
 
 def get_bluetooth_devices_info() -> list[dict]:
-    """Get list of currently connected remote devices"""
     with bt_lock:
         return list(bt_devices_info) if bt_devices_info else []
 
 
 def set_bluetooth_paired_devices_info(devices: list[dict]) -> None:
-    """Set list of all paired/known remote devices"""
     with bt_lock:
         del bt_paired_devices_info[:]
         bt_paired_devices_info.extend(devices or [])
 
 
 def get_bluetooth_paired_devices_info() -> list[dict]:
-    """Get list of all paired/known remote devices"""
     with bt_lock:
         return list(bt_paired_devices_info) if bt_paired_devices_info else []
 
 
 def add_bluetooth_received_message(message: dict) -> None:
-    """Append a received Bluetooth message to shared history"""
     with bt_lock:
         bt_received_messages.append(message or {})
 
 
 def get_bluetooth_received_messages(clear: bool = False, limit: int | None = None) -> list[dict]:
-    """Get received Bluetooth messages history"""
     with bt_lock:
         messages = list(bt_received_messages)
         if limit is not None and limit > 0:
@@ -577,13 +567,11 @@ def clear_bluetooth_received_messages() -> None:
 
 
 def add_bluetooth_sent_message(message: dict) -> None:
-    """Append a sent Bluetooth message to shared history"""
     with bt_lock:
         bt_sent_messages.append(message or {})
 
 
 def get_bluetooth_sent_messages(clear: bool = False, limit: int | None = None) -> list[dict]:
-    """Get sent Bluetooth messages history"""
     with bt_lock:
         messages = list(bt_sent_messages)
         if limit is not None and limit > 0:
@@ -599,7 +587,6 @@ def clear_bluetooth_sent_messages() -> None:
 
 
 def enqueue_bluetooth_command(command_type: str, payload: dict | None = None) -> int:
-    """Queue a low-level command for the bluetooth process and return command id"""
     with bt_next_command_id.get_lock():
         command_id = bt_next_command_id.value
         bt_next_command_id.value += 1
@@ -616,7 +603,6 @@ def enqueue_bluetooth_command(command_type: str, payload: dict | None = None) ->
 
 
 def pop_bluetooth_commands() -> list[dict]:
-    """Pop all queued bluetooth commands (used by bluetooth process)"""
     with bt_lock:
         commands = list(bt_commands)
         bt_commands[:] = []
@@ -624,7 +610,6 @@ def pop_bluetooth_commands() -> list[dict]:
 
 
 def set_bluetooth_command_result(command_id: int, success: bool, data: dict | None = None, error: str | None = None) -> None:
-    """Store command execution result (used by bluetooth process)"""
     with bt_lock:
         bt_command_results[command_id] = {
             'command_id': command_id,
@@ -636,7 +621,6 @@ def set_bluetooth_command_result(command_id: int, success: bool, data: dict | No
 
 
 def get_bluetooth_command_result(command_id: int, pop: bool = False) -> dict | None:
-    """Read command execution result"""
     with bt_lock:
         result = bt_command_results.get(command_id)
         if pop and result is not None:

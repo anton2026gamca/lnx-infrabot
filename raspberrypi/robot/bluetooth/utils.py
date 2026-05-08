@@ -103,27 +103,12 @@ def disconnect(mac_address: str, timeout_s: float = _DEFAULT_TIMEOUT_S) -> dict:
     return _execute_command("disconnect", payload={"mac_address": mac_address}, timeout_s=timeout_s)
 
 
-def add_paired_device(
-    name: str,
-    mac_address: str,
-    hostname: str | None = None,
-    ip_address: str | None = None,
-    timeout_s: float = _DEFAULT_TIMEOUT_S,
-) -> dict:
-    return _execute_command(
-        "add_paired_device",
-        payload={
-            "name": name,
-            "mac_address": mac_address,
-            "hostname": hostname,
-            "ip_address": ip_address,
-        },
-        timeout_s=timeout_s,
-    )
+def pair_device(mac_address: str, timeout_s: float = _DEFAULT_TIMEOUT_S) -> dict:
+    return _execute_command("pair_device", payload={"mac_address": mac_address}, timeout_s=timeout_s)
 
 
-def remove_paired_device(mac_address: str, timeout_s: float = _DEFAULT_TIMEOUT_S) -> dict:
-    return _execute_command("remove_paired_device", payload={"mac_address": mac_address}, timeout_s=timeout_s)
+def unpair_device(mac_address: str, timeout_s: float = _DEFAULT_TIMEOUT_S) -> dict:
+    return _execute_command("unpair_device", payload={"mac_address": mac_address}, timeout_s=timeout_s)
 
 
 def send_message(
@@ -153,17 +138,9 @@ def list_pairable_devices(timeout_seconds: int = 6, timeout_s: float = _DEFAULT_
     )
 
 
-def set_discoverable(duration_seconds: int | None = None, timeout_s: float = _DEFAULT_TIMEOUT_S) -> dict:
+def set_pairing_mode(enabled: bool, timeout_s: float = _DEFAULT_TIMEOUT_S) -> dict:
     return _execute_command(
-        "set_discoverable",
-        payload={"duration_seconds": duration_seconds},
-        timeout_s=timeout_s,
-    )
-
-
-def set_not_discoverable(timeout_s: float = _DEFAULT_TIMEOUT_S) -> dict:
-    return _execute_command(
-        "set_not_discoverable",
-        payload={},
+        "set_pairing_mode",
+        payload={"enabled": enabled},
         timeout_s=timeout_s,
     )
