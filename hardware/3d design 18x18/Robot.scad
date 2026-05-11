@@ -544,7 +544,7 @@ module all(){
     }
 }
 //handle_bracket();
-//handle();
+handle();
 //motor_brackets_all(180);
 //translate([0,0,47.5])motor_brackets_holders();
 //all();
@@ -553,7 +553,7 @@ module all(){
 *bottom_part();
 *middle_part();
 *upper_part();
-uppest_part();
+*uppest_part();
 //bottom_part();
 //bottom_wall();
 *middle_wall(0);
