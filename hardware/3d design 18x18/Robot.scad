@@ -19,6 +19,57 @@ use <IR_sensor_bracket.scad>;
 
 // IR seeker 3D model zo stranky
 // %rotate([0,0,180])translate([-21,-21,210])import("mrm-ir-finder3.stl");
+module MAXsize() {
+    cylinder(d = robot_d, h = robot_h);
+}
+//
+
+module handle() {
+    translate([0,0,30])difference() {
+        union() {
+            for(A = [1, -1]) {
+                translate([A*83,0,170])cube([10,10,80], center=true);
+                translate([A*60,0,231])rotate([0,A*-45,0])
+                    cube([10,10,68], center=true);
+            }
+            translate([0,0,253.5])cube([80,10,10], center=true);
+        }
+        for(A = [1,-1]) {
+            for (B = [10, 0]) 
+                translate([A*83,0,B+135])rotate([90,0,0])
+                    cylinder(d = 3.3, h = 200, center=true);
+        }
+    }
+}
+module handle_bracket() {
+    for (A = [0, 180]) rotate([0,0,A]) {
+        difference() {
+            union() {
+                translate([83,0,99])cube([12,85,3], center=true);
+                translate([83,0,105])cube([12,60,12], center=true);
+                for (A = [1, -1]) translate([0,0,134]) rotate([45*A,0,0]){
+                    translate([83,A*-17,0])cube([12,42,10], center=true);
+                }
+                translate([83,0,135])cube([12,20,30], center=true);
+            }
+            platform_conection_holes();
+            for(A = [1,-1]) {
+                translate([A*72,0,70])
+                    cube([26,35, 100], center=true);
+                translate([A*83,0,110])
+                    cube([11,10, 100], center=true);
+                for (B = [10, 0]) 
+                    translate([A*83,0,B+135])rotate([90,0,0])
+                        cylinder(d = 3.3, h = 200, center=true);
+            }
+
+        }
+    }
+    
+}
+
+
+
 module LED_holes(diodeDia=7,height=10){
     
             for(A=[0:15:359])rotate([0,0,A])translate([0,45,0])cylinder(d=diodeDia,h=height,center=true);
@@ -52,6 +103,20 @@ module LED_holes(diodeDia=7,height=10){
              }
 
 
+}
+module LED_shield() {
+    difference() {
+        union() {
+            translate([0,0,-5])cylinder(d=100,h=5);
+            for (A = [1, -1]) {
+                translate([A*50,0,-1])cube([20, 10, 2],center=true);
+            }
+        }
+        translate([0,0,-6])cylinder(d=95,h=7);
+        for (A = [1, -1]) {
+            translate([A*55,0,-1])cylinder(d=3.3, h=100,center=true);
+        }
+    }
 }
 module ball() {
     translate([0,-104.5,43/2])sphere(d = 43);
@@ -456,7 +521,7 @@ module all(){
         }
     }
 }
-
+handle_bracket();
 //motor_brackets_all(180);
 //translate([0,0,47.5])motor_brackets_holders();
 //all();
@@ -464,7 +529,7 @@ module all(){
 //ball();
 *bottom_part();
 *middle_part();
-upper_part();
+*upper_part();
 //bottom_part();
 //bottom_wall();
 *middle_wall(0);
