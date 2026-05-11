@@ -23,9 +23,28 @@ module MAXsize() {
     cylinder(d = robot_d, h = robot_h);
 }
 //
-
+module uppest_part() {
+    translate([0,0,200]) difference() {
+        union() {
+            cube([176, 20, 4], center = true);
+            cube([30, 30, 4], center = true);
+            for(A = [1,-1])
+                translate([A*83,0,-10])
+                    cube([10,20, 20], center=true);
+        }
+        IR_sensor_bracket_holes();
+        for(A = [1,-1])
+            translate([A*83,0,0])
+                cube([11,10, 100], center=true);
+        for(A = [1,-1]) for(B = [0: 10:10])
+            translate([A*83,0,B - 13])rotate([90,0,0])
+                cylinder(d = 3.3, h = 100, center=true);
+         
+        
+    }
+}
 module handle() {
-    translate([0,0,30])difference() {
+    translate([0,0,0])difference() {
         union() {
             for(A = [1, -1]) {
                 translate([A*83,0,170])cube([10,10,80], center=true);
@@ -39,6 +58,9 @@ module handle() {
                 translate([A*83,0,B+135])rotate([90,0,0])
                     cylinder(d = 3.3, h = 200, center=true);
         }
+        for(A = [1,-1]) for(B = [0: 10:50])
+            translate([A*83,0,B + 157])rotate([90,0,0])
+                cylinder(d = 3.3, h = 100, center=true);
     }
 }
 module handle_bracket() {
@@ -521,7 +543,8 @@ module all(){
         }
     }
 }
-handle_bracket();
+//handle_bracket();
+//handle();
 //motor_brackets_all(180);
 //translate([0,0,47.5])motor_brackets_holders();
 //all();
@@ -530,6 +553,7 @@ handle_bracket();
 *bottom_part();
 *middle_part();
 *upper_part();
+uppest_part();
 //bottom_part();
 //bottom_wall();
 *middle_wall(0);
