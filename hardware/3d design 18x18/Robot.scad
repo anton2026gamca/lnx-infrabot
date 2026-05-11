@@ -26,11 +26,12 @@ module MAXsize() {
 module uppest_part() {
     translate([0,0,200]) difference() {
         union() {
-            cube([176, 20, 4], center = true);
-            cube([30, 30, 4], center = true);
+            translate([0,0,-8])cube([155, 2.5, 20], center = true);
+            translate([0,0,0])translate([0,0,0])
+            cylinder(d = 30, h = 4, center = true);
             for(A = [1,-1])
-                translate([A*83,0,-10])
-                    cube([10,20, 20], center=true);
+                translate([A*81.75,0,-8])
+                    cube([12.5,15, 20], center=true);
         }
         IR_sensor_bracket_holes();
         for(A = [1,-1])
@@ -39,6 +40,10 @@ module uppest_part() {
         for(A = [1,-1]) for(B = [0: 10:10])
             translate([A*83,0,B - 13])rotate([90,0,0])
                 cylinder(d = 3.3, h = 100, center=true);
+        for(A = [1,-1]) for(B = [0: 10:10])
+            translate([A*83,25,B - 13])rotate([90,0,0])
+                cylinder(d = 6.4, h = 50, center=true, $fn = 6);
+        
          
         
     }
@@ -68,21 +73,24 @@ module handle_bracket() {
         difference() {
             union() {
                 translate([83,0,99])cube([12,85,3], center=true);
-                translate([83,0,105])cube([12,60,12], center=true);
+                translate([83,0,105])cube([12,60.81,11.33], center=true);
                 for (A = [1, -1]) translate([0,0,134]) rotate([45*A,0,0]){
                     translate([83,A*-17,0])cube([12,42,10], center=true);
                 }
-                translate([83,0,135])cube([12,20,30], center=true);
+                translate([83,0,135])cube([12,15,30], center=true);
             }
             platform_conection_holes();
             for(A = [1,-1]) {
                 translate([A*72,0,70])
                     cube([26,35, 100], center=true);
                 translate([A*83,0,110])
-                    cube([11,10, 100], center=true);
+                    cube([11,10.2, 100], center=true);
                 for (B = [10, 0]) 
                     translate([A*83,0,B+135])rotate([90,0,0])
                         cylinder(d = 3.3, h = 200, center=true);
+                for (B = [10, 0]) 
+                    translate([A*83,-25,B+135])rotate([90,0,0])
+                        cylinder(d = 6.4, h = 50, center=true, $fn = 6);
             }
 
         }
@@ -543,8 +551,8 @@ module all(){
         }
     }
 }
-//handle_bracket();
-handle();
+handle_bracket();
+//handle();
 //motor_brackets_all(180);
 //translate([0,0,47.5])motor_brackets_holders();
 //all();
@@ -553,7 +561,7 @@ handle();
 *bottom_part();
 *middle_part();
 *upper_part();
-*uppest_part();
+uppest_part();
 //bottom_part();
 //bottom_wall();
 *middle_wall(0);
