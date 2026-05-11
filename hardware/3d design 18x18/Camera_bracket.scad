@@ -33,6 +33,29 @@ module camera_bracket_holder() {
             cylinder(d = 44, h = 100, center=true);
     }
 }
+module camera_bracket_holder_new() {
+    translate([0,50,0]) intersection() {
+        difference() {
+            union () {
+                translate([0,-5,0])
+                    cube([41.4,41,2],center=true);
+                for (A = [1, -1]) {
+                    translate([A*16.7,-25.5,3.5])rotate([0,90,0])
+                        cylinder(d = 9, h = 8,center=true);
+                    
+                }
+            }
+            translate([0,0,0])IR_sensor_bracket_holes();
+            
+            translate([0,-29,0])cube([25.4,20,100],center=true);
+            translate([0,-25.5,3.5])rotate([0,90,0])
+                cylinder(d = 3.3, h = 80,center=true);
+            
+        }
+        translate([0,-35,0]) scale([1,2.1,1])
+            cylinder(d = 44, h = 100, center=true);
+    }
+}
 module camera_holes(dia = 2.3, height = 200) {
     translate([-10.5,10,0])
         for (A = [21, 0]) for (B = [-12.5, 0]) {
