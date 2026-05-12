@@ -39,7 +39,7 @@ module uppest_part_new() {
                     rotate([90,0,0])camera_holes();
                 }
             }
-            %translate([0,0,6])IR_sensor();
+            %translate([0,0,6])rotate([0,0,180])IR_sensor();
             cube([20,25,2],center=true);
             translate([0,0,-9])
                 cube([165, 2.5, 20], center = true);
@@ -48,9 +48,18 @@ module uppest_part_new() {
                 translate([A*81.75,0,-9])
                     cube([12.5,15, 20], center=true);
             }
+            for (A = [1, -1]) {
+                translate([A*16.7,-6,-14.5])rotate([0,90,0])
+                    cylinder(d = 9, h = 8,center=true);
+                translate([A*16.7,-3,-14.5])
+                    cube([8, 6, 9],center=true);
+                
+            }
         }
-        //IR_sensor_bracket_holes();
+        translate([0,0,-16])cube([25.4,100,25], center = true);
         rotate([0,0,180])IR_sensor_holes();
+        translate([0,-6,-14.5])rotate([0,90,0])
+            cylinder(d = 3.3, h = 100,center=true);
         for(A = [1,-1])
             translate([A*83,0,0])
                 cube([11,10.2, 100], center=true);
