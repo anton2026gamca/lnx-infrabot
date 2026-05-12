@@ -71,7 +71,7 @@ def parse_sensor_data_binary(data: bytes) -> ParsedTeensyData:
     pitch = struct.unpack('<h', data[4:6])[0]
     roll = struct.unpack('<h', data[6:8])[0]
     
-    angle = struct.unpack('<h', data[8:10])[0]
+    angle = -struct.unpack('<h', data[8:10])[0] % 360
     distance = struct.unpack('<h', data[10:12])[0]
     
     line_data_bytes = data[12:12+LINE_SENSOR_COUNT*3]
