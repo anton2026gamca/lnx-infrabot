@@ -23,6 +23,47 @@ module MAXsize() {
     cylinder(d = robot_d, h = robot_h);
 }
 //
+module uppest_part_new() {
+    translate([0,0,200]) difference() {
+        union() {
+            *translate([0,0,0])rotate([20,0,0]){
+                translate([0,0,-18]) difference() {
+                    union() rotate([90,0,0]) {
+                        translate([0,0,-5])
+                            cube([25,24,2], center=true);
+                        translate([0,0,-3.12])
+                            camera_holes(4, 3);
+                        // conection to robot construction
+                        
+                    }
+                    rotate([90,0,0])camera_holes();
+                }
+            }
+            cube([20,25,2],center=true);
+            translate([0,0,-9])
+                cube([165, 2.5, 20], center = true);
+            rotate([0,0,180])translate([0,0,5])IR_sensor_holes(4, 10);
+            for(A = [1,-1]) {
+                translate([A*81.75,0,-9])
+                    cube([12.5,15, 20], center=true);
+            }
+        }
+        //IR_sensor_bracket_holes();
+        rotate([0,0,180])IR_sensor_holes();
+        for(A = [1,-1])
+            translate([A*83,0,0])
+                cube([11,10.2, 100], center=true);
+        for(A = [1,-1]) for(B = [0: 10:10])
+            translate([A*83,0,B - 13])rotate([90,0,0])
+                cylinder(d = 3.3, h = 100, center=true);
+        for(A = [1,-1]) for(B = [0:10:10])
+            translate([A*83,25,B - 13])rotate([90,0,0])
+                cylinder(d = 6.4, h = 50, center=true, $fn = 6);
+        
+         
+        
+    }
+}
 module uppest_part() {
     translate([0,0,200]) difference() {
         union() {
@@ -581,7 +622,8 @@ module all(){
 *bottom_part();
 *middle_part();
 *upper_part();
-uppest_part();
+*uppest_part();
+uppest_part_new();
 //bottom_part();
 //bottom_wall();
 *middle_wall(0);
