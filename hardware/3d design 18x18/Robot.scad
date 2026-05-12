@@ -39,7 +39,7 @@ module uppest_part_new() {
                     rotate([90,0,0])camera_holes();
                 }
             }
-            %translate([0,0,6])rotate([0,0,180])IR_sensor();
+            //%translate([0,0,6])rotate([0,0,180])IR_sensor();
             cube([20,25,2],center=true);
             translate([0,0,-9])
                 cube([165, 2.5, 20], center = true);
