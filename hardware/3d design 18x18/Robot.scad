@@ -19,6 +19,234 @@ use <IR_sensor_bracket.scad>;
 
 // IR seeker 3D model zo stranky
 // %rotate([0,0,180])translate([-21,-21,210])import("mrm-ir-finder3.stl");
+module MAXsize() {
+    cylinder(d = robot_d, h = robot_h);
+}
+
+//
+// module uppest_part_new() {
+//     translate([0,0,200]) difference() {
+//         union() {
+//             *translate([0,0,0])rotate([20,0,0]){
+//                 translate([0,0,-18]) difference() {
+//                     union() rotate([90,0,0]) {
+//                         translate([0,0,-5])
+//                             cube([25,24,2], center=true);
+//                         translate([0,0,-3.12])
+//                             camera_holes(4, 3);
+//                         // conection to robot construction
+//                         
+//                     }
+//                     rotate([90,0,0])camera_holes();
+//                 }
+//             }
+//             //%translate([0,0,6])rotate([0,0,180])IR_sensor();
+//             cube([20,25,2],center=true);
+//             translate([0,0,-9])
+//                 cube([165, 2.5, 20], center = true);
+//             rotate([0,0,180])translate([0,0,3])IR_sensor_holes(4, 6);
+//             for(A = [1,-1]) {
+//                 translate([A*81.75,0,-9])
+//                     cube([12.5,15, 20], center=true);
+//             }
+//             for (A = [1, -1]) {
+//                 translate([A*16.7,-6,-14.5])rotate([0,90,0])
+//                     cylinder(d = 9, h = 8,center=true);
+//                 translate([A*16.7,-3,-14.5])
+//                     cube([8, 6, 9],center=true);
+//                 
+//             }
+//         }
+//         translate([0,0,-16])cube([25.4,100,25], center = true);
+//         rotate([0,0,180])IR_sensor_holes();
+//         translate([0,-6,-14.5])rotate([0,90,0])
+//             cylinder(d = 3.3, h = 100,center=true);
+//         for(A = [1,-1])
+//             translate([A*83,0,0])
+//                 cube([11,10.2, 100], center=true);
+//         for(A = [1,-1]) for(B = [0: 10:10])
+//             translate([A*83,0,B - 13])rotate([90,0,0])
+//                 cylinder(d = 3.3, h = 100, center=true);
+//         for(A = [1,-1]) for(B = [0:10:10])
+//             translate([A*83,25,B - 13])rotate([90,0,0])
+//                 cylinder(d = 6.4, h = 50, center=true, $fn = 6);
+//         
+//          
+//         
+//     }
+// }
+
+module uppest_part_new() {
+    height = 20;
+    thickness = 2.5;
+    ir_rotation_offset = 53;
+    ir_height_offset = 10;
+    ir_holders_d = 4;
+    camera_holder_d = 9;
+    camera_holder_offset = 4.5;
+
+    translate([0,0,187]) {
+        difference() {
+            cube([154, thickness, height], center=true);
+            translate([0, 0, -15.5 - height / 2 + camera_holder_d])
+                rotate([-45, 0, 0])
+                    cube([25.4, 50, 20], center=true);
+        }
+
+        translate([0, 0, height / 2 + ir_height_offset]) 
+            rotate([0, 0, ir_rotation_offset])
+                %IR_sensor();
+
+        for (dir = [1, -1]) {
+            rotate([0, 0, ir_rotation_offset]) {
+                translate([0, 0, height / 2]) {
+                    translate([dir * -7.5, dir * 10, 0]) {
+                        difference() {
+                            union() {
+                                cylinder(d=ir_holders_d, h=ir_height_offset, center=false);
+                                translate([0, 0, -4])
+                                    cylinder(d1=0, d2=ir_holders_d, h=4, center=false);
+                            }
+
+                            translate([0, 0, ir_height_offset])
+                                cylinder(d=1.6, h=ir_height_offset, center=true);
+                        }
+                    }
+                }
+            }
+
+            translate([dir * 81.75, 0, 0]) {
+                difference() {
+                    cube([12.5, 15, height], center=true);
+
+                    translate([dir * 1.25, 0, 0]) {
+                        cube([11, 10.2, height + 1], center=true);
+
+                        for (hole_dir = [-1, 1]) {
+                            translate([0, 0, hole_dir * 5]) rotate([90, 90, 0]) {
+                                cylinder(d=3.3, h=100, center=true);
+                                cylinder(d=6.4, h=50, center=false, $fn=6);
+                            }
+                        }
+                    }
+                }
+            }
+
+            translate([dir * 16.7, 0, camera_holder_d / 2 - height / 2]) {
+                rotate([0,90,0]) {
+                    translate([0, -camera_holder_offset - thickness / 2, 0]) {
+                        difference() {
+                            union() {
+                                cylinder(d=camera_holder_d, h=8, center=true);
+                                translate([0, camera_holder_offset / 2, 0])
+                                    cube([camera_holder_d, camera_holder_offset, 8], center=true);
+                            }
+                            cylinder(d=3.3, h=16, center=true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+module uppest_part() {
+    translate([0,0,200]) difference() {
+        union() {
+            *translate([0,0,0])rotate([20,0,0]){
+                translate([0,0,-18]) difference() {
+                    union() rotate([90,0,0]) {
+                        translate([0,0,-5])
+                            cube([25,24,2], center=true);
+                        translate([0,0,-3.12])
+                            camera_holes(4, 3);
+                        // conection to robot construction
+                        
+                    }
+                    rotate([90,0,0])camera_holes();
+                }
+            }
+            scale([1.3,1,1])cylinder(d = 35, h = 4, center = true);
+            for(A = [1,-1]) {
+                translate([A*46,0,-8])
+                    cube([60, 2.5, 20], center = true);
+                translate([A*81.75,0,-8])
+                    cube([12.5,15, 20], center=true);
+            }
+        }
+        IR_sensor_bracket_holes();
+        for(A = [1,-1])
+            translate([A*83,0,0])
+                cube([11,10.2, 100], center=true);
+        for(A = [1,-1]) for(B = [0: 10:10])
+            translate([A*83,0,B - 13])rotate([90,0,0])
+                cylinder(d = 3.3, h = 100, center=true);
+        for(A = [1,-1]) for(B = [0:10:10])
+            translate([A*83,25,B - 13])rotate([90,0,0])
+                cylinder(d = 6.4, h = 50, center=true, $fn = 6);
+        
+         
+        
+    }
+}
+module handle() {
+    translate([0,0,0])difference() {
+        union() {
+            for(A = [1, -1]) {
+                translate([A*83,0,170 + 7.5])cube([10,10,80 + 15], center=true);
+                translate([A*60,0,231 + 15])rotate([0,A*-45,0])
+                    cube([10,10,68], center=true);
+            }
+            translate([0,0,253.5 + 15])cube([80,10,10], center=true);
+        }
+        for(A = [1,-1]) {
+            for (B = [10, 0]) 
+                translate([A*83,0,B+135])rotate([90,0,0])
+                    cylinder(d = 3.3, h = 200, center=true);
+        }
+        for(A = [1,-1]) for(B = [0:5:60])
+            translate([A*83,0,B + 157])rotate([90,0,0])
+                cylinder(d = 3.3, h = 100, center=true);
+    }
+}
+module handle_bracket() {
+    for (A = [0, 180]) rotate([0,0,A]) {
+        difference() {
+            union() {
+                translate([83,0,99])cube([12,85,3], center=true);
+                translate([83,0,105])cube([12,60.81,11.33], center=true);
+                for (A = [1, -1]) translate([0,0,134]) rotate([45*A,0,0]){
+                    translate([83,A*-17,0])cube([12,42,10], center=true);
+                }
+                translate([83,0,135])cube([12,15,30], center=true);
+            }
+            platform_conection_holes();
+            for(C = [1,-1]) {
+                translate([C*72,0,70])
+                    cube([26,35, 100], center=true);
+                translate([C*83,0,110])
+                    cube([11,10.2, 100], center=true);
+                for (B = [10, 0]) 
+                    translate([C*83,0,B+135])rotate([90,0,0])
+                        cylinder(d = 3.3, h = 200, center=true);
+            }
+            if (A == 0)
+                for (B = [10, 0]) 
+                    rotate([90,0,0])translate([83,B+135,-20])
+                        cylinder(d = 6.4, h = 50, center=true, $fn = 6);
+            else
+                for (B = [10, 0]) 
+                    rotate([90,0,0])translate([83,B+135,20])
+                        cylinder(d = 6.4, h = 50, center=true, $fn = 6);
+
+            
+        }
+    }
+    
+}
+
+
+
 module LED_holes(diodeDia=7,height=10){
     
             for(A=[0:15:359])rotate([0,0,A])translate([0,45,0])cylinder(d=diodeDia,h=height,center=true);
@@ -52,6 +280,20 @@ module LED_holes(diodeDia=7,height=10){
              }
 
 
+}
+module LED_shield() {
+    difference() {
+        union() {
+            translate([0,0,-5])cylinder(d=100,h=5);
+            for (A = [1, -1]) {
+                translate([A*50,0,-1])cube([20, 10, 2],center=true);
+            }
+        }
+        translate([0,0,-6])cylinder(d=95,h=7);
+        for (A = [1, -1]) {
+            translate([A*55,0,-1])cylinder(d=3.3, h=100,center=true);
+        }
+    }
 }
 module ball() {
     translate([0,-104.5,43/2])sphere(d = 43);
@@ -98,28 +340,43 @@ module platform_conection_holes(diameter = 3.3, height = 500) {
 
 
 module middle_wall(USB_hole = 1) {
-    translate([0,0,55])for(A = [90, 180, 270]) for(B = [1,-1]) {
-        difference() { // screw holes
-            translate([0,0,20])
-                platform_conection_holes(13, 40-0.2);
-            platform_conection_holes(6.2);
-        }
-        for (A = [1, -1]) {
-            translate([A*89,0,20])cube([2,70,40-0.2],center=true);
-        }
-        translate([0,98,20])cube([80,2,40-0.2],center=true);
-        
-        translate([0,30,20])difference() { // wall
-            scale([1,0.855,1])cylinder(h = 40-0.2, d = 180,center=true);
-            scale([1,0.855,1])cylinder(h = 130, d = 175,center=true);
-            translate([0,-50,0])
-                cube([200,100,100],center=true);
-                cube([80,300,100],center=true);
+    difference() {
+        union() {
+            translate([0,0,55])for(A = [90, 180, 270]) for(B = [1,-1]) {
+                difference() { // screw holes
+                    translate([0,0,20])
+                        platform_conection_holes(13, 40-0.2);
+                    platform_conection_holes(7);
+                }
+                for (A = [1, -1]) {
+                    translate([A*89,0,20])cube([2,70,40-0.2],center=true);
+                }
+                translate([0,98,20])cube([80,2,40-0.2],center=true);
+                
+                translate([0,30,20])difference() { // wall
+                    scale([1,0.855,1])cylinder(h = 40-0.2, d = 180,center=true);
+                    scale([1,0.855,1])cylinder(h = 130, d = 175,center=true);
+                    translate([0,-50,0])
+                        cube([200,100,100],center=true);
+                        cube([80,300,100],center=true);
+                    
+                    
+                    
+                }
+                
+                
             
-            
+            }
+            //back camera moved to center of robot
+            *intersection() {
+                translate([0,110,95])scale([1.7,1,1])
+                    sphere(d = 51);
+                translate([0,84,44.9])cube([100,30,100],center = true);
+            }
         }
-        
-    
+        //back camera moved to center of robot
+        *translate([0,110,95])scale([1.7,1,1])
+            sphere(d = 50);
     }
 }
 
@@ -320,11 +577,25 @@ module middle_part (brackets_support = 1) {
 
 module upper_part () {
     intersection() {
-        translate([0,12,0])rotate([0,0,0])
+        translate([0,12,100])rotate([0,0,0])
             cube([180,180,200],center=true);
         difference() {
             translate([0,0,96]) union() {
                 cylinder(d=robot_d,h=2,center=true);
+                
+                translate([0,100,19])difference(){
+                    //back camera moved to center of robot
+                    *for (A = [1, -1]) {
+                        translate([A*16.7,-25.5,0])rotate([0,90,0])
+                            cylinder(d = 9, h = 8,center=true);
+                        translate([A*16.7,-25.5,-10])
+                            cube([8,9,20],center=true);
+
+                    }
+                    //back camera moved to center of robot
+                    *translate([0,-25.5,0])rotate([0,90,0])
+                        cylinder(d = 3.3, h = 80,center=true);
+                }
                 /*// SOCCER COMUNICATION MODUL
                 translate([-30-22.86/2,0,10]) {
                     cube([2.54+4,6*2.54+4,20], center = true);
@@ -338,6 +609,12 @@ module upper_part () {
                         cube([2.54+4,4*2.54+4,20],center=true);
                 }*/
             }
+            // Back camera hole
+            /* //back camera moved to center of robot
+            translate([0,100,95])cube([25.4,60,50], center=true);
+            translate([0,110,95])scale([1.7,1,1])
+                sphere(d = 50);
+            */
             // BUTTON HOLE
             
             // Motor brackets holes - if mounting it from top
@@ -364,7 +641,7 @@ module upper_part () {
             
             // SOCCER COMUNICATION MODUL 
                         //translate([-73-22.86/2,-34,100])
-            translate([-22.86/2,60,100]) {
+            translate([-22.86/2,40,100]) {
                 cube([2.54+0.5,6*2.54+0.5,100], center = true);
                 translate([22.86,2.54,0])
                     cube([2.54+0.5,4*2.54+0.5,100],center=true);
@@ -375,9 +652,15 @@ module upper_part () {
                 translate([7 * 2.54,0,0])
                     cube([2.54+0.5,4*2.54+0.5,200],center=true);
             }
-            
-            // Button ON / OFF
-            translate([-55,65,50])cube([21,15,100], center=true);
+            // Display & Rpi buttons
+            translate([0,0,0]) {
+                translate([0,65,100])
+                    cube([2.54+0.5,4*2.54+0.5,100], center = true);
+                translate([20,80,100])
+                    cube([2.54+0.5,4*2.54+0.5,100], center = true);
+            }
+            // Switch ON / OFF
+            translate([-55,65,50])cube([19,13,100], center=true);
             
             
         }
@@ -415,7 +698,8 @@ module all(){
         }
     }
 }
-
+//handle_bracket();
+handle();
 //motor_brackets_all(180);
 //translate([0,0,47.5])motor_brackets_holders();
 //all();
@@ -424,9 +708,24 @@ module all(){
 *bottom_part();
 *middle_part();
 *upper_part();
+*uppest_part();
+*uppest_part_new();
 //bottom_part();
 //bottom_wall();
+*middle_wall(0);
 
+*translate([0,99,115])rotate([0,0,180]){//front camera
+    camera_bracket_holder();
+    camera_bracket();
+    camera();
+}
+*translate([0,50,190])rotate([0,0,180]){//back camera
+    rotate([0,180,0])translate([0,0,-3.5])camera_bracket_holder_new();
+    translate([0,42.5,-21.5])rotate([-20,180,180]){
+        camera_bracket();
+        camera();
+    }
+}
 //ball_zone();
 //kicker_cutout();
 //translate([0,-70,23.1])kicker();
@@ -434,7 +733,6 @@ module all(){
 
 /*
 middle_part(0);
-//middle_wall(0);
 
 %translate([-25,-20,60.4])rotate([0,0,90])
     raspberry_bracket();
@@ -445,7 +743,7 @@ middle_part(0);
 %bottom_wall();
 /**/
 
-bottom_part();
+//bottom_part();
 
 
 
@@ -471,3 +769,4 @@ bottom_part();
 // translate([0,0,70])cube([100,50,2], center=true);
 *for (A = [1,-1])
     translate([A*75,0,20])cube([35, 60, 2], center=true);
+
