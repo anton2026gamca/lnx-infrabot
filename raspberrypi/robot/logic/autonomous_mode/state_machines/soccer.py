@@ -61,7 +61,7 @@ AUTO_GOAL_SEARCH_ROTATE_SPEED = 1.0
 # Toggle between standard attacker behaviour and goalkeeper behaviour.
 # When enabled, the robot will prioritize defending our goal and only
 # switch to attacking states when a nearby ball can be grabbed.
-GOALKEEPER_MODE_ENABLED = True
+GOALKEEPER_MODE_ENABLED = False
 
 # Goalkeeper positioning/behaviour tuning
 GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM = 320.0

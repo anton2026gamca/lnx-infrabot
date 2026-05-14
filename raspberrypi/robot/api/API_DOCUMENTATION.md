@@ -1387,9 +1387,6 @@ Pair a new Bluetooth device and store its metadata.
   event: "bluetooth_pair_device",
   data: {
     mac_address: string,
-    name: string,
-    hostname?: string,
-    ip_address?: string
   }
 }
 ```
@@ -1456,16 +1453,16 @@ Unpair a previously paired Bluetooth device.
 }
 ```
 
-### `set_bluetooth_discoverable`
+### `set_bluetooth_pairing_mode`
 
-Make this robot discoverable via Bluetooth, allowing other devices to find it.
+Set Bluetooth pairing mode (enable or disable discoverability).
 
 **Request:**
 ```typescript
 {
-  event: "set_bluetooth_discoverable",
+  event: "set_bluetooth_pairing_mode",
   data: {
-    duration_seconds?: number  // Optional duration in seconds (null/omitted = indefinite, typically ~120s)
+    enabled: boolean  // true to enable pairing mode, false to disable
   }
 }
 ```
@@ -1477,51 +1474,16 @@ Make this robot discoverable via Bluetooth, allowing other devices to find it.
   result?: {
     command_id: number,
     success: boolean,
-    data: object,
+    data: {
+      pairing_mode_enabled: boolean
+    },
     error?: string,
     timestamp: number
   },
-  discoverable?: boolean,
+  pairing_mode_enabled?: boolean,
   error?: string
 }
 ```
-
-**Notes:**
-- Requires root/sudo access on the Raspberry Pi
-- `duration_seconds` is optional; if not specified, the device remains discoverable for ~120 seconds (system default)
-- If `duration_seconds` is 0 or negative, an error is returned
-
-### `set_bluetooth_not_discoverable`
-
-Make this robot non-discoverable via Bluetooth, preventing other devices from finding it.
-
-**Request:**
-```typescript
-{
-  event: "set_bluetooth_not_discoverable",
-  data: {}
-}
-```
-
-**Response:**
-```typescript
-{
-  status: "ok" | "error",
-  result?: {
-    command_id: number,
-    success: boolean,
-    data: object,
-    error?: string,
-    timestamp: number
-  },
-  discoverable?: boolean,
-  error?: string
-}
-```
-
-**Notes:**
-- Requires root/sudo access on the Raspberry Pi
-- Immediately disables discoverable mode
 
 ---
 

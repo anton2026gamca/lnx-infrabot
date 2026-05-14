@@ -17,8 +17,8 @@ def _serialize_message(message: BluetoothMessage, sender_mac: str) -> dict:
 
 def _refresh_shared_state(manager: BluetoothManager) -> None:
     shared_data.set_bluetooth_device_info(manager.get_device_info())
-    shared_data.set_bluetooth_paired_devices_info([d.to_dict() for d in manager.get_paired_devices()])
-    shared_data.set_bluetooth_devices_info([d.to_dict() for d in manager.get_connected_devices()])
+    shared_data.set_bluetooth_paired_devices_info([d.to_dict() for d in manager.list_paired_devices()])
+    shared_data.set_bluetooth_devices_info([d.to_dict() for d in manager.list_paired_devices() if d.connected])
 
 
 def _drain_incoming_messages(manager: BluetoothManager) -> None:
@@ -26,9 +26,8 @@ def _drain_incoming_messages(manager: BluetoothManager) -> None:
     if not messages_by_mac:
         return
 
-    for sender_mac, messages in messages_by_mac.items():
-        for message in messages:
-            shared_data.add_bluetooth_received_message(_serialize_message(message, sender_mac))
+    for sender_mac, message in messages_by_mac:
+        shared_data.add_bluetooth_received_message(_serialize_message(message, sender_mac))
 
 
 def _execute_command(manager: BluetoothManager, command: dict) -> None:
@@ -41,15 +40,15 @@ def _execute_command(manager: BluetoothManager, command: dict) -> None:
             mac_address = payload.get("mac_address")
             if not mac_address:
                 raise ValueError("mac_address is required")
-            success = manager.connect_to_device(mac_address)
+            success = manager.connect(mac_address)
             shared_data.set_bluetooth_command_result(command_id, success, data={"mac_address": mac_address})
 
         elif command_type == "disconnect":
             mac_address = payload.get("mac_address")
             if not mac_address:
                 raise ValueError("mac_address is required")
-            success = manager.disconnect_from_device(mac_address)
-            shared_data.set_bluetooth_command_result(command_id, success, data={"mac_address": mac_address})
+            manager.disconnect(mac_address)
+            shared_data.set_bluetooth_command_result(command_id, True, data={"mac_address": mac_address})
 
         elif command_type == "send_message":
             mac_address = payload.get("mac_address")
@@ -64,9 +63,9 @@ def _execute_command(manager: BluetoothManager, command: dict) -> None:
             outgoing = BluetoothMessage(
                 message_type=message_type,
                 content=str(content),
-                sender_id=payload.get("sender_id"),
+                sender_id=payload.get("sender_id", ""),
             )
-            success = manager.send_message(mac_address, outgoing)
+            success = manager.send(mac_address, outgoing)
 
             if success:
                 sent_data = outgoing.to_dict()
@@ -80,26 +79,22 @@ def _execute_command(manager: BluetoothManager, command: dict) -> None:
                 error=None if success else "send failed",
             )
 
-        elif command_type == "add_paired_device":
-            name = payload.get("name")
-            mac_address = payload.get("mac_address")
-            if not name or not mac_address:
-                raise ValueError("name and mac_address are required")
-
-            device = manager.add_paired_device(
-                name=name,
-                mac_address=mac_address,
-                hostname=payload.get("hostname"),
-                ip_address=payload.get("ip_address"),
-            )
-            shared_data.set_bluetooth_command_result(command_id, True, data=device.to_dict())
-
-        elif command_type == "remove_paired_device":
+        elif command_type == "pair_device":
             mac_address = payload.get("mac_address")
             if not mac_address:
                 raise ValueError("mac_address is required")
 
-            success = manager.remove_paired_device(mac_address)
+            success = manager.pair(
+                mac_address=mac_address,
+            )
+            shared_data.set_bluetooth_command_result(command_id, success)
+
+        elif command_type == "unpair_device":
+            mac_address = payload.get("mac_address")
+            if not mac_address:
+                raise ValueError("mac_address is required")
+
+            success = manager.remove_pairing(mac_address)
             shared_data.set_bluetooth_command_result(command_id, success, data={"mac_address": mac_address})
 
         elif command_type == "refresh_state":
@@ -111,21 +106,25 @@ def _execute_command(manager: BluetoothManager, command: dict) -> None:
             if timeout_seconds <= 0:
                 raise ValueError("timeout_seconds must be positive")
 
-            devices = manager.list_pairable_devices(timeout_seconds=timeout_seconds)
+            devices = manager.scan(timeout_seconds)
+            devices_dicts = [d.to_dict() for d in devices]
             shared_data.set_bluetooth_command_result(
                 command_id,
                 True,
-                data={"devices": devices, "timeout_seconds": timeout_seconds},
+                data={"devices": devices_dicts, "timeout_seconds": timeout_seconds},
             )
 
-        elif command_type == "set_discoverable":
-            duration = payload.get("duration_seconds")
-            success = manager.set_discoverable(duration)
-            shared_data.set_bluetooth_command_result(command_id, success, data={"discoverable": True} if success else {}, error=None if success else "Failed to set discoverable")
-
-        elif command_type == "set_not_discoverable":
-            success = manager.set_not_discoverable()
-            shared_data.set_bluetooth_command_result(command_id, success, data={"discoverable": False} if success else {}, error=None if success else "Failed to set non-discoverable")
+        elif command_type == "set_pairing_mode":
+            enabled = payload.get("enabled", False)
+            if not isinstance(enabled, bool):
+                raise ValueError("enabled must be a boolean")
+            success = manager.set_pairing_mode(enabled=enabled)
+            shared_data.set_bluetooth_command_result(
+                command_id,
+                success,
+                data={"pairing_mode_enabled": enabled} if success else {},
+                error=None if success else f"Failed to set pairing mode to {enabled}"
+            )
 
         else:
             raise ValueError(f"Unknown bluetooth command: {command_type}")
@@ -138,9 +137,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     manager = BluetoothManager()
 
     try:
-        listening_ok = manager.start_listening()
-        if not listening_ok:
-            logger.warning("Bluetooth listening failed to start; command processing will continue")
+        manager.start_server()
 
         shared_data.set_bluetooth_process_alive(True)
         _refresh_shared_state(manager)
@@ -154,10 +151,10 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
             _refresh_shared_state(manager)
             time.sleep(_COMMAND_POLL_INTERVAL_S)
 
-    except Exception as exc:
-        logger.error(f"Bluetooth process crashed: {exc}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Bluetooth process crashed: {e}", exc_info=True)
     finally:
         shared_data.set_bluetooth_process_alive(False)
         shared_data.set_bluetooth_devices_info([])
-        manager.stop_listening()
+        manager.stop_server()
 

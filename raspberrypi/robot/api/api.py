@@ -377,8 +377,8 @@ def create_sensor_data() -> dict:
         running_state={
             "running": running_state.running if running_state else False,
             "bt_module_enabled": running_state.bt_module_enabled if running_state else False,
-            "bt_module_state": running_state.bt_module_state if running_state else False,
-            "switch_state": running_state.switch_state if running_state else False,
+            "bt_module_state": running_state.bt_module_value if running_state else False,
+            "switch_state": running_state.main_switch_value if running_state else False,
         } if running_state else None,
         timestamp=hw.timestamp,
     )
@@ -1194,21 +1194,12 @@ async def bluetooth_pair_device(sid: str, data: dict | None = None):
     try:
         d = data or {}
         mac_address = d.get("mac_address")
-        name = d.get("name")
         
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required")
-        if not isinstance(name, str) or not name.strip():
-            return _err("name is required")
         
-        hostname = d.get("hostname")
-        ip_address = d.get("ip_address")
-        
-        result = bluetooth_utils.add_paired_device(
-            name=name.strip(),
+        result = bluetooth_utils.pair_device(
             mac_address=mac_address.strip(),
-            hostname=hostname.strip() if hostname else None,
-            ip_address=ip_address.strip() if ip_address else None,
         )
         
         if not result.get("success", False):
@@ -1230,7 +1221,7 @@ async def bluetooth_unpair_device(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required")
         
-        result = bluetooth_utils.remove_paired_device(mac_address.strip())
+        result = bluetooth_utils.unpair_device(mac_address.strip())
         
         if not result.get("success", False):
             return _err(result.get("error") or "Failed to unpair device")
@@ -1242,41 +1233,23 @@ async def bluetooth_unpair_device(sid: str, data: dict | None = None):
 
 
 @sio.event
-async def set_bluetooth_discoverable(sid: str, data: dict | None = None):
-    """Make this robot discoverable via Bluetooth."""
+async def set_bluetooth_pairing_mode(sid: str, data: dict | None = None):
+    """Set Bluetooth pairing mode (enable/disable discoverability)."""
     try:
         d = data or {}
-        duration_raw = d.get("duration_seconds")
-        duration_seconds = None
+        enabled_raw = d.get("enabled")
         
-        if duration_raw is not None:
-            if not isinstance(duration_raw, int) or duration_raw <= 0:
-                return _err("duration_seconds must be a positive integer or null")
-            duration_seconds = duration_raw
+        if not isinstance(enabled_raw, bool):
+            return _err("enabled must be a boolean (true/false)")
         
-        result = bluetooth_utils.set_discoverable(duration_seconds=duration_seconds)
+        result = bluetooth_utils.set_pairing_mode(enabled=enabled_raw)
         
         if not result.get("success", False):
-            return _err(result.get("error") or "Failed to set discoverable")
+            return _err(result.get("error") or "Failed to set pairing mode")
         
-        return _ok(result=result, discoverable=True)
+        return _ok(result=result, pairing_mode_enabled=enabled_raw)
     except Exception as exc:
-        logger.error(f"set_bluetooth_discoverable: {exc}", exc_info=True)
-        return _err("Internal server error")
-
-
-@sio.event
-async def set_bluetooth_not_discoverable(sid: str, data: dict | None = None):
-    """Make this robot non-discoverable via Bluetooth."""
-    try:
-        result = bluetooth_utils.set_not_discoverable()
-        
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to set non-discoverable")
-        
-        return _ok(result=result, discoverable=False)
-    except Exception as exc:
-        logger.error(f"set_bluetooth_not_discoverable: {exc}", exc_info=True)
+        logger.error(f"set_bluetooth_pairing_mode: {exc}", exc_info=True)
         return _err("Internal server error")
 
 

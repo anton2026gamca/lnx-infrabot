@@ -18,7 +18,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
             logging.getLogger("picamera2.picamera2").setLevel(logging.INFO)
 
         captured_frames = 0
-        last_debug_msg_time = time.time()
+        last_debug_msg_time = time.perf_counter()
 
         logger.info("Initializing camera...")
         camera.init()
@@ -34,10 +34,10 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 time.sleep(0.001)
                 continue
             
-            if time.time() > last_debug_msg_time + 1:
+            if time.perf_counter() > last_debug_msg_time + 1:
                 logger.debug(f"Camera Capture FPS: {captured_frames}")
                 captured_frames = 0
-                last_debug_msg_time += 1
+                last_debug_msg_time = time.perf_counter()
     except KeyboardInterrupt:
         pass
     except Exception as e:
