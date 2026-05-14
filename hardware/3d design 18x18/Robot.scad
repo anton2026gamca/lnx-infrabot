@@ -22,58 +22,134 @@ use <IR_sensor_bracket.scad>;
 module MAXsize() {
     cylinder(d = robot_d, h = robot_h);
 }
+
 //
+// module uppest_part_new() {
+//     translate([0,0,200]) difference() {
+//         union() {
+//             *translate([0,0,0])rotate([20,0,0]){
+//                 translate([0,0,-18]) difference() {
+//                     union() rotate([90,0,0]) {
+//                         translate([0,0,-5])
+//                             cube([25,24,2], center=true);
+//                         translate([0,0,-3.12])
+//                             camera_holes(4, 3);
+//                         // conection to robot construction
+//                         
+//                     }
+//                     rotate([90,0,0])camera_holes();
+//                 }
+//             }
+//             //%translate([0,0,6])rotate([0,0,180])IR_sensor();
+//             cube([20,25,2],center=true);
+//             translate([0,0,-9])
+//                 cube([165, 2.5, 20], center = true);
+//             rotate([0,0,180])translate([0,0,3])IR_sensor_holes(4, 6);
+//             for(A = [1,-1]) {
+//                 translate([A*81.75,0,-9])
+//                     cube([12.5,15, 20], center=true);
+//             }
+//             for (A = [1, -1]) {
+//                 translate([A*16.7,-6,-14.5])rotate([0,90,0])
+//                     cylinder(d = 9, h = 8,center=true);
+//                 translate([A*16.7,-3,-14.5])
+//                     cube([8, 6, 9],center=true);
+//                 
+//             }
+//         }
+//         translate([0,0,-16])cube([25.4,100,25], center = true);
+//         rotate([0,0,180])IR_sensor_holes();
+//         translate([0,-6,-14.5])rotate([0,90,0])
+//             cylinder(d = 3.3, h = 100,center=true);
+//         for(A = [1,-1])
+//             translate([A*83,0,0])
+//                 cube([11,10.2, 100], center=true);
+//         for(A = [1,-1]) for(B = [0: 10:10])
+//             translate([A*83,0,B - 13])rotate([90,0,0])
+//                 cylinder(d = 3.3, h = 100, center=true);
+//         for(A = [1,-1]) for(B = [0:10:10])
+//             translate([A*83,25,B - 13])rotate([90,0,0])
+//                 cylinder(d = 6.4, h = 50, center=true, $fn = 6);
+//         
+//          
+//         
+//     }
+// }
+
 module uppest_part_new() {
-    translate([0,0,200]) difference() {
-        union() {
-            *translate([0,0,0])rotate([20,0,0]){
-                translate([0,0,-18]) difference() {
-                    union() rotate([90,0,0]) {
-                        translate([0,0,-5])
-                            cube([25,24,2], center=true);
-                        translate([0,0,-3.12])
-                            camera_holes(4, 3);
-                        // conection to robot construction
-                        
+    height = 20;
+    thickness = 2.5;
+    ir_rotation_offset = 53;
+    ir_height_offset = 10;
+    ir_holders_d = 4;
+    camera_holder_d = 9;
+    camera_holder_offset = 4.5;
+
+    translate([0,0,187]) {
+        difference() {
+            cube([154, thickness, height], center=true);
+            translate([0, 0, -15.5 - height / 2 + camera_holder_d])
+                rotate([-45, 0, 0])
+                    cube([25.4, 50, 20], center=true);
+        }
+
+        translate([0, 0, height / 2 + ir_height_offset]) 
+            rotate([0, 0, ir_rotation_offset])
+                %IR_sensor();
+
+        for (dir = [1, -1]) {
+            rotate([0, 0, ir_rotation_offset]) {
+                translate([0, 0, height / 2]) {
+                    translate([dir * -7.5, dir * 10, 0]) {
+                        difference() {
+                            union() {
+                                cylinder(d=ir_holders_d, h=ir_height_offset, center=false);
+                                translate([0, 0, -4])
+                                    cylinder(d1=0, d2=ir_holders_d, h=4, center=false);
+                            }
+
+                            translate([0, 0, ir_height_offset])
+                                cylinder(d=1.6, h=ir_height_offset, center=true);
+                        }
                     }
-                    rotate([90,0,0])camera_holes();
                 }
             }
-            //%translate([0,0,6])rotate([0,0,180])IR_sensor();
-            cube([20,25,2],center=true);
-            translate([0,0,-9])
-                cube([165, 2.5, 20], center = true);
-            rotate([0,0,180])translate([0,0,3])IR_sensor_holes(4, 6);
-            for(A = [1,-1]) {
-                translate([A*81.75,0,-9])
-                    cube([12.5,15, 20], center=true);
+
+            translate([dir * 81.75, 0, 0]) {
+                difference() {
+                    cube([12.5, 15, height], center=true);
+
+                    translate([dir * 1.25, 0, 0]) {
+                        cube([11, 10.2, height + 1], center=true);
+
+                        for (hole_dir = [-1, 1]) {
+                            translate([0, 0, hole_dir * 5]) rotate([90, 90, 0]) {
+                                cylinder(d=3.3, h=100, center=true);
+                                cylinder(d=6.4, h=50, center=false, $fn=6);
+                            }
+                        }
+                    }
+                }
             }
-            for (A = [1, -1]) {
-                translate([A*16.7,-6,-14.5])rotate([0,90,0])
-                    cylinder(d = 9, h = 8,center=true);
-                translate([A*16.7,-3,-14.5])
-                    cube([8, 6, 9],center=true);
-                
+
+            translate([dir * 16.7, 0, camera_holder_d / 2 - height / 2]) {
+                rotate([0,90,0]) {
+                    translate([0, -camera_holder_offset - thickness / 2, 0]) {
+                        difference() {
+                            union() {
+                                cylinder(d=camera_holder_d, h=8, center=true);
+                                translate([0, camera_holder_offset / 2, 0])
+                                    cube([camera_holder_d, camera_holder_offset, 8], center=true);
+                            }
+                            cylinder(d=3.3, h=16, center=true);
+                        }
+                    }
+                }
             }
         }
-        translate([0,0,-16])cube([25.4,100,25], center = true);
-        rotate([0,0,180])IR_sensor_holes();
-        translate([0,-6,-14.5])rotate([0,90,0])
-            cylinder(d = 3.3, h = 100,center=true);
-        for(A = [1,-1])
-            translate([A*83,0,0])
-                cube([11,10.2, 100], center=true);
-        for(A = [1,-1]) for(B = [0: 10:10])
-            translate([A*83,0,B - 13])rotate([90,0,0])
-                cylinder(d = 3.3, h = 100, center=true);
-        for(A = [1,-1]) for(B = [0:10:10])
-            translate([A*83,25,B - 13])rotate([90,0,0])
-                cylinder(d = 6.4, h = 50, center=true, $fn = 6);
-        
-         
-        
     }
 }
+
 module uppest_part() {
     translate([0,0,200]) difference() {
         union() {
@@ -693,3 +769,4 @@ middle_part(0);
 // translate([0,0,70])cube([100,50,2], center=true);
 *for (A = [1,-1])
     translate([A*75,0,20])cube([35, 60, 2], center=true);
+
