@@ -193,18 +193,18 @@ module handle() {
     translate([0,0,0])difference() {
         union() {
             for(A = [1, -1]) {
-                translate([A*83,0,170])cube([10,10,80], center=true);
-                translate([A*60,0,231])rotate([0,A*-45,0])
+                translate([A*83,0,170 + 7.5])cube([10,10,80 + 15], center=true);
+                translate([A*60,0,231 + 15])rotate([0,A*-45,0])
                     cube([10,10,68], center=true);
             }
-            translate([0,0,253.5])cube([80,10,10], center=true);
+            translate([0,0,253.5 + 15])cube([80,10,10], center=true);
         }
         for(A = [1,-1]) {
             for (B = [10, 0]) 
                 translate([A*83,0,B+135])rotate([90,0,0])
                     cylinder(d = 3.3, h = 200, center=true);
         }
-        for(A = [1,-1]) for(B = [0:5:45])
+        for(A = [1,-1]) for(B = [0:5:60])
             translate([A*83,0,B + 157])rotate([90,0,0])
                 cylinder(d = 3.3, h = 100, center=true);
     }
@@ -699,7 +699,7 @@ module all(){
     }
 }
 //handle_bracket();
-//handle();
+handle();
 //motor_brackets_all(180);
 //translate([0,0,47.5])motor_brackets_holders();
 //all();
@@ -709,7 +709,7 @@ module all(){
 *middle_part();
 *upper_part();
 *uppest_part();
-uppest_part_new();
+*uppest_part_new();
 //bottom_part();
 //bottom_wall();
 *middle_wall(0);
