@@ -64,24 +64,36 @@ module camera_holes(dia = 2.3, height = 200) {
     }
 }
 module camera_bracket() {
-    translate([camera_pos_x,camera_pos_y,camera_pos_z])
-    rotate([camera_angle_x,camera_angle_y,camera_angle_z])
-    translate([0,15.5,-5]) difference() {
-        union() rotate([90,0,0]) {
-            translate([0,0,-5])
-                cube([25,24,2], center=true);
-            translate([0,0,-3.12])
-                camera_holes(4, 3);
-            // conection to robot construction
-            for (A = [1, -1]) for (H = [5, -9]) {
-                translate([A*8.5,H,-9])rotate([0,90,0])
-                    cylinder(d = 9, h = 8,center=true);
-                
+    translate([camera_pos_x, camera_pos_y, camera_pos_z])
+    rotate([camera_angle_x, camera_angle_y, camera_angle_z])
+    translate([0,15.5,-5]) {
+        difference() {
+            rotate([90, 0, 0]) {
+                translate([0, 0, -5])
+                    cube([25, 24, 2], center=true);
+                translate([0, 0, -3.12])
+                    camera_holes(4, 3);
+                // conection to robot construction
+                for (A = [1, -1]) for (H = [5, -9]) {
+                    translate([A * 8.5, H, -9])rotate([0, 90, 0])
+                        cylinder(d=9, h=8, center=true);
+                    
+                }
             }
+            for (H = [5, -9]) {
+                translate([0, 9, H]) {
+                    rotate([0, 90, 0]) {
+                        cylinder(d=3.3, h=80, center=true);
+                        cylinder(d=6.4, h=12.5, center=true, $fn=6);
+                    }
+                }
+            }
+            rotate([90, 0, 0])
+                camera_holes();
+            translate([0, 10, 0]) 
+                rotate([90, 0, 0])
+                    camera_holes(4.5, 8, $fn=6);
         }
-        for (H = [5, -9]) translate([0,9,H])rotate([0,90,0])
-            cylinder(d = 3.3, h = 80,center=true);
-        rotate([90,0,0])camera_holes();
     }
 }
 module camera() {

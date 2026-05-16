@@ -723,10 +723,9 @@ uppest_part_new();
     camera();
 }
 *translate([0,50,190])rotate([0,0,180]){//back camera
-    rotate([0,180,0])translate([0,0,-3.5])camera_bracket_holder_new();
-    translate([0,42.5,-21.5])rotate([-20,180,180]){
+    translate([0,16,-3.7])rotate([20,0,0]){
         camera_bracket();
-        camera();
+        %camera();
     }
 }
 //ball_zone();
