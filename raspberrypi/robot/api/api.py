@@ -82,7 +82,6 @@ async def _stop_monitoring_loop():
     logger.info("State monitor task stopped")
 
 async def _monitor_state_changes() -> None:
-    """Continuously monitor state changes and emit updates to subscribed clients."""
     global _state_tracker
     check_interval = 0.1  # Check for changes every 100ms
     
@@ -138,7 +137,6 @@ async def _monitor_state_changes() -> None:
 
 
 async def _broadcast_update(event_name: str, data: dict) -> None:
-    """Broadcast an update event to all subscribed clients."""
     sids_to_remove = []
     for sid, sub_info in _update_subscriptions.items():
         if event_name in sub_info["subscribed_updates"]:
@@ -178,45 +176,66 @@ def _build_detected_objects(detections: list) -> list[DetectedObject]:
                 height=det.get("height", 0),
                 confidence=det.get("confidence", 0.0),
                 color=color,
+                camera=det.get("camera"),
             ))
         else:
             result.append(det)
     return result
 
 
+def _filter_raw_detections_by_camera(detections: list[dict], camera: str) -> list[dict]:
+    if camera == "both":
+        return detections
+    return [det for det in detections if det.get("camera") == camera or det.get("camera") is None]
+
+
 # ---------------------------------------------------------------------------
 # Video streaming
 # ---------------------------------------------------------------------------
 
-async def _video_loop(sid: str, fps: float, show_detections: bool) -> None:
-    """Push binary JPEG frames to a single client until cancelled."""
+async def _video_loop(sid: str, fps: float, show_detections: bool, camera: str) -> None:
     sleep_time = 1.0 / fps if fps > 0 else 0
     try:
         while True:
             if sleep_time:
                 await asyncio.sleep(sleep_time)
 
-            frame_data = shared_data.get_camera_frame()
-            if frame_data is None or frame_data.frame is None:
-                continue
+            emit_front = camera in ("front", "both")
+            emit_back = camera in ("back", "both")
+            detections_raw = shared_data.get_detected_objects_raw() if show_detections else []
 
-            frame = frame_data.frame
+            if emit_front:
+                front_frame_data = shared_data.get_camera_frame("front")
+                if front_frame_data is not None and front_frame_data.frame is not None:
+                    front_frame = front_frame_data.frame
+                    if show_detections:
+                        try:
+                            front_detections = _filter_raw_detections_by_camera(detections_raw, "front")
+                            objects = _build_detected_objects(front_detections)
+                            if objects:
+                                front_frame = vision.draw_detections_on_frame(front_frame, objects, draw_labels=True)
+                        except Exception as exc:
+                            logger.debug(f"Error drawing detections: {exc}")
 
-            if show_detections:
-                try:
-                    detections = shared_data.get_detected_objects()
-                    if isinstance(detections, list):
-                        objects = _build_detected_objects(detections)
-                        if objects:
-                            frame = vision.draw_detections_on_frame(frame, objects, draw_labels=True)
-                except Exception as exc:
-                    logger.debug(f"Error drawing detections: {exc}")
+                    ret_front, front_buffer = cv2.imencode(".jpg", front_frame, encode_params)
+                    if ret_front:
+                        await sio.emit("video_frame_front", front_buffer.tobytes(), to=sid)
 
-            ret, buffer = cv2.imencode(".jpg", frame, encode_params)
-            if not ret:
-                continue
-
-            await sio.emit("video_frame", buffer.tobytes(), to=sid)
+            if emit_back:
+                back_frame_data = shared_data.get_camera_frame("back")
+                if back_frame_data is not None and back_frame_data.frame is not None:
+                    back_frame = back_frame_data.frame
+                    if show_detections:
+                        try:
+                            back_detections = _filter_raw_detections_by_camera(detections_raw, "back")
+                            objects = _build_detected_objects(back_detections)
+                            if objects:
+                                back_frame = vision.draw_detections_on_frame(back_frame, objects, draw_labels=True)
+                        except Exception as exc:
+                            logger.debug(f"Error drawing detections: {exc}")
+                    ret_back, back_buffer = cv2.imencode(".jpg", back_frame, encode_params)
+                    if ret_back:
+                        await sio.emit("video_frame_back", back_buffer.tobytes(), to=sid)
     except asyncio.CancelledError:
         pass
     except Exception as exc:
@@ -259,9 +278,6 @@ async def disconnect(sid: str):
 
 @sio.event
 async def subscribe_updates(sid: str, data: dict | None = None):
-    """
-    Subscribe to state change notifications.
-    """
     data = data or {}
     updates = data.get("updates", {})
 
@@ -287,16 +303,13 @@ async def subscribe_updates(sid: str, data: dict | None = None):
         return _err(f"No valid updates specified. Valid events: {', '.join(sorted(valid_events))}")
 
     _update_subscriptions[sid] = {"subscribed_updates": subscribed}
-    logger.info(f"Client {sid} subscribed to updates: {subscribed}")
     return _ok(message=f"Subscribed to {len(subscribed)} update(s)")
 
 
 @sio.event
 async def unsubscribe_updates(sid: str, data: dict | None = None):
-    """Unsubscribe from state change notifications."""
     if sid in _update_subscriptions:
         _update_subscriptions.pop(sid)
-        logger.info(f"Client {sid} unsubscribed from updates")
     return _ok()
 
 
@@ -306,11 +319,6 @@ async def unsubscribe_updates(sid: str, data: dict | None = None):
 
 @sio.event
 async def subscribe_video(sid: str, data: dict | None = None):
-    """
-    Client -> subscribe_video  { fps?: number, show_detections?: bool }
-    Server -> ack              { status: "ok" | "error" }
-    Server -> video_frame      <bytes>   (repeated until unsubscribed)
-    """
     data = data or {}
     if sid in _video_tasks:
         return _ok(message="already subscribed")
@@ -323,15 +331,17 @@ async def subscribe_video(sid: str, data: dict | None = None):
         fps = API_VIDEO_TARGET_FPS
 
     show_detections = bool(data.get("show_detections", True))
+    camera = str(data.get("camera", "both")).lower()
+    if camera not in ("front", "back", "both"):
+        return _err("camera must be one of: front, back, both")
 
-    task = asyncio.create_task(_video_loop(sid, fps, show_detections))
+    task = asyncio.create_task(_video_loop(sid, fps, show_detections, camera))
     _video_tasks[sid] = task
     return _ok()
 
 
 @sio.event
 async def unsubscribe_video(sid: str, data: dict | None = None):
-    """Stop sending video frames to this client."""
     task = _video_tasks.pop(sid, None)
     if task:
         task.cancel()
@@ -432,18 +442,9 @@ async def get_motor_settings(sid: str, data: dict | None = None):
 async def get_goal_settings(sid: str, data: dict | None = None):
     try:
         goal_color = shared_data.get_goal_color()
-        y_ranges = shared_data.get_goal_calibration("yellow")
-        b_ranges = shared_data.get_goal_calibration("blue")
-        
-        y_ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in y_ranges]
-        b_ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in b_ranges]
         
         return _ok(
             goal_color=goal_color,
-            calibration={
-                "yellow": {"ranges": y_ranges_list},
-                "blue":   {"ranges": b_ranges_list},
-            },
         )
     except Exception as exc:
         logger.error(f"get_goal_settings: {exc}", exc_info=True)
@@ -451,11 +452,72 @@ async def get_goal_settings(sid: str, data: dict | None = None):
 
 
 @sio.event
+async def get_goal_color_calibration(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        camera = str(d.get("camera", "front")).lower()
+        if camera not in ("front", "back"):
+            return _err("camera must be one of: front, back")
+        y_ranges = shared_data.get_goal_calibration("yellow", camera)
+        b_ranges = shared_data.get_goal_calibration("blue", camera)
+        
+        y_ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in y_ranges]
+        b_ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in b_ranges]
+        
+        return _ok(
+            camera=camera,
+            yellow_ranges=y_ranges_list,
+            blue_ranges=b_ranges_list
+        )
+
+    except Exception as exc:
+        logger.error(f"get_goal_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
 async def get_goal_detection(sid: str, data: dict | None = None):
     try:
         result = shared_data.get_goal_detection_result()
+        enemy_color = shared_data.get_goal_color().lower()
+        own_color = "blue" if enemy_color == "yellow" else "yellow"
+        yellow_result = shared_data.get_goal_detection_result_for_color("yellow")
+        blue_result = shared_data.get_goal_detection_result_for_color("blue")
+
+        def _result_to_dict(goal_result):
+            if goal_result is None:
+                return {
+                    "goal_detected": False,
+                    "alignment": 0.0,
+                    "goal_center_x": None,
+                    "goal_area": 0.0,
+                    "distance_mm": None,
+                    "goal_height_pixels": 0.0,
+                    "camera_yaw_deg": 0.0,
+                }
+            return {
+                "goal_detected": goal_result.detected,
+                "alignment": goal_result.alignment,
+                "goal_center_x": goal_result.center_x,
+                "goal_area": goal_result.area,
+                "distance_mm": goal_result.distance_mm,
+                "goal_height_pixels": goal_result.height_pixels,
+                "camera_yaw_deg": goal_result.camera_yaw_deg,
+            }
+
         if result is None:
-            return _ok(goal_detected=False, alignment=0.0, goal_center_x=None, goal_area=0.0)
+            return _ok(
+                goal_detected=False,
+                alignment=0.0,
+                goal_center_x=None,
+                goal_area=0.0,
+                goals_by_color={
+                    "yellow": _result_to_dict(yellow_result),
+                    "blue": _result_to_dict(blue_result),
+                },
+                enemy_goal_color=enemy_color,
+                own_goal_color=own_color,
+            )
         return _ok(
             goal_detected=result.detected,
             alignment=result.alignment,
@@ -463,6 +525,13 @@ async def get_goal_detection(sid: str, data: dict | None = None):
             goal_area=result.area,
             distance_mm=result.distance_mm,
             goal_height_pixels=result.height_pixels,
+            camera_yaw_deg=result.camera_yaw_deg,
+            goals_by_color={
+                "yellow": _result_to_dict(yellow_result),
+                "blue": _result_to_dict(blue_result),
+            },
+            enemy_goal_color=enemy_color,
+            own_goal_color=own_color,
         )
     except Exception as exc:
         logger.error(f"get_goal_detection: {exc}", exc_info=True)
@@ -484,7 +553,25 @@ async def get_position_estimate(sid: str, data: dict | None = None):
 @sio.event
 async def get_detections(sid: str, data: dict | None = None):
     try:
-        return _ok(detections=shared_data.get_detected_objects_raw())
+        d = data or {}
+        camera = str(d.get("camera", "both")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
+
+        detections = shared_data.get_detected_objects_raw()
+        for d in detections:
+            if "color" not in d or d["color"] is None or d["color"] == (-1, -1, -1):
+                conf = vision.get_visualizer().get_object_type_config(d.get("object_type", ""))
+                if conf is not None:
+                    d["color"] = conf.color
+
+        return _ok(
+            camera=camera,
+            detections={
+                "front": _filter_raw_detections_by_camera(detections, "front") if camera in ["both", "front"] else None,
+                "back": _filter_raw_detections_by_camera(detections, "back") if camera in ["both", "back"] else None,
+            },
+        )
     except Exception as exc:
         logger.error(f"get_detections: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -493,9 +580,13 @@ async def get_detections(sid: str, data: dict | None = None):
 @sio.event
 async def get_ball_calibration(sid: str, data: dict | None = None):
     try:
-        ranges = shared_data.get_ball_calibration()
+        d = data or {}
+        camera = str(d.get("camera", "front")).lower()
+        if camera not in ("front", "back"):
+            return _err("camera must be one of: front, back")
+        ranges = shared_data.get_ball_calibration(camera)
         ranges_list = [{"lower": list(lower), "upper": list(upper)} for lower, upper in ranges]
-        return _ok(ranges=ranges_list)
+        return _ok(camera=camera, ranges=ranges_list)
     except Exception as exc:
         logger.error(f"get_ball_calibration: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -504,7 +595,11 @@ async def get_ball_calibration(sid: str, data: dict | None = None):
 @sio.event
 async def get_goal_focal_length(sid: str, data: dict | None = None):
     try:
-        return _ok(focal_length_pixels=shared_data.get_goal_focal_length())
+        d = data or {}
+        camera = str(d.get("camera", "front")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back")
+        return _ok(camera=camera, focal_length_pixels=shared_data.get_goal_focal_length(camera))
     except Exception as exc:
         logger.error(f"get_goal_focal_length: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -558,7 +653,6 @@ async def get_goal_distance_calibration_status(sid: str, data: dict | None = Non
 
 @sio.event
 async def set_mode(sid: str, data: dict | None = None):
-    """data: { mode: "idle" | "manual" | "autonomous" }"""
     try:
         mode = (data or {}).get("mode")
         if mode not in ["idle", "manual", "autonomous"]:
@@ -572,7 +666,6 @@ async def set_mode(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_manual_control(sid: str, data: dict | None = None):
-    """data: { move: { angle: float, speed: float }, rotate: float }"""
     try:
         d = data or {}
         move = d.get("move")
@@ -608,7 +701,6 @@ async def reset_compass(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_motor_settings(sid: str, data: dict | None = None):
-    """data: { rotation_correction_enabled?: bool, line_avoiding_enabled?: bool, ... }"""
     try:
         d = data or {}
         bool_settings = {
@@ -630,40 +722,12 @@ async def set_motor_settings(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_goal_settings(sid: str, data: dict | None = None):
-    """data: { goal_color?: str, calibration?: { yellow?: {...}, blue?: {...} } }
-    
-    Each color's calibration can have either:
-    - "ranges": [{"lower": [h,s,v], "upper": [h,s,v]}, ...] for multiple ranges
-    - "lower": [h,s,v], "upper": [h,s,v] for backward compatibility (sets single range)
-    """
     try:
         d = data or {}
         if "goal_color" in d:
             if d["goal_color"] not in ["yellow", "blue"]:
                 return _err("goal_color must be 'yellow' or 'blue'")
             calibration.set_enemy_goal_color(d["goal_color"])
-
-        cal = d.get("calibration", {})
-        for color in ("yellow", "blue"):
-            if color in cal:
-                entry = cal[color]
-                
-                # Support new format with multiple ranges
-                if "ranges" in entry and isinstance(entry["ranges"], list):
-                    ranges = []
-                    for r in entry["ranges"]:
-                        lower = r.get("lower")
-                        upper = r.get("upper")
-                        if lower and len(lower) == 3 and upper and len(upper) == 3:
-                            ranges.append((tuple(lower), tuple(upper)))
-                    if ranges:
-                        calibration.set_goal_color_ranges(color, ranges)
-                # Support old format with single range
-                elif "lower" in entry and "upper" in entry:
-                    lower = entry.get("lower")
-                    upper = entry.get("upper")
-                    if lower and len(lower) == 3 and upper and len(upper) == 3:
-                        calibration.set_goal_color_range(color, tuple(lower), tuple(upper))
         return _ok()
     except Exception as exc:
         logger.error(f"set_goal_settings: {exc}", exc_info=True)
@@ -671,17 +735,42 @@ async def set_goal_settings(sid: str, data: dict | None = None):
 
 
 @sio.event
-async def set_ball_calibration(sid: str, data: dict | None = None):
-    """data: { ranges?: [{"lower": [h,s,v], "upper": [h,s,v]}, ...], lower?: [h,s,v], upper?: [h,s,v] }
-    
-    Supports both:
-    - New format: ranges array with multiple ranges
-    - Old format: single lower/upper pair for backward compatibility
-    """
+async def set_goal_color_calibration(sid: str, data: dict | None = None):
     try:
         d = data or {}
+        camera = str(d.get("camera", "both")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
+
+        for color in ("yellow", "blue"):
+            if f"{color}_ranges" in d:
+                entry = d[f"{color}_ranges"]
+                
+                if isinstance(entry, list):
+                    ranges = []
+                    for r in entry:
+                        lower = r.get("lower")
+                        upper = r.get("upper")
+                        if lower and len(lower) == 3 and upper and len(upper) == 3:
+                            ranges.append((tuple(lower), tuple(upper)))
+                    if ranges:
+                        calibration.set_goal_color_ranges(color, ranges, camera=camera)
+                else:
+                    return _err(f"'{color}_ranges' must be an array")
+        return _ok(camera=camera)
+    except Exception as exc:
+        logger.error(f"set_goal_settings: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_ball_calibration(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        camera = str(d.get("camera", "both")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
         
-        # Support new format with multiple ranges
         if "ranges" in d and isinstance(d["ranges"], list):
             ranges = []
             for r in d["ranges"]:
@@ -690,20 +779,10 @@ async def set_ball_calibration(sid: str, data: dict | None = None):
                 if lower and len(lower) == 3 and upper and len(upper) == 3:
                     ranges.append((tuple(lower), tuple(upper)))
             if ranges:
-                calibration.set_ball_color_ranges(ranges)
-        # Support old format with single range
-        elif "lower" in d and "upper" in d:
-            lower = d.get("lower")
-            upper = d.get("upper")
-            if not lower or not upper or len(lower) != 3 or len(upper) != 3:
-                return _err("'lower' and 'upper' must be lists of 3 values")
-            calibration.set_ball_color_range(
-                tuple(int(v) for v in lower),
-                tuple(int(v) for v in upper),
-            )
+                calibration.set_ball_color_ranges(ranges, camera=camera)
         else:
-            return _err("Must provide either 'ranges' array or 'lower'/'upper' pair")
-        return _ok()
+            return _err("Must provide 'ranges' array")
+        return _ok(camera=camera)
     except Exception as exc:
         logger.error(f"set_ball_calibration: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -711,10 +790,12 @@ async def set_ball_calibration(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_goal_focal_length(sid: str, data: dict | None = None):
-    """data: { focal_length_pixels: float }"""
     try:
         d = data or {}
         fl = d.get("focal_length_pixels")
+        camera = str(d.get("camera", "both")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
         if isinstance(fl, str):
             try:
                 fl = float(fl)
@@ -722,8 +803,8 @@ async def set_goal_focal_length(sid: str, data: dict | None = None):
                 return _err("focal_length_pixels must be a positive number")
         if not isinstance(fl, (int, float)) or fl <= 0:
             return _err("focal_length_pixels must be a positive number")
-        calibration.set_goal_focal_length(float(fl))
-        return _ok(focal_length_pixels=fl)
+        calibration.set_goal_focal_length(float(fl), camera=camera)
+        return _ok(focal_length_pixels=fl, camera=camera)
     except Exception as exc:
         logger.error(f"set_goal_focal_length: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -731,7 +812,6 @@ async def set_goal_focal_length(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_autonomous_state(sid: str, data: dict | None = None):
-    """data: { name: str }"""
     try:
         state_machine = (data or {}).get("state_machine")
         if isinstance(state_machine, str):
@@ -759,7 +839,6 @@ async def set_autonomous_state(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_line_thresholds(sid: str, data: dict | None = None):
-    """data: { thresholds: [[min,max], ...] }  (LINE_SENSOR_COUNT pairs)"""
     try:
         d = data or {}
         thresholds = d.get("thresholds")
@@ -786,17 +865,19 @@ async def set_line_thresholds(sid: str, data: dict | None = None):
 
 @sio.event
 async def camera_ball_distance_calibration(sid: str, data: dict | None = None):
-    """data: { known_distance_mm: float }"""
     try:
         d = data or {}
         known = d.get("known_distance_mm")
+        camera = str(d.get("camera", "front")).lower()
+        if camera not in ("front", "back"):
+            return _err("camera must be one of: front, back")
         if known is None:
             return _err("Missing known_distance_mm")
         known = float(known)
         if known <= 0:
             return _err("known_distance_mm must be a positive number")
-        constant = calibration.calibrate_ball_distance(known)
-        return _ok(calibration_constant=constant)
+        constant = calibration.calibrate_ball_distance(known, camera=camera)
+        return _ok(camera=camera, calibration_constant=constant)
     except Exception as exc:
         logger.error(f"camera_ball_distance_calibration: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -804,21 +885,23 @@ async def camera_ball_distance_calibration(sid: str, data: dict | None = None):
 
 @sio.event
 async def add_goal_color_range(sid: str, data: dict | None = None):
-    """data: { goal_color: str, lower: [h,s,v], upper: [h,s,v] }"""
     try:
         d = data or {}
         goal_color = d.get("goal_color")
         lower = d.get("lower")
         upper = d.get("upper")
+        camera = str(d.get("camera", "both")).lower()
         
         if goal_color not in ["yellow", "blue"]:
             return _err("goal_color must be 'yellow' or 'blue'")
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
         if not lower or not upper or len(lower) != 3 or len(upper) != 3:
             return _err("'lower' and 'upper' must be lists of 3 values")
         
-        calibration.add_goal_color_range(goal_color, tuple(lower), tuple(upper))
-        ranges = calibration.get_goal_color_ranges(goal_color)
-        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+        calibration.add_goal_color_range(goal_color, tuple(lower), tuple(upper), camera=camera)
+        ranges = calibration.get_goal_color_ranges(goal_color, "front" if camera == "both" else camera)
+        return _ok(camera=camera, ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
     except Exception as exc:
         logger.error(f"add_goal_color_range: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -826,22 +909,24 @@ async def add_goal_color_range(sid: str, data: dict | None = None):
 
 @sio.event
 async def remove_goal_color_range(sid: str, data: dict | None = None):
-    """data: { goal_color: str, index: int }"""
     try:
         d = data or {}
         goal_color = d.get("goal_color")
         index = d.get("index")
+        camera = str(d.get("camera", "both")).lower()
         
         if goal_color not in ["yellow", "blue"]:
             return _err("goal_color must be 'yellow' or 'blue'")
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
         if not isinstance(index, int) or index < 0:
             return _err("index must be a non-negative integer")
         
-        if not calibration.remove_goal_color_range(goal_color, index):
+        if not calibration.remove_goal_color_range(goal_color, index, camera=camera):
             return _err(f"Invalid range index: {index}")
         
-        ranges = calibration.get_goal_color_ranges(goal_color)
-        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+        ranges = calibration.get_goal_color_ranges(goal_color, "front" if camera == "both" else camera)
+        return _ok(camera=camera, ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
     except Exception as exc:
         logger.error(f"remove_goal_color_range: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -849,18 +934,20 @@ async def remove_goal_color_range(sid: str, data: dict | None = None):
 
 @sio.event
 async def add_ball_color_range(sid: str, data: dict | None = None):
-    """data: { lower: [h,s,v], upper: [h,s,v] }"""
     try:
         d = data or {}
         lower = d.get("lower")
         upper = d.get("upper")
+        camera = str(d.get("camera", "both")).lower()
         
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
         if not lower or not upper or len(lower) != 3 or len(upper) != 3:
             return _err("'lower' and 'upper' must be lists of 3 values")
         
-        calibration.add_ball_color_range(tuple(lower), tuple(upper))
-        ranges = calibration.get_ball_color_ranges()
-        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+        calibration.add_ball_color_range(tuple(lower), tuple(upper), camera=camera)
+        ranges = calibration.get_ball_color_ranges("front" if camera == "both" else camera)
+        return _ok(camera=camera, ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
     except Exception as exc:
         logger.error(f"add_ball_color_range: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -868,19 +955,21 @@ async def add_ball_color_range(sid: str, data: dict | None = None):
 
 @sio.event
 async def remove_ball_color_range(sid: str, data: dict | None = None):
-    """data: { index: int }"""
     try:
         d = data or {}
         index = d.get("index")
+        camera = str(d.get("camera", "both")).lower()
         
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
         if not isinstance(index, int) or index < 0:
             return _err("index must be a non-negative integer")
         
-        if not calibration.remove_ball_color_range(index):
+        if not calibration.remove_ball_color_range(index, camera=camera):
             return _err(f"Invalid range index: {index}")
         
-        ranges = calibration.get_ball_color_ranges()
-        return _ok(ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
+        ranges = calibration.get_ball_color_ranges("front" if camera == "both" else camera)
+        return _ok(camera=camera, ranges=[{"lower": list(l), "upper": list(u)} for l, u in ranges])
     except Exception as exc:
         logger.error(f"remove_ball_color_range: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -888,7 +977,6 @@ async def remove_ball_color_range(sid: str, data: dict | None = None):
 
 @sio.event
 async def start_line_calibration(sid: str, data: dict | None = None):
-    """data: { phase: 1 | 2 }"""
     try:
         phase = int((data or {}).get("phase", 1))
         if phase not in [1, 2]:
@@ -936,17 +1024,19 @@ async def cancel_line_calibration(sid: str, data: dict | None = None):
 
 @sio.event
 async def start_goal_distance_calibration(sid: str, data: dict | None = None):
-    """data: { initial_distance?: float, line_distance?: float }"""
     try:
         d = data or {}
         init_dist = d.get("initial_distance", 200.0)
         line_dist = d.get("line_distance",    200.0)
+        camera = str(d.get("camera", "front")).lower()
         if not isinstance(init_dist, (int, float)) or init_dist <= 0:
             return _err("initial_distance must be a positive number")
         if not isinstance(line_dist, (int, float)) or line_dist <= 0:
             return _err("line_distance must be a positive number")
-        calibration.start_goal_distance_calibration(float(init_dist), float(line_dist))
-        return _ok(message="Drive the robot toward the enemy goal until it detects the line, then stop calibration")
+        if camera not in ("front", "back"):
+            return _err("camera must be one of: front, back")
+        calibration.start_goal_distance_calibration(float(init_dist), float(line_dist), camera=camera)
+        return _ok(camera=camera, message="Drive the robot toward the enemy goal until it detects the line, then stop calibration")
     except Exception as exc:
         logger.error(f"start_goal_distance_calibration: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -973,12 +1063,11 @@ async def cancel_goal_distance_calibration(sid: str, data: dict | None = None):
 
 @sio.event
 async def compute_hsv_from_regions(sid: str, data: dict | None = None):
-    """
-    data: { regions: [{ x, y, width, height }, ...] }
-    Returns the union HSV range across all regions.
-    """
     try:
         d = data or {}
+        camera = str(d.get("camera", "front")).lower()
+        if camera not in ("front", "back"):
+            return _err("camera must be one of: front, back")
         regions = d.get("regions", [])
         if not regions:
             return _err("Missing 'regions'")
@@ -995,9 +1084,9 @@ async def compute_hsv_from_regions(sid: str, data: dict | None = None):
             if width <= 0 or height <= 0:
                 return _err("Invalid region dimensions")
 
-            frame_data = shared_data.get_camera_frame()
+            frame_data = shared_data.get_camera_frame(camera)
             if frame_data is None or frame_data.frame is None:
-                return _err("No camera frame available")
+                return _err(f"No {camera} camera frame available")
             frame = frame_data.frame
 
             fh, fw = frame.shape[:2]
@@ -1039,7 +1128,6 @@ async def compute_hsv_from_regions(sid: str, data: dict | None = None):
 
 @sio.event
 async def get_bluetooth_state(sid: str, data: dict | None = None):
-    """Get Bluetooth process/device status and selected peer robot metadata."""
     try:
         return _ok(
             process_alive=bluetooth_utils.is_bluetooth_process_alive(),
@@ -1055,7 +1143,6 @@ async def get_bluetooth_state(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_other_robot(sid: str, data: dict | None = None):
-    """Set metadata for the selected remote robot (name/mac/etc)."""
     try:
         d = data or {}
         if d.get("clear") is True:
@@ -1084,7 +1171,6 @@ async def set_other_robot(sid: str, data: dict | None = None):
 
 @sio.event
 async def bluetooth_connect_other_robot(sid: str, data: dict | None = None):
-    """Connect to selected robot (or explicit mac_address) via Bluetooth."""
     try:
         d = data or {}
         mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
@@ -1103,7 +1189,6 @@ async def bluetooth_connect_other_robot(sid: str, data: dict | None = None):
 
 @sio.event
 async def bluetooth_disconnect_other_robot(sid: str, data: dict | None = None):
-    """Disconnect from selected robot (or explicit mac_address)."""
     try:
         d = data or {}
         mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
@@ -1122,7 +1207,6 @@ async def bluetooth_disconnect_other_robot(sid: str, data: dict | None = None):
 
 @sio.event
 async def bluetooth_send_message(sid: str, data: dict | None = None):
-    """Send a custom Bluetooth message to selected robot or explicit mac_address."""
     try:
         d = data or {}
         mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
@@ -1152,7 +1236,6 @@ async def bluetooth_send_message(sid: str, data: dict | None = None):
 
 @sio.event
 async def get_bluetooth_messages(sid: str, data: dict | None = None):
-    """Get Bluetooth incoming/outgoing message history."""
     try:
         d = data or {}
         clear = bool(d.get("clear", False))
@@ -1170,7 +1253,6 @@ async def get_bluetooth_messages(sid: str, data: dict | None = None):
 
 @sio.event
 async def bluetooth_list_pairable_devices(sid: str, data: dict | None = None):
-    """List discoverable Bluetooth devices available for pairing."""
     try:
         d = data or {}
         timeout_raw = d.get("timeout_seconds", 6)
@@ -1190,7 +1272,6 @@ async def bluetooth_list_pairable_devices(sid: str, data: dict | None = None):
 
 @sio.event
 async def bluetooth_pair_device(sid: str, data: dict | None = None):
-    """Pair a Bluetooth device and store its metadata."""
     try:
         d = data or {}
         mac_address = d.get("mac_address")
@@ -1213,7 +1294,6 @@ async def bluetooth_pair_device(sid: str, data: dict | None = None):
 
 @sio.event
 async def bluetooth_unpair_device(sid: str, data: dict | None = None):
-    """Unpair a Bluetooth device."""
     try:
         d = data or {}
         mac_address = d.get("mac_address")
@@ -1234,7 +1314,6 @@ async def bluetooth_unpair_device(sid: str, data: dict | None = None):
 
 @sio.event
 async def set_bluetooth_pairing_mode(sid: str, data: dict | None = None):
-    """Set Bluetooth pairing mode (enable/disable discoverability)."""
     try:
         d = data or {}
         enabled_raw = d.get("enabled")

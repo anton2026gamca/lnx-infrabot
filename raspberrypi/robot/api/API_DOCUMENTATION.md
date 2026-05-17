@@ -302,20 +302,35 @@ Get goal detection color and calibration ranges.
 {
   status: "ok",
   goal_color: "yellow" | "blue",
-  calibration: {
-    yellow: {
-      ranges: Array<{
-        lower: [number, number, number],  // [H, S, V]
-        upper: [number, number, number]   // [H, S, V]
-      }>
-    },
-    blue: {
-      ranges: Array<{
-        lower: [number, number, number],
-        upper: [number, number, number]
-      }>
-    }
+}
+```
+
+### `get_goal_color_calibration`
+
+Get goal color calibration ranges used for goal detection.
+
+**Request:**
+```typescript
+{
+  event: "get_goal_color_calibration",
+  data: {
+    camera: "front" | "back"
   }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok"
+  yellow_ranges: Array<{
+    lower: [number, number, number],  // [H, S, V]
+    upper: [number, number, number]   // [H, S, V]
+  }>
+  blue_ranges: Array<{
+    lower: [number, number, number],  // [H, S, V]
+    upper: [number, number, number]   // [H, S, V]
+  }>
 }
 ```
 
@@ -373,13 +388,15 @@ Get estimated robot position on the field.
 
 ### `get_detections`
 
-Get all detected objects in the current frame.
+Get detected objects, optionally filtered by camera.
 
 **Request:**
 ```typescript
 {
   event: "get_detections",
-  data: {}
+  data: {
+    camera?: "front" | "back" | "both" // Default: "both"
+  }
 }
 ```
 
@@ -387,15 +404,29 @@ Get all detected objects in the current frame.
 ```typescript
 {
   status: "ok",
-  detections: Array<{
-    object_type: string,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    confidence: number,  // 0.0 to 1.0
-    color: [number, number, number]  // [R, G, B]
-  }>
+  camera: "front" | "back" | "both",
+  detections: {
+    front?: Array<{
+      object_type: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      confidence: number,
+      color: [number, number, number], // [B, G, R]
+      camera: "front" | "back" | null
+    }>,
+    back?: Array<{
+      object_type: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      confidence: number,
+      color: [number, number, number], // [B, G, R]
+      camera: "front" | "back" | null
+    }>
+  }
 }
 ```
 
@@ -407,7 +438,9 @@ Get current ball color calibration ranges.
 ```typescript
 {
   event: "get_ball_calibration",
-  data: {}
+  data: {
+    camera?: "front" | "back" // Default: "front"
+  }
 }
 ```
 
@@ -415,6 +448,7 @@ Get current ball color calibration ranges.
 ```typescript
 {
   status: "ok",
+  camera: "front" | "back",
   ranges: Array<{
     lower: [number, number, number],  // [H, S, V]
     upper: [number, number, number]   // [H, S, V]
@@ -430,7 +464,9 @@ Get the focal length used for distance calculations.
 ```typescript
 {
   event: "get_goal_focal_length",
-  data: {}
+  data: {
+    camera?: "front" | "back" // Default: "front"
+  }
 }
 ```
 
@@ -438,6 +474,7 @@ Get the focal length used for distance calculations.
 ```typescript
 {
   status: "ok",
+  camera: "front" | "back",
   focal_length_pixels: number
 }
 ```
@@ -525,10 +562,12 @@ Get goal distance calibration status.
 {
   status: "ok",
   active: boolean,
-  initial_distance_mm: number,
-  line_distance_mm: number,
-  samples: number,
-  distance_constant: number | null
+  phase?: "initial" | "driving",
+  initial_distance_mm?: number,
+  line_distance_mm?: number,
+  initial_height_pixels?: number | null,
+  line_height_pixels?: number | null,
+  camera?: "front" | "back"
 }
 ```
 
@@ -630,49 +669,43 @@ Update motor control settings.
 
 ### `set_goal_settings`
 
-Update goal color and calibration ranges.
+Update goal settings
 
-**Request (New Format - Multiple Ranges):**
+**Request:**
 ```typescript
 {
   event: "set_goal_settings",
   data: {
     goal_color?: "yellow" | "blue",
-    calibration?: {
-      yellow?: {
-        ranges: Array<{
-          lower: [number, number, number],  // [H, S, V]
-          upper: [number, number, number]
-        }>
-      },
-      blue?: {
-        ranges: Array<{
-          lower: [number, number, number],
-          upper: [number, number, number]
-        }>
-      }
-    }
   }
 }
 ```
 
-**Request (Legacy Format - Single Range):**
+**Response:**
 ```typescript
 {
-  event: "set_goal_settings",
-  data: {
-    goal_color?: "yellow" | "blue",
-    calibration?: {
-      yellow?: {
-        lower: [number, number, number],
-        upper: [number, number, number]
-      },
-      blue?: {
-        lower: [number, number, number],
-        upper: [number, number, number]
-      }
-    }
-  }
+  status: "ok" | "error",
+  error?: string
+}
+```
+
+### `set_goal_color_calibration`
+
+Update goal color calibration ranges
+
+**Request:**
+```typescript
+{
+  event: "set_goal_color_calibration"
+  camera: "front" | "back" | "both"
+  yellow_ranges?: Array<{
+    lower: [number, number, number],  // [H, S, V]
+    upper: [number, number, number]
+  }>
+  blue_ranges?: Array<{
+    lower: [number, number, number],
+    upper: [number, number, number]
+  }>
 }
 ```
 
@@ -688,26 +721,16 @@ Update goal color and calibration ranges.
 
 Update ball color calibration ranges.
 
-**Request (New Format - Multiple Ranges):**
+**Request:**
 ```typescript
 {
   event: "set_ball_calibration",
   data: {
+    camera?: "front" | "back" | "both", // Default: "both"
     ranges: Array<{
       lower: [number, number, number],  // [H, S, V]
       upper: [number, number, number]
     }>
-  }
-}
-```
-
-**Request (Legacy Format - Single Range):**
-```typescript
-{
-  event: "set_ball_calibration",
-  data: {
-    lower: [number, number, number],    // [H, S, V]
-    upper: [number, number, number]
   }
 }
 ```
@@ -729,7 +752,8 @@ Set the focal length for goal distance calculations.
 {
   event: "set_goal_focal_length",
   data: {
-    focal_length_pixels: number  // Must be positive
+    focal_length_pixels: number,  // Must be positive
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -805,7 +829,8 @@ Calibrate ball distance detection. Place ball at a known distance and call this 
 {
   event: "camera_ball_distance_calibration",
   data: {
-    known_distance_mm: number  // Distance from camera to ball in millimeters
+    known_distance_mm: number,  // Distance from camera to ball in millimeters
+    camera?: "front" | "back"   // Default: "front"
   }
 }
 ```
@@ -830,7 +855,8 @@ Add a new HSV range for goal color detection.
   data: {
     goal_color: "yellow" | "blue",
     lower: [number, number, number],  // [H, S, V]
-    upper: [number, number, number]   // [H, S, V]
+    upper: [number, number, number],  // [H, S, V]
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -857,7 +883,8 @@ Remove a goal color range by index.
   event: "remove_goal_color_range",
   data: {
     goal_color: "yellow" | "blue",
-    index: number  // Index of the range to remove
+    index: number,  // Index of the range to remove
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -884,7 +911,8 @@ Add a new HSV range for ball color detection.
   event: "add_ball_color_range",
   data: {
     lower: [number, number, number],  // [H, S, V]
-    upper: [number, number, number]   // [H, S, V]
+    upper: [number, number, number],  // [H, S, V]
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -910,7 +938,8 @@ Remove a ball color range by index.
 {
   event: "remove_ball_color_range",
   data: {
-    index: number  // Index of the range to remove
+    index: number,  // Index of the range to remove
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -1012,7 +1041,8 @@ Begin goal distance calibration. Drive robot toward goal until it hits the line.
   event: "start_goal_distance_calibration",
   data: {
     initial_distance?: number,  // Initial distance in mm (default: 200)
-    line_distance?: number      // Expected line distance in mm (default: 200)
+    line_distance?: number,     // Expected line distance in mm (default: 200)
+    camera?: "front" | "back"   // Default: "front"
   }
 }
 ```
@@ -1042,7 +1072,8 @@ Stop goal distance calibration and save results.
 ```typescript
 {
   status: "ok" | "error",
-  distance_constant?: number,
+  focal_length_pixels?: number,
+  camera?: "front" | "back",
   message?: string,
   error?: string
 }
@@ -1078,6 +1109,7 @@ Analyze selected image regions and compute HSV ranges.
 {
   event: "compute_hsv_from_regions",
   data: {
+    camera?: "front" | "back",  // Default: "front"
     regions: Array<{
       x: number,       // X coordinate
       y: number,       // Y coordinate
@@ -1491,7 +1523,7 @@ Set Bluetooth pairing mode (enable or disable discoverability).
 
 ### `subscribe_video`
 
-Start receiving video frames from the robot's camera.
+Start receiving video frames from the robot cameras.
 
 **Request:**
 ```typescript
@@ -1499,7 +1531,8 @@ Start receiving video frames from the robot's camera.
   event: "subscribe_video",
   data: {
     fps?: number,              // Frames per second (default from config)
-    show_detections?: boolean  // Overlay detection boxes (default: true)
+    show_detections?: boolean, // Overlay detection boxes on the streamed camera(s) (default: true)
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -1515,12 +1548,17 @@ Start receiving video frames from the robot's camera.
 
 **Emitted Events:**
 
-**`video_frame`** - Binary JPEG frame data (repeated until unsubscribed)
+**`video_frame_front`** - Binary JPEG frame data from the front camera
 ```typescript
 <bytes>  // Raw JPEG image data
 ```
 
-The client receives raw JPEG bytes which can be decoded and displayed as video. Frames are sent continuously at the specified FPS rate.
+**`video_frame_back`** - Binary JPEG frame data from the back camera
+```typescript
+<bytes>  // Raw JPEG image data
+```
+
+When `camera: "both"` is used, the server emits both `video_frame_front` and `video_frame_back`.
 
 ### `unsubscribe_video`
 
@@ -1592,7 +1630,8 @@ socket.on('connect', () => {
   // Subscribe to video
   socket.emit('subscribe_video', {
     fps: 30,
-    show_detections: true
+    show_detections: true,
+    camera: 'both'
   });
 });
 
@@ -1601,9 +1640,15 @@ socket.on('important_sensor_data_change', (data) => {
   console.log('Sensor data changed:', data);
 });
 
-// Listen for video frames
-socket.on('video_frame', (frameData) => {
-  // frameData is binary JPEG data
+socket.on('video_frame_front', (frameData) => {
+  // Front camera (binary JPEG data)
+  const blob = new Blob([frameData], { type: 'image/jpeg' });
+  const url = URL.createObjectURL(blob);
+  // Display in <img src={url} /> or canvas
+});
+
+socket.on('video_frame_back', (frameData) => {
+  // Back camera (binary JPEG data)
   const blob = new Blob([frameData], { type: 'image/jpeg' });
   const url = URL.createObjectURL(blob);
   // Display in <img src={url} /> or canvas

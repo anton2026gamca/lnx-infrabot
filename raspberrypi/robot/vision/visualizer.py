@@ -14,6 +14,7 @@ class DetectedObject:
     height: int       # Bounding box height
     confidence: float | None = None # 0.0 to 1.0, optional confidence metric
     color: tuple[int, int, int] = (-1, -1, -1) # BGR color for drawing
+    camera: str | None = None # "front" | "back" | None
 
 @dataclass
 class ObjectTypeConfig:
@@ -188,4 +189,3 @@ def draw_detections_on_frame(
     """
     visualizer = get_visualizer()
     return visualizer.draw_detections(frame, detections, draw_labels, alpha)
-
