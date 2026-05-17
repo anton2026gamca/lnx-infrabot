@@ -537,11 +537,17 @@ Get current line calibration status.
 ```typescript
 {
   status: "ok",
-  phase: number,              // 0 = idle, 1 = phase 1, 2 = phase 2
-  line_sensor_count: number,
-  min_values: number[],
-  max_values: number[],
-  thresholds: [[number, number], ...]
+  active: boolean,                         // true when calibration is running
+  phase: number,                           // 0 = idle, 1 = phase 1, 2 = phase 2
+  current_thresholds: Array<[number, number]>,
+  calibration_min: Array<number | null> | null,   // current phase min values
+  calibration_max: Array<number | null> | null,   // current phase max values
+  phase1_complete: boolean,
+  phase1_min: Array<number | null> | null,
+  phase1_max: Array<number | null> | null,
+  phase2_complete: boolean,
+  phase2_min: Array<number | null> | null,
+  phase2_max: Array<number | null> | null
 }
 ```
 
@@ -840,6 +846,36 @@ Calibrate ball distance detection. Place ball at a known distance and call this 
 {
   status: "ok" | "error",
   calibration_constant?: number,
+  error?: string
+}
+```
+
+### `camera_auto_calibration`
+
+Temporarily enable camera AWB and AE so the camera can adapt to current lighting, then disable both again and copy the learned values to all other cameras.
+
+**Request:**
+```typescript
+{
+  event: "camera_auto_calibration",
+  data: {
+    camera?: "front" | "back", // Default: "front"
+    settle_time_s?: number              // Seconds to keep AWB/AE enabled (default: 2.0)
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  camera?: "front" | "back" | "both",
+  result?: {
+    color_gains: [number, number],    // [red_gain, blue_gain]
+    exposure_time: number | null,     // microseconds
+    analogue_gain: number | null,
+    settle_time_s: number
+  },
   error?: string
 }
 ```

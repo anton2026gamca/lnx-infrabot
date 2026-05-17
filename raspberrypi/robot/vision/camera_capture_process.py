@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import logging
 import multiprocessing.synchronize
 import numpy as np
@@ -34,6 +35,36 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
             raise RuntimeError("No cameras available")
         
         while not stop_event.is_set():
+            calibration_request = shared_data.claim_camera_auto_calibration_request()
+            if calibration_request:
+                request_id = int(calibration_request.get("request_id", 0))
+                target_camera = str(calibration_request.get("camera", "front")).lower()
+                settle_time_s = float(calibration_request.get("settle_time_s", 2.0))
+
+                try:
+                    if target_camera not in available_cameras:
+                        raise RuntimeError(f"{target_camera} camera is not available")
+
+                    calibration_result = camera.calibrate_auto_controls(target_camera, settle_time_s)
+
+                    for camera_name in available_cameras:
+                        if camera_name == target_camera:
+                            continue
+                        camera.apply_auto_calibration_result(camera_name, calibration_result)
+
+                    shared_data.set_camera_auto_calibration_result(
+                        request_id=request_id,
+                        success=True,
+                        result={"camera": target_camera, "result": calibration_result},
+                    )
+                except Exception as e:
+                    logger.error(f"Camera auto calibration failed: {e}", exc_info=True)
+                    shared_data.set_camera_auto_calibration_result(
+                        request_id=request_id,
+                        success=False,
+                        error=str(e),
+                    )
+
             had_capture_error = False
             for camera_name in available_cameras:
                 try:
@@ -61,4 +92,3 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 shared_data.set_camera_frame(FrameData(frame=black_frame, timestamp=time.time()), camera_name=camera_name)
         except Exception | KeyboardInterrupt:
             pass
-

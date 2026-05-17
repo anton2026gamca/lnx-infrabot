@@ -55,33 +55,101 @@ def capture_frame(camera_name: str = "front") -> FrameData:
     return FrameData(frame=frame_rgb, timestamp=time.time())
 
 
-def calibrate_color_gains(camera_name: str = "front") -> tuple[int, int] | None:
+def calibrate_auto_controls(camera_name: str = "front", settle_time_s: float = 2.0) -> dict:
     """
-    Enables AWB momentarily to find the best ratios for current lighting,
-    then locks them in. Best used when pointing at a white/gray card.
+    Temporarily enables AWB and AE to adapt to current lighting,
+    then locks the discovered values by disabling both again.
     """
     picam = _picams.get(camera_name)
     if picam is None:
         raise RuntimeError("Camera not initialized. Call init_camera() first.")
+    if settle_time_s <= 0:
+        raise ValueError("settle_time_s must be > 0")
 
-    _logger.info(f"({camera_name.title()} Camera) Starting color calibration (AWB enabled)...")
+    _logger.info(
+        f"({camera_name.title()} Camera) Starting camera auto calibration "
+        f"(AWB+AE enabled for {settle_time_s:.2f}s)..."
+    )
     
-    picam.set_controls({"AwbEnable": True})
+    picam.set_controls({"AwbEnable": True, "AeEnable": True})
     
-    time.sleep(2.0)
+    time.sleep(settle_time_s)
     
     metadata = picam.capture_metadata()
     gains = metadata.get("ColourGains")
+    exposure_time = metadata.get("ExposureTime")
+    analogue_gain = metadata.get("AnalogueGain")
+
+    controls: dict = {
+        "AwbEnable": False,
+        "AeEnable": False,
+    }
+    if gains and len(gains) >= 2:
+        controls["ColourGains"] = (float(gains[0]), float(gains[1]))
+    if exposure_time is not None:
+        controls["ExposureTime"] = int(exposure_time)
+    if analogue_gain is not None:
+        controls["AnalogueGain"] = float(analogue_gain)
+    picam.set_controls(controls)
     
     if gains:
-        red_gain, blue_gain = gains[0], gains[1]
-        picam.set_controls({
-            "AwbEnable": False,
-            "ColourGains": (red_gain, blue_gain)
-        })
-        _logger.info(f"({camera_name.title()} Camera) Calibration complete. Locked Gains -> Red: {red_gain:.3f}, Blue: {blue_gain:.3f}")
-        return (red_gain, blue_gain)
-    else:
-        _logger.warning(f"({camera_name.title()} Camera) Calibration failed: Could not retrieve ColourGains metadata.")
-        return None
+        red_gain, blue_gain = float(gains[0]), float(gains[1])
+        _logger.info(
+            f"({camera_name.title()} Camera) Calibration complete. "
+            f"Locked Gains -> Red: {red_gain:.3f}, Blue: {blue_gain:.3f}, "
+            f"ExposureTime: {exposure_time}, AnalogueGain: {analogue_gain}"
+        )
+        return {
+            "color_gains": [red_gain, blue_gain],
+            "exposure_time": int(exposure_time) if exposure_time is not None else None,
+            "analogue_gain": float(analogue_gain) if analogue_gain is not None else None,
+            "settle_time_s": float(settle_time_s),
+        }
+    raise RuntimeError(f"({camera_name.title()} Camera) Calibration failed: Could not retrieve ColourGains metadata.")
 
+
+def apply_auto_calibration_result(camera_name: str, calibration_result: dict) -> dict:
+    picam = _picams.get(camera_name)
+    if picam is None:
+        raise RuntimeError("Camera not initialized. Call init_camera() first.")
+
+    gains = calibration_result.get("color_gains")
+    exposure_time = calibration_result.get("exposure_time")
+    analogue_gain = calibration_result.get("analogue_gain")
+    settle_time_s = calibration_result.get("settle_time_s")
+
+    if not isinstance(gains, list) or len(gains) != 2:
+        raise ValueError("calibration_result.color_gains must contain exactly 2 values")
+
+    controls = {
+        "AwbEnable": False,
+        "AeEnable": False,
+        "ColourGains": (float(gains[0]), float(gains[1])),
+    }
+    if exposure_time is not None:
+        controls["ExposureTime"] = int(exposure_time)
+    if analogue_gain is not None:
+        controls["AnalogueGain"] = float(analogue_gain)
+
+    picam.set_controls(controls)
+    _logger.info(
+        f"({camera_name.title()} Camera) Applied calibration result from reference camera. "
+        f"Gains={controls['ColourGains']}, ExposureTime={controls.get('ExposureTime')}, "
+        f"AnalogueGain={controls.get('AnalogueGain')}, settle_time_s={settle_time_s}"
+    )
+    return {
+        "color_gains": [float(gains[0]), float(gains[1])],
+        "exposure_time": int(exposure_time) if exposure_time is not None else None,
+        "analogue_gain": float(analogue_gain) if analogue_gain is not None else None,
+        "settle_time_s": float(settle_time_s) if settle_time_s is not None else None,
+    }
+
+
+def calibrate_color_gains(camera_name: str = "front") -> tuple[float, float] | None:
+    result = calibrate_auto_controls(camera_name=camera_name, settle_time_s=2.0)
+    if not result:
+        return None
+    gains = result.get("color_gains")
+    if not isinstance(gains, list) or len(gains) != 2:
+        return None
+    return (float(gains[0]), float(gains[1]))

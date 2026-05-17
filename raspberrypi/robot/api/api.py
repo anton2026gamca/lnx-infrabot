@@ -884,6 +884,47 @@ async def camera_ball_distance_calibration(sid: str, data: dict | None = None):
 
 
 @sio.event
+async def camera_auto_calibration(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        camera_name = str(d.get("camera", "both")).lower()
+        if camera_name not in ("front", "back"):
+            return _err("camera must be one of: front, back")
+
+        settle_time_s = d.get("settle_time_s", 2.0)
+        if isinstance(settle_time_s, str):
+            try:
+                settle_time_s = float(settle_time_s)
+            except ValueError:
+                return _err("settle_time_s must be a positive number")
+        if not isinstance(settle_time_s, (int, float)) or settle_time_s <= 0:
+            return _err("settle_time_s must be a positive number")
+
+        request_id = shared_data.request_camera_auto_calibration(
+            camera=camera_name,
+            settle_time_s=float(settle_time_s),
+        )
+        if request_id is None:
+            return _err("A camera auto calibration is already in progress")
+
+        timeout_s = float(settle_time_s) + 5.0
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        while asyncio.get_running_loop().time() < deadline:
+            result = shared_data.get_camera_auto_calibration_result(request_id)
+            if result and result.get("done", False):
+                if result.get("success", False):
+                    payload = result.get("result", {})
+                    return _ok(camera=payload.get("camera", camera_name), result=payload.get("result", {}))
+                return _err(result.get("error") or "Camera auto calibration failed")
+            await asyncio.sleep(0.05)
+
+        return _err("Camera auto calibration timed out")
+    except Exception as exc:
+        logger.error(f"camera_auto_calibration: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
 async def add_goal_color_range(sid: str, data: dict | None = None):
     try:
         d = data or {}

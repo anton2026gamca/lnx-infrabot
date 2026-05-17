@@ -228,6 +228,71 @@ def get_camera_frame(camera_name: str = "front") -> FrameData | None:
         return None
 
 
+# Camera auto calibration (handled by camera_capture_process)
+camera_auto_calibration_lock = multiprocessing.Lock()
+camera_auto_calibration_request = _manager.dict()
+camera_auto_calibration_result = _manager.dict()
+camera_auto_calibration_next_request_id = multiprocessing.Value('i', 1)
+
+def request_camera_auto_calibration(camera: str = "front", settle_time_s: float = 2.0) -> int | None:
+    with camera_auto_calibration_lock:
+        if camera_auto_calibration_request.get("active", False):
+            return None
+        request_id = int(camera_auto_calibration_next_request_id.value)
+        camera_auto_calibration_next_request_id.value += 1
+
+        camera_name = _normalize_camera_name(camera, allow_both=True)
+        camera_auto_calibration_request.clear()
+        camera_auto_calibration_request.update({
+            "active": True,
+            "request_id": request_id,
+            "camera": camera_name,
+            "settle_time_s": float(settle_time_s),
+            "requested_at": time.time(),
+        })
+
+        camera_auto_calibration_result.clear()
+        camera_auto_calibration_result.update({
+            "request_id": request_id,
+            "done": False,
+            "success": False,
+        })
+        return request_id
+
+def claim_camera_auto_calibration_request() -> dict | None:
+    with camera_auto_calibration_lock:
+        if not camera_auto_calibration_request.get("active", False):
+            return None
+        request = dict(camera_auto_calibration_request)
+        camera_auto_calibration_request["active"] = False
+        return request
+
+def set_camera_auto_calibration_result(
+    request_id: int,
+    success: bool,
+    result: dict | None = None,
+    error: str | None = None,
+) -> None:
+    with camera_auto_calibration_lock:
+        camera_auto_calibration_result.clear()
+        camera_auto_calibration_result.update({
+            "request_id": int(request_id),
+            "done": True,
+            "success": bool(success),
+            "result": dict(result or {}),
+            "error": error,
+            "completed_at": time.time(),
+        })
+
+def get_camera_auto_calibration_result(request_id: int) -> dict | None:
+    with camera_auto_calibration_lock:
+        if not camera_auto_calibration_result:
+            return None
+        if int(camera_auto_calibration_result.get("request_id", -1)) != int(request_id):
+            return None
+        return dict(camera_auto_calibration_result)
+
+
 # Detected objects by camera
 detected_objects = _manager.list()
 detected_objects_lock = multiprocessing.Lock()
