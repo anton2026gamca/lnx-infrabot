@@ -6,15 +6,18 @@ from dataclasses import dataclass
 from robot.vision.visualizer import DetectedObject
 
 
+MORPH_OPEN_KERNEL_3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
-@dataclass
+
+
+@dataclass(slots=True)
 class CameraBallData:
     angle: float
     distance: float
     detected: bool
     area_pixels: float
 
-@dataclass
+@dataclass(slots=True)
 class BallPossessionArea:
     """Represents the ball possession detection area and status."""
     x: int                  # Top-left x coordinate
@@ -22,7 +25,6 @@ class BallPossessionArea:
     width: int              # Area width in pixels
     height: int             # Area height in pixels
     possessed: bool         # Whether ball is possessed (enough orange pixels detected)
-
 
 def detect_ball(
     hsv_frame: np.ndarray,
@@ -44,42 +46,47 @@ def detect_ball(
     """
     if hsv_frame is None or hsv_frame.size == 0:
         return [], False
-    
-    mask = None
+
     if isinstance(ball_lower, list):
-        for lower, upper in zip(ball_lower, ball_upper):
-            range_mask = cv2.inRange(hsv_frame, lower, upper)
-            mask = range_mask if mask is None else cv2.bitwise_or(mask, range_mask)
+        if not ball_lower or not isinstance(ball_upper, list):
+            return [], False
+        mask = cv2.inRange(hsv_frame, ball_lower[0], ball_upper[0])
+        for lower, upper in zip(ball_lower[1:], ball_upper[1:]):
+            cv2.bitwise_or(mask, cv2.inRange(hsv_frame, lower, upper), dst=mask)
     elif isinstance(ball_lower, np.ndarray) and isinstance(ball_upper, np.ndarray):
         mask = cv2.inRange(hsv_frame, ball_lower, ball_upper)
+    else:
+        return [], False
 
     if mask is None:
         return [], False
-    
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    detections = []
-    if contours:
-        largest_contour = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(largest_contour)
-        
-        if area >= min_area:
-            x, y, w, h = cv2.boundingRect(largest_contour)
-            confidence = min(1.0, area / 5000.0)
-            detections.append(DetectedObject(
-                object_type="ball",
-                x=x,
-                y=y,
-                width=w,
-                height=h,
-                confidence=confidence
-            ))
-    
-    return detections, len(detections) > 0
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, MORPH_OPEN_KERNEL_3, iterations=1)
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if num_labels <= 1:
+        return [], False
+
+    component_stats = stats[1:]
+    largest_idx_rel = int(np.argmax(component_stats[:, cv2.CC_STAT_AREA]))
+    largest_area = int(component_stats[largest_idx_rel, cv2.CC_STAT_AREA])
+    if largest_area < min_area:
+        return [], False
+
+    largest_idx = largest_idx_rel + 1
+    x = int(stats[largest_idx, cv2.CC_STAT_LEFT])
+    y = int(stats[largest_idx, cv2.CC_STAT_TOP])
+    w = int(stats[largest_idx, cv2.CC_STAT_WIDTH])
+    h = int(stats[largest_idx, cv2.CC_STAT_HEIGHT])
+    confidence = min(1.0, largest_area / 5000.0)
+    detection = DetectedObject(
+        object_type="ball",
+        x=x,
+        y=y,
+        width=w,
+        height=h,
+        confidence=confidence,
+    )
+    return [detection], True
 
 def calculate_ball_data(ball_detections, frame_width: float, camera_fov: float, calibration_constant: float) -> CameraBallData:
     camera_ball_angle = 999.0
@@ -153,4 +160,3 @@ def detect_ball_possession(
         x=area_x, y=area_y, width=area_width, height=area_height,
         possessed=possessed
     )
-

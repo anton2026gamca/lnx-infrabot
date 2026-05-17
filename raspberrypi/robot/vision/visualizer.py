@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 
-@dataclass
+@dataclass(slots=True)
 class DetectedObject:
     """Represents a detected object with its bounding box and metadata."""
     object_type: str  # "goal_yellow", "goal_blue", "ball", etc.
@@ -16,7 +16,7 @@ class DetectedObject:
     color: tuple[int, int, int] = (-1, -1, -1) # BGR color for drawing
     camera: str | None = None # "front" | "back" | None
 
-@dataclass
+@dataclass(slots=True)
 class ObjectTypeConfig:
     """Configuration for a specific object type."""
     color: tuple[int, int, int]   # BGR color for drawing

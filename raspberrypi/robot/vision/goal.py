@@ -8,14 +8,17 @@ from robot.vision.visualizer import DetectedObject
 from robot.config import *
 
 
+MORPH_OPEN_KERNEL_3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
-@dataclass
+
+
+@dataclass(slots=True)
 class GoalColorCalibration:
     """HSV color ranges for goal detection - supports multiple ranges per color"""
     yellow_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([20, 100, 100]), np.array([30, 255, 255]))])
     blue_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([100, 100, 100]), np.array([130, 255, 255]))])
 
-@dataclass
+@dataclass(slots=True)
 class GoalDetectionResult:
     alignment: float            # -1.0 (too far left) to 1.0 (too far right), 0.0 is centered
     detected: bool
@@ -26,7 +29,7 @@ class GoalDetectionResult:
     camera_yaw_deg: float = 0.0 # 0=front camera, 180=back camera
     _rect: tuple[int, int, int, int, float] | None = None  # Cached bounding rect (x, y, w, h) for visualization
 
-@dataclass
+@dataclass(slots=True)
 class PositionEstimate:
     x_mm: float
     y_mm: float
@@ -144,26 +147,32 @@ def _get_goal_bounding_rect(
     else:
         return 0, 0, 0, 0, 0.0
     
-    mask = None
-    for lower, upper in ranges:
-        range_mask = cv2.inRange(hsv_frame, lower, upper)
-        mask = range_mask if mask is None else cv2.bitwise_or(mask, range_mask)
+    if not ranges:
+        return 0, 0, 0, 0, 0.0
+
+    mask = cv2.inRange(hsv_frame, ranges[0][0], ranges[0][1])
+    for lower, upper in ranges[1:]:
+        cv2.bitwise_or(mask, cv2.inRange(hsv_frame, lower, upper), dst=mask)
     
     if mask is None:
         return 0, 0, 0, 0, 0.0
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, MORPH_OPEN_KERNEL_3, iterations=1)
     
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
         return 0, 0, 0, 0, 0.0
     
-    largest_contour = max(contours, key=cv2.contourArea)
-    goal_area = cv2.contourArea(largest_contour)
+    largest_contour = None
+    largest_area = 0.0
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area > largest_area:
+            largest_area = area
+            largest_contour = contour
     
-    if goal_area < min_area:
+    if largest_area < min_area or largest_contour is None:
         return 0, 0, 0, 0, 0.0
     
     x, y, w, h = cv2.boundingRect(largest_contour)
