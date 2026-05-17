@@ -3,6 +3,7 @@ import math
 import numpy as np
 from dataclasses import dataclass
 
+from robot.profiling import profile_function
 from robot.vision.visualizer import DetectedObject
 
 
@@ -26,6 +27,7 @@ class BallPossessionArea:
     height: int             # Area height in pixels
     possessed: bool         # Whether ball is possessed (enough orange pixels detected)
 
+@profile_function
 def detect_ball(
     hsv_frame: np.ndarray,
     ball_lower: np.ndarray | list[np.ndarray],
@@ -88,6 +90,7 @@ def detect_ball(
     )
     return [detection], True
 
+@profile_function
 def calculate_ball_data(ball_detections, frame_width: float, camera_fov: float, calibration_constant: float) -> CameraBallData:
     camera_ball_angle = 999.0
     camera_ball_distance = 0.0
@@ -114,6 +117,7 @@ def calculate_ball_data(ball_detections, frame_width: float, camera_fov: float, 
         camera_ball_area,
     )
 
+@profile_function
 def detect_ball_possession(
     ball_center_x: float | None,
     ball_center_y: float | None,
@@ -160,3 +164,4 @@ def detect_ball_possession(
         x=area_x, y=area_y, width=area_width, height=area_height,
         possessed=possessed
     )
+

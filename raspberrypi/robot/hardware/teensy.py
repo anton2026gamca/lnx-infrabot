@@ -8,6 +8,12 @@ from dataclasses import asdict, dataclass
 from serial.tools import list_ports
 import serial
 
+try:
+    from robot.profiling import profile_function
+except ImportError:
+    def profile_function(func):
+        return func
+
 
 
 logger = logging.getLogger("Teensy Communication")
@@ -58,6 +64,7 @@ class ParsedTeensyData:
     timestamp: float
 
 
+@profile_function
 def parse_sensor_data_binary(data: bytes) -> ParsedTeensyData:
     if len(data) != SENSOR_DATA_MESSAGE_LENGTH:
         raise ValueError(f"Sensor data length invalid: expected {SENSOR_DATA_MESSAGE_LENGTH}, got {len(data)}")
@@ -100,6 +107,7 @@ class RunningStateData:
     bt_module_enabled: bool
     bt_module_value: bool
 
+@profile_function
 def parse_running_state_binary(data: bytes) -> RunningStateData:
     if len(data) != 4:
         raise ValueError(f"Running state message length invalid: expected 4, got {len(data)}")
@@ -129,6 +137,7 @@ def open_serial(port: str | None = None, baud: int = DEFAULT_TEENSY_BAUD, timeou
         raise RuntimeError(f"Failed to open serial port {port}: {e}.{hint}") from e
 
 
+@profile_function
 def format_message(motor_speeds: list[int], kicker_state: bool) -> bytes:
     """Format motor control message for Teensy.
     
@@ -197,6 +206,7 @@ class TeensyCommunicator:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
     
+    @profile_function
     def read_messages(self) -> dict[int, bytes]:
         if self.ser is None:
             raise RuntimeError("Serial port not open. Call connect() first.")
@@ -269,6 +279,7 @@ class TeensyCommunicator:
             raise RuntimeError("Serial port not open. Call connect() first.")
         self.ser.write(message)
     
+    @profile_function
     def send_motors_message(self, motor_speeds: list, kicker_state: bool) -> None:
         message = format_message(motor_speeds, kicker_state)
         self.send_message(message)

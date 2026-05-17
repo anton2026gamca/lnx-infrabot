@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from robot import calibration, utils, vision
 from robot.multiprocessing import shared_data
+from robot.profiling import profile_function
 
 from robot.vision import GoalColorCalibration, GoalDetectionResult, DetectedObject
 from robot.config import *
@@ -92,6 +93,7 @@ def _build_camera_runtime_state() -> dict[str, dict]:
     }
 
 
+@profile_function
 def _refresh_camera_runtime_state(
     camera_name: str,
     camera_state: dict,
@@ -139,6 +141,7 @@ def _refresh_camera_runtime_state(
     camera_state["ball_calibration_constant"] = shared_data.get_camera_ball_calibration_constant(camera_name)
 
 
+@profile_function
 def _process_camera_frame(
     frame_entry: tuple[str, float, np.ndarray],
     camera_state: dict,
@@ -215,6 +218,7 @@ def _process_camera_frame(
     }
 
 
+@profile_function
 def _fuse_goal_results(results: list[GoalDetectionResult]) -> GoalDetectionResult:
     if not results:
         return GoalDetectionResult(0.0, False, None, 0.0, None, 0.0)
@@ -231,6 +235,7 @@ def _fuse_goal_results(results: list[GoalDetectionResult]) -> GoalDetectionResul
     return best
 
 
+@profile_function
 def _fuse_ball_data(
     data: list[vision.CameraBallData],
     ir_ball_angle: float | None,
@@ -439,3 +444,4 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 )
                 frames_processed = 0
                 last_debug_msg_time = time.perf_counter()
+

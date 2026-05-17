@@ -9,6 +9,7 @@ except ImportError:
 
 from robot import utils
 from robot.config import *
+from robot.profiling import profile_function
 
 
 
@@ -22,6 +23,7 @@ class FrameData:
 _picams: dict = {}
 
 
+@profile_function
 def init(camera_name: str = "front", camera_index: int | None = None):
     """Must be called from within the process that will use it."""
     if Picamera2 is None:
@@ -47,6 +49,7 @@ def init(camera_name: str = "front", camera_index: int | None = None):
     _picams[camera_name] = picam
 
 
+@profile_function
 def capture_frame(camera_name: str = "front") -> FrameData:
     picam = _picams.get(camera_name)
     if picam is None:
@@ -55,6 +58,7 @@ def capture_frame(camera_name: str = "front") -> FrameData:
     return FrameData(frame=frame_rgb, timestamp=time.time())
 
 
+@profile_function
 def calibrate_auto_controls(camera_name: str = "front", settle_time_s: float = 2.0) -> dict:
     """
     Temporarily enables AWB and AE to adapt to current lighting,
@@ -108,6 +112,7 @@ def calibrate_auto_controls(camera_name: str = "front", settle_time_s: float = 2
     raise RuntimeError(f"({camera_name.title()} Camera) Calibration failed: Could not retrieve ColourGains metadata.")
 
 
+@profile_function
 def apply_auto_calibration_result(camera_name: str, calibration_result: dict) -> dict:
     picam = _picams.get(camera_name)
     if picam is None:
@@ -145,6 +150,7 @@ def apply_auto_calibration_result(camera_name: str, calibration_result: dict) ->
     }
 
 
+@profile_function
 def calibrate_color_gains(camera_name: str = "front") -> tuple[float, float] | None:
     result = calibrate_auto_controls(camera_name=camera_name, settle_time_s=2.0)
     if not result:
@@ -153,3 +159,4 @@ def calibrate_color_gains(camera_name: str = "front") -> tuple[float, float] | N
     if not isinstance(gains, list) or len(gains) != 2:
         return None
     return (float(gains[0]), float(gains[1]))
+

@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 import logging
 import multiprocessing.synchronize
 import numpy as np
@@ -6,11 +5,71 @@ import time
 
 from robot import utils
 from robot.multiprocessing import shared_data
+from robot.profiling import profile_function
 from robot.vision import camera
 
 from robot.vision.camera import FrameData
 from robot.config import *
 
+
+
+@profile_function
+def _initialize_cameras(logger: logging.Logger) -> list[str]:
+    available_cameras: list[str] = []
+    for camera_name, camera_index in [("front", CAMERA_FRONT_INDEX), ("back", CAMERA_BACK_INDEX)]:
+        try:
+            logger.info(f"Initializing {camera_name} camera (index {camera_index})...")
+            camera.init(camera_name=camera_name, camera_index=camera_index)
+            available_cameras.append(camera_name)
+            logger.info(f"{camera_name.capitalize()} camera initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize {camera_name} camera: {e}", exc_info=True)
+    return available_cameras
+
+
+@profile_function
+def _handle_auto_calibration(calibration_request: dict, available_cameras: list[str], logger: logging.Logger) -> None:
+    request_id = int(calibration_request.get("request_id", 0))
+    target_camera = str(calibration_request.get("camera", "front")).lower()
+    settle_time_s = float(calibration_request.get("settle_time_s", 2.0))
+
+    try:
+        if target_camera not in available_cameras:
+            raise RuntimeError(f"{target_camera} camera is not available")
+
+        calibration_result = camera.calibrate_auto_controls(target_camera, settle_time_s)
+
+        for camera_name in available_cameras:
+            if camera_name == target_camera:
+                continue
+            camera.apply_auto_calibration_result(camera_name, calibration_result)
+
+        shared_data.set_camera_auto_calibration_result(
+            request_id=request_id,
+            success=True,
+            result={"camera": target_camera, "result": calibration_result},
+        )
+    except Exception as e:
+        logger.error(f"Camera auto calibration failed: {e}", exc_info=True)
+        shared_data.set_camera_auto_calibration_result(
+            request_id=request_id,
+            success=False,
+            error=str(e),
+        )
+
+
+@profile_function
+def _capture_frames(available_cameras: list[str], logger: logging.Logger) -> bool:
+    had_capture_error = False
+    for camera_name in available_cameras:
+        try:
+            frame = camera.capture_frame(camera_name=camera_name)
+            shared_data.set_camera_frame(frame, camera_name=camera_name)
+        except Exception as e:
+            had_capture_error = True
+            logger.error(f"Error capturing {camera_name} frame: {e}", exc_info=True)
+            shared_data.set_camera_frame(None, camera_name=camera_name)
+    return had_capture_error
 
 
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
@@ -21,15 +80,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         captured_frames = 0
         last_debug_msg_time = time.perf_counter()
 
-        available_cameras: list[str] = []
-        for camera_name, camera_index in [("front", CAMERA_FRONT_INDEX), ("back", CAMERA_BACK_INDEX)]:
-            try:
-                logger.info(f"Initializing {camera_name} camera (index {camera_index})...")
-                camera.init(camera_name=camera_name, camera_index=camera_index)
-                available_cameras.append(camera_name)
-                logger.info(f"{camera_name.capitalize()} camera initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize {camera_name} camera: {e}", exc_info=True)
+        available_cameras = _initialize_cameras(logger)
 
         if not available_cameras:
             raise RuntimeError("No cameras available")
@@ -37,43 +88,9 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         while not stop_event.is_set():
             calibration_request = shared_data.claim_camera_auto_calibration_request()
             if calibration_request:
-                request_id = int(calibration_request.get("request_id", 0))
-                target_camera = str(calibration_request.get("camera", "front")).lower()
-                settle_time_s = float(calibration_request.get("settle_time_s", 2.0))
+                _handle_auto_calibration(calibration_request, available_cameras, logger)
 
-                try:
-                    if target_camera not in available_cameras:
-                        raise RuntimeError(f"{target_camera} camera is not available")
-
-                    calibration_result = camera.calibrate_auto_controls(target_camera, settle_time_s)
-
-                    for camera_name in available_cameras:
-                        if camera_name == target_camera:
-                            continue
-                        camera.apply_auto_calibration_result(camera_name, calibration_result)
-
-                    shared_data.set_camera_auto_calibration_result(
-                        request_id=request_id,
-                        success=True,
-                        result={"camera": target_camera, "result": calibration_result},
-                    )
-                except Exception as e:
-                    logger.error(f"Camera auto calibration failed: {e}", exc_info=True)
-                    shared_data.set_camera_auto_calibration_result(
-                        request_id=request_id,
-                        success=False,
-                        error=str(e),
-                    )
-
-            had_capture_error = False
-            for camera_name in available_cameras:
-                try:
-                    frame = camera.capture_frame(camera_name=camera_name)
-                    shared_data.set_camera_frame(frame, camera_name=camera_name)
-                except Exception as e:
-                    had_capture_error = True
-                    logger.error(f"Error capturing {camera_name} frame: {e}", exc_info=True)
-                    shared_data.set_camera_frame(None, camera_name=camera_name)
+            had_capture_error = _capture_frames(available_cameras, logger)
             captured_frames += 1
             if had_capture_error:
                 time.sleep(0.001)
@@ -92,3 +109,4 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 shared_data.set_camera_frame(FrameData(frame=black_frame, timestamp=time.time()), camera_name=camera_name)
         except Exception | KeyboardInterrupt:
             pass
+

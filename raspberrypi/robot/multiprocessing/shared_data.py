@@ -12,12 +12,13 @@ _manager = multiprocessing.Manager()
 logs_buffer = multiprocessing.Queue(maxsize=LOG_BUFFER_MAX_ENTRIES)
 
 
-from robot import utils
+from robot import profiling, utils
 from robot.config import *
 from robot.hardware.teensy import ParsedTeensyData, IRData, CompassData, RunningStateData
 from robot.robot import RobotManualControl
 from robot.vision import CameraBallData, DetectedObject, GoalDetectionResult
 from robot.vision.camera import FrameData
+from robot.profiling import profile_function
 
 
 
@@ -34,7 +35,7 @@ def _normalize_camera_name(camera: str | None, allow_both: bool = False) -> str:
 
 # Running state
 running_state = _manager.dict()
-running_state_lock = multiprocessing.Lock()
+running_state_lock = profiling.create_profiled_lock("running_state_lock")
 def set_running_state(state: RunningStateData | None):
     with running_state_lock:
         running_state.clear()
@@ -57,7 +58,7 @@ def get_running_state() -> RunningStateData | None:
 
 # Hardware data
 hardware_data = _manager.dict()
-hardware_data_lock = multiprocessing.Lock()
+hardware_data_lock  = profiling.create_profiled_lock("hardware_data_lock")
 def set_hardware_data(data: ParsedTeensyData | None):
     dict_data = {
         'compass': {
@@ -79,6 +80,7 @@ def set_hardware_data(data: ParsedTeensyData | None):
         hardware_data.clear()
         hardware_data.update(dict_data)
 
+@profile_function
 def get_hardware_data() -> ParsedTeensyData | None:
     data_dict = None
     with hardware_data_lock:
@@ -197,7 +199,7 @@ frame_buffers = {
     "front": front_frame_buffer,
     "back": back_frame_buffer,
 }
-frame_lock = multiprocessing.Lock()
+frame_lock  = profiling.create_profiled_lock("frame_lock")
 
 def set_camera_frame(frame: FrameData | None, camera_name: str = "front"):
     camera_name = camera_name if camera_name in frame_buffers else "front"
@@ -229,7 +231,7 @@ def get_camera_frame(camera_name: str = "front") -> FrameData | None:
 
 
 # Camera auto calibration (handled by camera_capture_process)
-camera_auto_calibration_lock = multiprocessing.Lock()
+camera_auto_calibration_lock  = profiling.create_profiled_lock("camera_auto_calibration_lock")
 camera_auto_calibration_request = _manager.dict()
 camera_auto_calibration_result = _manager.dict()
 camera_auto_calibration_next_request_id = multiprocessing.Value('i', 1)
@@ -295,7 +297,7 @@ def get_camera_auto_calibration_result(request_id: int) -> dict | None:
 
 # Detected objects by camera
 detected_objects = _manager.list()
-detected_objects_lock = multiprocessing.Lock()
+detected_objects_lock  = profiling.create_profiled_lock("detected_objects_lock")
 def get_detected_objects_raw() -> list[dict]:
     with detected_objects_lock:
         return detected_objects[:]
@@ -333,7 +335,7 @@ def set_detected_objects(detections: list[DetectedObject]) -> None:
 
 
 # Line detection and calibration
-line_calibration_lock = multiprocessing.Lock()
+line_calibration_lock  = profiling.create_profiled_lock("line_calibration_lock")
 line_detection_thresholds = multiprocessing.Array('i', [val for pair in DEFAULT_LINE_DETECTION_THRESHOLDS for val in pair])
 def get_line_detection_thresholds() -> list[list[int]]:
     with line_calibration_lock:
@@ -345,7 +347,7 @@ def set_line_detection_thresholds(thresholds: list[list[int]]) -> None:
             line_detection_thresholds[i * 2] = thresholds[i][0]  # min
             line_detection_thresholds[i * 2 + 1] = thresholds[i][1]  # max
 
-# line_detected_lock = multiprocessing.Lock()
+line_detected_lock  = profiling.create_profiled_lock("line_detected_lock")
 line_detected = multiprocessing.Array('b', [False] * LINE_SENSOR_COUNT)
 line_calibration_min = multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT)
 line_calibration_max = multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT)
@@ -357,7 +359,7 @@ line_calibration_phase2_max = multiprocessing.Array('d', [float('-inf')] * LINE_
 
 
 # Goal detection and calibration
-goal_detection_lock = multiprocessing.Lock()
+goal_detection_lock  = profiling.create_profiled_lock("goal_detection_lock")
 
 goal_color = multiprocessing.Array('c', b'yellow'.ljust(10))
 def set_goal_color(color: str) -> None:
@@ -365,6 +367,7 @@ def set_goal_color(color: str) -> None:
         color_bytes = color.encode()[:10].ljust(10)
         for i in range(10):
             goal_color[i] = color_bytes[i:i+1]
+@profile_function
 def get_goal_color() -> str:
     with goal_detection_lock:
         return bytes(goal_color[:]).decode().strip()
@@ -475,6 +478,7 @@ def set_goal_detection_result_for_color(color: str, result: GoalDetectionResult 
         store = goal_detection_result_yellow if color.lower() == 'yellow' else goal_detection_result_blue
         _set_goal_detection_result_to_store(store, result)
 
+@profile_function
 def get_goal_detection_result_for_color(color: str) -> GoalDetectionResult | None:
     with goal_detection_lock:
         store = goal_detection_result_yellow if color.lower() == 'yellow' else goal_detection_result_blue
@@ -483,6 +487,7 @@ def get_goal_detection_result_for_color(color: str) -> GoalDetectionResult | Non
 def set_goal_detection_result(result: GoalDetectionResult | None) -> None:
     with goal_detection_lock:
         _set_goal_detection_result_to_store(goal_detection_result, result)
+@profile_function
 def get_goal_detection_result() -> GoalDetectionResult | None:
     with goal_detection_lock:
         return _get_goal_detection_result_from_store(goal_detection_result)
@@ -501,7 +506,7 @@ def set_goal_focal_length(focal_length: float, camera: str = "both") -> None:
 
 goal_distance_calibration_active = multiprocessing.Value('b', False)
 goal_distance_calibration_data = _manager.dict()
-goal_distance_calibration_lock = multiprocessing.Lock()
+goal_distance_calibration_lock  = profiling.create_profiled_lock("goal_distance_calibration_lock")
 
 # Ball detection and calibration
 ball_calibration_front = _manager.dict()
@@ -558,10 +563,11 @@ def get_ball_calibration(camera: str = "front") -> list[tuple[list[int], list[in
 camera_ball_possession = multiprocessing.Value('b', False)
 def set_camera_ball_possession(possessed: bool) -> None:
     camera_ball_possession.value = possessed
+@profile_function
 def get_camera_ball_possession() -> bool:
     return bool(camera_ball_possession.value)
 
-camera_ball_position_lock = multiprocessing.Lock()
+camera_ball_position_lock  = profiling.create_profiled_lock("camera_ball_position_lock")
 camera_ball_angle = multiprocessing.Value('d', 999.0)  # 999 = not detected
 camera_ball_distance = multiprocessing.Value('d', 999.0)
 camera_ball_detected = multiprocessing.Value('b', False)
@@ -584,6 +590,7 @@ def set_camera_ball_data_for_camera(camera: str, ball_data: CameraBallData) -> N
         target['detected'] = ball_data.detected
         target['area_pixels'] = ball_data.area_pixels
 
+@profile_function
 def get_camera_ball_data() -> CameraBallData:
     with camera_ball_position_lock:
         return CameraBallData(
@@ -623,6 +630,7 @@ def set_camera_ball_calibration_constant(constant: float, camera: str = "both") 
 camera_ball_usage_enabled = multiprocessing.Value('b', AUTO_CAMERA_BALL_TRACKING_ENABLED)
 def set_camera_ball_usage_enabled(enabled: bool) -> None:
     camera_ball_usage_enabled.value = enabled
+@profile_function
 def get_camera_ball_usage_enabled() -> bool:
     return camera_ball_usage_enabled.value
 
@@ -638,6 +646,7 @@ line_avoiding_enabled = multiprocessing.Value('b', DEFAULT_LINE_AVOIDING_ENABLED
 def set_line_avoiding_enabled(enabled: bool) -> None:
     line_avoiding_enabled.value = enabled
 
+@profile_function
 def get_line_avoiding_enabled() -> bool:
     return line_avoiding_enabled.value
 
@@ -648,8 +657,9 @@ def set_position_based_speed_enabled(enabled: bool) -> None:
 def get_position_based_speed_enabled() -> bool:
     return position_based_speed_enabled.value
 
-position_estimate_lock = multiprocessing.Lock()
+position_estimate_lock  = profiling.create_profiled_lock("position_estimate_lock")
 last_position_estimate = _manager.dict()
+@profile_function
 def set_last_position_estimate(x_mm: float, y_mm: float, confidence: float) -> None:
     with position_estimate_lock:
         last_position_estimate.clear()
@@ -657,6 +667,7 @@ def set_last_position_estimate(x_mm: float, y_mm: float, confidence: float) -> N
         last_position_estimate["y_mm"] = float(y_mm)
         last_position_estimate["confidence"] = float(confidence)
         last_position_estimate["timestamp"] = time.time()
+@profile_function
 def get_last_position_estimate() -> dict | None:
     with position_estimate_lock:
         return dict(last_position_estimate) if last_position_estimate else None
@@ -665,6 +676,7 @@ always_facing_goal_enabled = multiprocessing.Value('b', True)  # True = always f
 def set_always_facing_goal_enabled(enabled: bool) -> None:
     always_facing_goal_enabled.value = enabled
 
+@profile_function
 def get_always_facing_goal_enabled() -> bool:
     return always_facing_goal_enabled.value
 
@@ -681,7 +693,7 @@ bt_command_results = _manager.dict()
 bt_next_command_id = multiprocessing.Value('i', 1)
 bt_process_alive = multiprocessing.Value('b', False)
 bt_other_robot_info = _manager.dict()
-bt_lock = multiprocessing.Lock()
+bt_lock  = profiling.create_profiled_lock("bt_lock")
 
 
 def set_bluetooth_process_alive(alive: bool) -> None:

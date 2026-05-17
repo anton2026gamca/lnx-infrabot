@@ -2,7 +2,7 @@ import json
 import multiprocessing
 import os
 
-from robot import utils
+from robot import utils, profiling
 from robot.multiprocessing import shared_data
 
 from robot.config import *
@@ -12,7 +12,7 @@ from robot.config import *
 CALIBRATION_SCHEMA_VERSION = 1
 
 
-lock = multiprocessing.Lock()
+lock = profiling.create_profiled_lock("calibration_data_lock")
 logger = utils.get_logger("Calibration Data Manager")
 
 

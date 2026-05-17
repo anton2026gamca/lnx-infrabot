@@ -21,6 +21,7 @@ This is a comprehensive WebSocket/HTTP API for controlling and monitoring a robo
 5. [Calibration Procedures](#calibration-procedures)
 6. [Bluetooth Communication](#bluetooth-communication)
 7. [Video Streaming](#video-streaming)
+8. [Profiling & Performance](#profiling--performance)
 
 ---
 
@@ -1618,6 +1619,195 @@ Stop receiving video frames.
 
 ---
 
+## Profiling & Performance
+
+The API provides real-time control over profiling data collection. Profiling tracks function execution times, lock contention, and process metrics across all robot processes. Use the profiling endpoints to enable/disable collection at runtime, retrieve performance metrics, and analyze bottlenecks.
+
+### `profiling_start`
+
+Start collecting profiling data.
+
+**Request:**
+```typescript
+{
+  event: "profiling_start",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  message: string,
+  error?: string
+}
+```
+
+**Description:** Initializes the profiling collector and begins recording function execution times, lock contention events, and process metrics. Previous collected data is cleared when starting a new collection session.
+
+### `profiling_stop`
+
+Stop collecting profiling data without clearing accumulated data.
+
+**Request:**
+```typescript
+{
+  event: "profiling_stop",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  message: string,
+  error?: string
+}
+```
+
+**Description:** Stops the profiler from collecting new events. Data collected so far remains available for retrieval via `profiling_report`.
+
+### `profiling_status`
+
+Get current profiling status and statistics.
+
+**Request:**
+```typescript
+{
+  event: "profiling_status",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  is_collecting: boolean,
+  total_function_events: number,
+  total_lock_events: number,
+  total_processes: number,
+  collection_duration: number  // seconds
+}
+```
+
+**Description:** Returns the current profiling state including whether collection is active and basic statistics about collected data.
+
+### `profiling_report`
+
+Get detailed profiling report with metrics and statistics.
+
+**Request:**
+```typescript
+{
+  event: "profiling_report",
+  data: {
+    include_stack_traces?: boolean  // Default: false (stack traces omitted to reduce network size)
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  report?: {
+    metadata: {
+      collection_duration: number,
+      start_time: number,
+      end_time: number,
+      total_function_events: number,
+      total_lock_events: number,
+      total_processes: number,
+      is_collecting: boolean
+    },
+    processes: {
+      [process_name]: {
+        process_name: string,
+        process_id: number,
+        start_time: number,
+        stop_time: number,
+        function_count: number,
+        lock_events_count: number
+      }
+    },
+    functions: {
+      by_name: {
+        [function_name]: {
+          count: number,
+          total_time: number,
+          min_time: number,
+          max_time: number,
+          avg_time: number,
+          name: string
+        }
+      },
+      sorted_by_total_time: [...]  // Top functions by total execution time
+    },
+    locks: {
+      by_name: {
+        [lock_name]: {
+          acquire_count: number,
+          total_wait_time: number,
+          max_wait_time: number,
+          contentions: number
+        }
+      },
+      sorted_by_contention: [...]  // Locks sorted by contention count
+    },
+    timeline: {
+      processes: [...],       // Process lifecycle events (max 1000)
+      functions: [...],       // Function call events (max 1000)
+      locks: [...]            // Lock events (max 1000)
+    }
+  },
+  error?: string
+}
+```
+
+**Description:** Returns comprehensive profiling data including:
+- **Metadata:** Collection duration and event counts
+- **Processes:** Per-process statistics and lifecycle
+- **Functions:** Execution time statistics for all profiled functions
+- **Locks:** Lock contention and wait time statistics
+- **Timeline:** Time-series event data
+
+**Data Fields Explanation:**
+- `count` - Number of times the event occurred
+- `total_time` - Sum of all durations (seconds)
+- `avg_time` - Average time per occurrence
+- `min_time`, `max_time` - Minimum and maximum durations
+- `contentions` - Number of times a lock was contested
+- `total_wait_time` - Total time processes waited for this lock
+- `max_wait_time` - Maximum single wait duration
+
+### `profiling_clear`
+
+Clear all collected profiling data and reset the collector.
+
+**Request:**
+```typescript
+{
+  event: "profiling_clear",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  message: string,
+  error?: string
+}
+```
+
+**Description:** Clears all collected profiling data. After clearing, the profiler remains in its current state (collecting or stopped). Start a new session with `profiling_start` to begin fresh data collection.
+
+---
+
 ## Error Responses
 
 All error responses follow this format:
@@ -1697,26 +1887,12 @@ socket.on('disconnect', () => {
 
 ---
 
-## Configuration Constants
-
-The following configuration values affect API behavior:
-
-| Constant | Purpose |
-|----------|---------|
-| `AUTH_TOKEN` | Authentication token (base64 encoded for transmission) |
-| `API_HOST` | Server host address |
-| `API_PORT` | Server port number |
-| `API_VIDEO_TARGET_FPS` | Default video frame rate |
-| `API_VIDEO_JPEG_QUALITY` | JPEG compression quality (0-100) |
-
----
-
 ## Notes
 
 - All timestamps are in seconds (Unix epoch)
 - All distances in calibration are in millimeters (mm)
 - All angles in degrees (0-360)
-- HSV ranges: H[0-179], S[0-255], V[0-255] (OpenCV convention)
+- HSV ranges: H (0-179), S (0-255), V (0-255) (OpenCV convention)
 - State monitoring interval: 100ms
 - Video frames are compressed as JPEG with configured quality
 - Disconnected clients are automatically cleaned up after failed emission attempts

@@ -5,6 +5,7 @@ import multiprocessing.synchronize
 from robot import calibration, utils
 from robot.hardware import line_sensors, teensy
 from robot.multiprocessing import shared_data
+from robot.profiling import profile_function
 
 from robot.hardware.teensy import TeensyCommunicator
 from robot.config import *

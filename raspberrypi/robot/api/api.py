@@ -1373,6 +1373,93 @@ async def set_bluetooth_pairing_mode(sid: str, data: dict | None = None):
         return _err("Internal server error")
 
 
+# ---------------------------------------------------------------------------
+# Profiling Control
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def profiling_start(sid: str, data: dict | None = None):
+    try:
+        from robot import profiling
+        
+        collector = profiling.get_collector()
+        if collector:
+            collector.start_collection()
+            return _ok(message="Profiling collection started")
+        else:
+            return _err("Profiling system not available")
+    except Exception as exc:
+        logger.error(f"profiling_start: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def profiling_stop(sid: str, data: dict | None = None):
+    try:
+        from robot import profiling
+        
+        collector = profiling.get_collector()
+        if collector:
+            collector.stop_collection()
+            return _ok(message="Profiling collection stopped")
+        else:
+            return _err("Profiling system not available")
+    except Exception as exc:
+        logger.error(f"profiling_stop: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def profiling_status(sid: str, data: dict | None = None):
+    try:
+        from robot import profiling
+        
+        collector = profiling.get_collector()
+        if collector:
+            status = collector.get_status()
+            return _ok(**status)
+        else:
+            return _err("Profiling system not available")
+    except Exception as exc:
+        logger.error(f"profiling_status: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def profiling_report(sid: str, data: dict | None = None):
+    try:
+        from robot import profiling
+
+        d = data or {}
+        collector = profiling.get_collector()
+        if collector:
+            report = collector.get_report(force_refresh=bool(d.get("force_refresh", False)))
+            if d.get("consume", True):
+                collector.clear_collection()
+            return _ok(report=report)
+        else:
+            return _err("Profiling system not available")
+    except Exception as exc:
+        logger.error(f"profiling_report: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def profiling_clear(sid: str, data: dict | None = None):
+    try:
+        from robot import profiling
+        
+        collector = profiling.get_collector()
+        if collector:
+            collector.clear_collection()
+            return _ok(message="Profiling data cleared")
+        else:
+            return _err("Profiling system not available")
+    except Exception as exc:
+        logger.error(f"profiling_clear: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
 
 # ---------------------------------------------------------------------------
 # Entry point

@@ -4,6 +4,7 @@ import numpy as np
 from dataclasses import dataclass, field
 
 from robot.multiprocessing import shared_data
+from robot.profiling import profile_function
 from robot.vision.visualizer import DetectedObject
 from robot.config import *
 
@@ -36,6 +37,7 @@ class PositionEstimate:
     confidence: float
 
 
+@profile_function
 def detect_goal_alignment_with_rect(
     hsv_frame: np.ndarray,
     goal_color: str = "yellow",
@@ -67,6 +69,7 @@ def detect_goal_alignment_with_rect(
     return result, detections
 
 
+@profile_function
 def _detect_goal_alignment_internal(
     hsv_frame: np.ndarray,
     goal_color: str = "yellow",
@@ -122,6 +125,7 @@ def _detect_goal_alignment_internal(
     return result
 
 
+@profile_function
 def _get_goal_bounding_rect(
     hsv_frame: np.ndarray,
     goal_color: str = "yellow",
@@ -188,6 +192,7 @@ def _get_goal_bounding_rect(
     return x, y, w, h, goal_height
 
 
+@profile_function
 def get_position_estimate() -> PositionEstimate | None:
     hardware_data = shared_data.get_hardware_data()
 
@@ -252,3 +257,4 @@ def get_position_estimate() -> PositionEstimate | None:
 
     shared_data.set_last_position_estimate(x_mm, y_mm, confidence)
     return PositionEstimate(x_mm=x_mm, y_mm=y_mm, confidence=confidence)
+
