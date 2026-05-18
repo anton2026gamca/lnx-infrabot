@@ -22,10 +22,16 @@ module wheels() {
 }
 
 module wheels_cutout() {
-    translate([0,0,wheel_d/2]) for (A = [0:90:359]) {
-        rotate([A,90,45]) translate([0,0,wheel_offset - 5]) 
-            cylinder(wheel_h + 10, d = wheel_d + 5);
-            
+    for (angle = [45, 135, 225, 315]) {
+        rotate([0, 0, angle]) {
+            side = 50;
+            d_outer = side / sin(180 / 8);
+            d_inner = side / tan(180 / 8);
+            translate([wheel_offset + d_inner / 2 - 4, 0, 0]) {
+                rotate([0, 0, 360 / 16])
+                    cylinder(100, d=d_outer, $fn=8);
+            }
+        } 
     }
 }
 wheels_cutout();
