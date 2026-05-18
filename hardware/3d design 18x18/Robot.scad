@@ -498,6 +498,8 @@ module bottom_part () {
                 } 
             }
             wheels_cutout();
+
+            %wheels();
             
             
             // Motor brackets holes
@@ -505,9 +507,6 @@ module bottom_part () {
             
             // Driver holes
             motor_driver_bracket_holes();
-              
-            // Ball zone
-            ball_zone_cutout();
             
             // Ball zone holes
             ball_zone_holes();
@@ -530,7 +529,6 @@ module middle_part (brackets_support = 1) {
         translate([0,12,0])rotate([0,0,0])
             cube([180,180,200],center=true);
         difference() {
-            
             // Middle part
             union() {
                 translate([0,0,wheel_d/2-15.5 + 42]) 
@@ -540,7 +538,7 @@ module middle_part (brackets_support = 1) {
                         raspberry_bracket_support_all();
                     translate([30,-12.5,57.4]) rotate([0,0,90])
                         teensy_board_brackets_holes(6, 5);
-                    translate([-40,37,70])
+                    translate([-40,37,57.4])
                         level_shifter_holes(6, 5);
                 }
             }
@@ -577,9 +575,6 @@ module middle_part (brackets_support = 1) {
             // level_shifter
             translate([-40,37,70])
                 level_shifter_holes();
-            
-            // cable hole
-            //cylinder(d = 90, h = 200, center=true);
             
             // batery
             for(A = [1,-1])
@@ -744,7 +739,7 @@ ball_zone();
         camera();
     }
 }
-//ball_zone();
+ball_zone();
 //kicker_cutout();
 //translate([0,-70,23.1])kicker();
 //motors();
