@@ -24,7 +24,7 @@ module wheels() {
 module wheels_cutout() {
     for (angle = [45, 135, 225, 315]) {
         rotate([0, 0, angle]) {
-            side = 50;
+            side = 45;
             d_outer = side / sin(180 / 8);
             d_inner = side / tan(180 / 8);
             translate([wheel_offset + d_inner / 2 - 4, 0, 0]) {

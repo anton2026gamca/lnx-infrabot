@@ -1,5 +1,5 @@
 $fn = 90;
-wheel_d = 55;
+wheel_d = 60;
 wheel_h = 12.5;
 wheel_offset = 90;
 robot_d = 215;
