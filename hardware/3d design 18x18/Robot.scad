@@ -634,14 +634,21 @@ module upper_part () {
         
         // platform conection
         platform_conection_holes();
-        // IR sensor
-        *IR_sensor_bracket_holes();
+
         // front
-        *translate([0,-89.2,100])
-            cube([200,50,100],center=true);
         translate([0,-120,100]) scale([1.05,1,1])
             cylinder(h = 100, d = 200,center=true);
-        
+        for (angle = [225, 315]) {
+            rotate([0, 0, angle]) {
+                side = 45;
+                d_outer = side / sin(180 / 8);
+                d_inner = side / tan(180 / 8);
+                translate([wheel_offset + d_inner / 2 - 4, 0, 50]) {
+                    rotate([0, 0, 45])
+                        cube([d_inner, d_inner, 100], center=true);
+                }
+            } 
+        }
         
         // batery
         for(A = [1,-1])
@@ -674,8 +681,6 @@ module upper_part () {
         
         // Switch ON / OFF
         translate([-55,65,50])rotate([0,0,45])cube([19,13,100], center=true);
-        
-        
     }
 
     translate([0,0,96])difference() {
