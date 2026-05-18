@@ -595,95 +595,112 @@ module middle_part (brackets_support = 1) {
 
 
 module upper_part () {
-    intersection() {
-        translate([0,12,100])rotate([0,0,0])
-            cube([180,180,200],center=true);
-        difference() {
-            translate([0,0,96]) union() {
+    difference() {
+        translate([0,0,96]) union() {
+            
+            intersection() {
                 cylinder(d=robot_d,h=2,center=true);
-                
-                translate([0,100,19])difference(){
-                    //back camera moved to center of robot
-                    *for (A = [1, -1]) {
-                        translate([A*16.7,-25.5,0])rotate([0,90,0])
-                            cylinder(d = 9, h = 8,center=true);
-                        translate([A*16.7,-25.5,-10])
-                            cube([8,9,20],center=true);
-
-                    }
-                    //back camera moved to center of robot
-                    *translate([0,-25.5,0])rotate([0,90,0])
-                        cylinder(d = 3.3, h = 80,center=true);
-                }
-                /*// SOCCER COMUNICATION MODUL
-                translate([-30-22.86/2,0,10]) {
-                    cube([2.54+4,6*2.54+4,20], center = true);
-                    translate([22.86,2.54,0])
-                        cube([2.54+4,4*2.54+4,20],center=true);
-                }
-                // BNO Compass
-                translate([40-7*2.54/2,0,10])rotate([0,0,45]) {
-                    cube([2.54+4,6*2.54+4,20], center = true);
-                    translate([7 * 2.54,0,0])
-                        cube([2.54+4,4*2.54+4,20],center=true);
-                }*/
+                            
+                translate([0,12,0])rotate([0,0,0])
+                    cube([180,180,200],center=true);
+            
+            
             }
-            // Back camera hole
-            /* //back camera moved to center of robot
-            translate([0,100,95])cube([25.4,60,50], center=true);
-            translate([0,110,95])scale([1.7,1,1])
-                sphere(d = 50);
-            */
-            // BUTTON HOLE
+            translate([0,100,19])difference(){
+                //back camera moved to center of robot
+                *for (A = [1, -1]) {
+                    translate([A*16.7,-25.5,0])rotate([0,90,0])
+                        cylinder(d = 9, h = 8,center=true);
+                    translate([A*16.7,-25.5,-10])
+                        cube([8,9,20],center=true);
+
+                }
+                //back camera moved to center of robot
+                *translate([0,-25.5,0])rotate([0,90,0])
+                    cylinder(d = 3.3, h = 80,center=true);
+            }
             
-            // Motor brackets holes - if mounting it from top
-            motor_driver_bracket_holes();
-            // platform conection
-            platform_conection_holes();
-            // IR sensor
-            IR_sensor_bracket_holes();
-            // front
-            *translate([0,-89.2,100])
-                cube([200,50,100],center=true);
-            translate([0,-120,100]) scale([1.05,1,1])
-                cylinder(h = 100, d = 200,center=true);
-            // cable hole
-            translate([30,0,0])
-                cylinder(d = 30, h = 300,center=true);
-            // camera cable hole
-            translate([-30,0,100]) cube([5,20,100], center=true);
-            // batery
-            // batery
-            for(A = [1,-1])
-                translate([A*72,0,50])
-                    cube([26,35, 100], center=true);
             
-            // SOCCER COMUNICATION MODUL 
-                        //translate([-73-22.86/2,-34,100])
-            translate([-22.86/2,40,100]) {
-                cube([2.54+0.5,6*2.54+0.5,100], center = true);
+            /*// SOCCER COMUNICATION MODUL
+            translate([-30-22.86/2,0,10]) {
+                cube([2.54+4,6*2.54+4,20], center = true);
                 translate([22.86,2.54,0])
-                    cube([2.54+0.5,4*2.54+0.5,100],center=true);
+                    cube([2.54+4,4*2.54+4,20],center=true);
             }
             // BNO Compass
-            translate([50+8*2.54/2,50,100])rotate([0,0,45]) {
-                cube([2.54+0.5,6*2.54+0.5,200], center = true);
+            translate([40-7*2.54/2,0,10])rotate([0,0,45]) {
+                cube([2.54+4,6*2.54+4,20], center = true);
                 translate([7 * 2.54,0,0])
-                    cube([2.54+0.5,4*2.54+0.5,200],center=true);
+                    cube([2.54+4,4*2.54+4,20],center=true);
+            }*/
+        }
+        // Back camera hole
+        /* //back camera moved to center of robot
+        translate([0,100,95])cube([25.4,60,50], center=true);
+        translate([0,110,95])scale([1.7,1,1])
+            sphere(d = 50);
+        */
+        // BUTTON HOLE
+        
+        
+        // platform conection
+        platform_conection_holes();
+        // IR sensor
+        *IR_sensor_bracket_holes();
+        // front
+        *translate([0,-89.2,100])
+            cube([200,50,100],center=true);
+        translate([0,-120,100]) scale([1.05,1,1])
+            cylinder(h = 100, d = 200,center=true);
+        
+        
+        // batery
+        for(A = [1,-1])
+            translate([A*72,0,50])
+                cube([26,35, 100], center=true);
+        
+        // SOCCER COMUNICATION MODUL 
+                    //translate([-73-22.86/2,-34,100])
+        /*translate([-22.86/2,40,100]) {
+            cube([2.54+0.5,6*2.54+0.5,100], center = true);
+            translate([22.86,2.54,0])
+                cube([2.54+0.5,4*2.54+0.5,100],center=true);
+        }*/
+        // teensy buttons
+        translate([-22.86/2,15,100])
+            cube([2.54+0.5,6*2.54+0.5,100], center = true);
+        // LCD display
+        translate([38/2,40,100])
+            cube([2.54+0.5,4*2.54+0.5,100], center = true);
+        // rpi buttons
+        translate([0,53,100])
+                cube([(4*3+1)*2.54+0.5,2.54+0.5,100], center = true);
+        
+        // BNO Compass
+        translate([50+8*2.54/2,50,100])rotate([0,0,45]) {
+            cube([2.54+0.5,6*2.54+0.5,200], center = true);
+            translate([7 * 2.54,0,0])
+                cube([2.54+0.5,4*2.54+0.5,200],center=true);
+        }
+        
+        // Switch ON / OFF
+        translate([-55,65,50])rotate([0,0,45])cube([19,13,100], center=true);
+        
+        
+    }
+
+    translate([0,0,96])difference() {
+        for (A = [1, -1]) {
+            translate([A*(16.7-1),-24.5,3.5]) {
+                rotate([0,90,0])cylinder(d = 9, h = 8-2,center=true);
+                translate([0,5,-3.5])cube([8-2, 10, 2], center=true);
             }
-            // Display & Rpi buttons
-            translate([0,0,0]) {
-                translate([0,65,100])
-                    cube([2.54+0.5,4*2.54+0.5,100], center = true);
-                translate([20,80,100])
-                    cube([2.54+0.5,4*2.54+0.5,100], center = true);
-            }
-            // Switch ON / OFF
-            translate([-55,65,50])cube([19,13,100], center=true);
-            
             
         }
+        translate([0,-24.5,3.5])rotate([0,90,0])
+            cylinder(d = 3.3, h = 80,center=true);
     }
+    
 }
 module all(){
     intersection() {
@@ -725,8 +742,8 @@ module all(){
 //IR_sensor_bracket();
 //ball();
 *bottom_part();
-middle_part();
-*upper_part();
+*middle_part();
+upper_part();
 *uppest_part();
 *uppest_part_new();
 //bottom_part();
