@@ -489,17 +489,6 @@ module bottom_part () {
             }
             
             // Wheels
-            for (angle = [45, 135, 225, 315]) {
-                rotate([0, 0, angle]) {
-                    side = 45;
-                    d_outer = side / sin(180 / 8);
-                    d_inner = side / tan(180 / 8);
-                    translate([wheel_offset + d_inner / 2 - 5, 0, 0]) {
-                        rotate([0, 0, 360 / 16])
-                            cylinder(wheel_h + 10, d=d_outer, $fn=8);
-                    }
-                } 
-            }
             wheels_cutout();
 
             %wheels();
@@ -741,8 +730,8 @@ module all(){
 //all();
 //IR_sensor_bracket();
 //ball();
-*bottom_part();
-*middle_part();
+bottom_part();
+middle_part();
 upper_part();
 *uppest_part();
 *uppest_part_new();
@@ -751,7 +740,7 @@ upper_part();
 *middle_wall(0);
 
 //wheels_cutout();
-*ball_zone();
+ball_zone();
 *translate([0,99,115])rotate([0,0,180]){//front camera
     camera_bracket_holder();
     camera_bracket();
