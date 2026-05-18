@@ -1,5 +1,5 @@
 $fn = 90;
-wheel_d = 55;
+wheel_d = 60;
 wheel_h = 12.5;
 wheel_offset = 90;
 robot_d = 215;
@@ -444,7 +444,7 @@ module bottom_part () {
         difference() {
             
             // Main part
-            translate([0,0,wheel_d/2-15.5]) union() {
+            translate([0,0,55/2-15.5]) union() {
                 cylinder(d = robot_d, h = 2, center=true);
                 for(A = [1,-1])
                 translate([A*72,0,10])
@@ -480,9 +480,25 @@ module bottom_part () {
             // Connection to upper parts
             platform_conection_holes();
             
-           
-            // Kolesa
+            // LED shield holes
+            for (A = [1, -1]) {
+                translate([A*55,0,-1])cylinder(d=3.3, h=100,center=true);
+            }
+            
+            // Wheels
+            for (angle = [45, 135, 225, 315]) {
+                rotate([0, 0, angle]) {
+                    side = 45;
+                    d_outer = side / sin(180 / 8);
+                    d_inner = side / tan(180 / 8);
+                    translate([wheel_offset + d_inner / 2 - 5, 0, 0]) {
+                        rotate([0, 0, 360 / 16])
+                            cylinder(wheel_h + 10, d=d_outer, $fn=8);
+                    }
+                } 
+            }
             wheels_cutout();
+            
             
             // Motor brackets holes
             motor_bracket_holes();
@@ -501,8 +517,8 @@ module bottom_part () {
             
             // Batery
             for(A = [1,-1])
-                translate([A*72,0,23])
-                    cube([26,35, 20], center=true);
+                translate([A*72,0,25])
+                    cube([26,35, 25], center=true);
       
         }
         
@@ -699,21 +715,23 @@ module all(){
     }
 }
 //handle_bracket();
-handle();
+//handle();
 //motor_brackets_all(180);
 //translate([0,0,47.5])motor_brackets_holders();
 //all();
 //IR_sensor_bracket();
 //ball();
-*bottom_part();
+bottom_part();
 *middle_part();
 *upper_part();
 *uppest_part();
 *uppest_part_new();
 //bottom_part();
-//bottom_wall();
+bottom_wall();
 *middle_wall(0);
 
+//wheels_cutout();
+ball_zone();
 *translate([0,99,115])rotate([0,0,180]){//front camera
     camera_bracket_holder();
     camera_bracket();

@@ -24,7 +24,8 @@ module wheels() {
 module wheels_cutout() {
     translate([0,0,wheel_d/2]) for (A = [0:90:359]) {
         rotate([A,90,45]) translate([0,0,wheel_offset - 5]) 
-            cylinder(wheel_h + 10, d = wheel_d + 6);
+            cylinder(wheel_h + 10, d = wheel_d + 5);
             
     }
 }
+wheels_cutout();
