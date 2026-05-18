@@ -17,6 +17,9 @@ use <Level_shifter.scad>;
 use <Camera_bracket.scad>;
 use <IR_sensor_bracket.scad>;
 
+rpi_pos = [0,-30,55];
+level_shifter_pos = [-35,32,57.4];
+
 // IR seeker 3D model zo stranky
 // %rotate([0,0,180])translate([-21,-21,210])import("mrm-ir-finder3.stl");
 module MAXsize() {
@@ -531,17 +534,23 @@ module middle_part (brackets_support = 1) {
         difference() {
             // Middle part
             union() {
-                translate([0,0,wheel_d/2-15.5 + 42]) 
+                translate([0,0,55/2-15.5 + 42]) 
                     cylinder(d = robot_d, h = 2, center=true);
                 if (brackets_support) {
-                    translate([-25,-20,57.4]) rotate([0,0,90]) 
-                        raspberry_bracket_support_all();
-                    translate([30,-12.5,57.4]) rotate([0,0,90])
+                    translate(rpi_pos) rotate([0,0,0])
+                        raspberry_holes(6, 5);
+                    *translate([30,-12.5,57.4]) rotate([0,0,90])
                         teensy_board_brackets_holes(6, 5);
-                    translate([-40,37,57.4])
+                    translate(level_shifter_pos)
                         level_shifter_holes(6, 5);
                 }
             }
+            // raspberry
+            translate(rpi_pos) rotate([0,0,0])
+                translate([0,0,-10])raspberry_holes();
+            
+            translate(level_shifter_pos)
+                level_shifter_holes();
             
             // back side
             translate([0,70,0])cube([50,35,200],center=true);
@@ -553,7 +562,7 @@ module middle_part (brackets_support = 1) {
             motor_driver_bracket_holes();
             
             // Motor brackets holes
-            translate([0,0,100])motor_bracket_holes();
+            //translate([0,0,100])motor_bracket_holes();
             
             // Ball zone holes
             ball_zone_holes();
@@ -564,23 +573,22 @@ module middle_part (brackets_support = 1) {
             // ball zona
             translate([0,0,40])ball_zone_cutout();
             
-            // raspberry
-            translate([-25,-20,0]) rotate([0,0,90])        
-                raspberry_bracket_holes();
             
-            // teensy board
-            translate([30,-12.5,76.6]) rotate([0,0,90])
-                teensy_board_brackets_holes();
+            
             
             // level_shifter
             translate([-40,37,70])
                 level_shifter_holes();
+            
+            // cable hole
+            cylinder(d = 30, h = 200, center=true);
             
             // batery
             for(A = [1,-1])
                 translate([A*72,0,23])
                     cube([26,35, 100], center=true);
         }
+        
     }
 }
 
@@ -716,17 +724,17 @@ module all(){
 //all();
 //IR_sensor_bracket();
 //ball();
-bottom_part();
-*middle_part();
+*bottom_part();
+middle_part();
 *upper_part();
 *uppest_part();
 *uppest_part_new();
 //bottom_part();
-bottom_wall();
+*bottom_wall();
 *middle_wall(0);
 
 //wheels_cutout();
-ball_zone();
+*ball_zone();
 *translate([0,99,115])rotate([0,0,180]){//front camera
     camera_bracket_holder();
     camera_bracket();
@@ -739,7 +747,7 @@ ball_zone();
         camera();
     }
 }
-ball_zone();
+*ball_zone();
 //kicker_cutout();
 //translate([0,-70,23.1])kicker();
 //motors();
@@ -763,19 +771,19 @@ middle_part(0);
 
 
 
-*color("red", 0.5)translate([-55,0,75])rotate([0,0,0]) {
+*color("red", 0.5)translate([0,-40,75])rotate([0,0,0]) {
     raspberry();
     translate([0,0,-14.6])raspberry_bracket();
 }
 
 *translate([0,-robot_d/2+7.5 + 10,0])
     cube([100,15,100], center=true);
-*%translate([-55,0,75])rotate([0,0,0])
+*translate([0,-30,75])rotate([0,0,0])
     translate([0,0,-14.6])raspberry_bracket();
 
-*%translate([55,15,76.6]) rotate([0,0,90])
+*translate([55,15,76.6]) rotate([0,0,90])
     teensy_board_bracket();
-
+*translate([0,0,10])translate(level_shifter_pos)level_shifter();
 //  diera na baterku - 35x26
 *for(A = [1,-1])
     #translate([A*15,80,50])cube([26,35, 100], center=true);

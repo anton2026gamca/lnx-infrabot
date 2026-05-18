@@ -1,5 +1,5 @@
 $fn = 90;
-wheel_d = 55;
+wheel_d = 60;
 wheel_h = 12.5;
 wheel_offset = 90;
 robot_d = 215;
@@ -9,7 +9,7 @@ ballDiameter = 43;
 use <Robot.scad>
 
 module wheels() {
-    translate([0,0,wheel_d/2]) 
+    translate([0,0,55/2]) 
     for (A = [0:90:359]){
         rotate([A,90,45]) translate([0,0,wheel_offset]) {
             difference() {
