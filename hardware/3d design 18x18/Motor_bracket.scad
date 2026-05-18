@@ -28,15 +28,15 @@ module wheel_conector() {
         }
     }
 }
-module motor_bracket_holes() {
+module motor_bracket_holes(d = 3.3, h = 100, holes = [0:1:num_holes-1]) {
     for (A = [0:90:359]){
         rotate([0,0,A + 45])
-        translate([wheel_offset - 5,0,0])
-        for (B = [0:1:num_holes-1]) {
-            rotate([0,0,180])
-            translate([0,0,-14.5])
-            translate([B*hole_set + 6.4,0,0])
-            cylinder(d = 3.3, h = 100,center=true);
+        translate([wheel_offset - 5,0,0]) {
+            for (B = holes) {
+                rotate([0,0,180])
+                    translate([B*hole_set + 6.4,0,0])
+                        cylinder(d=d, h=h, center=true);
+            }
         }
     }
 }

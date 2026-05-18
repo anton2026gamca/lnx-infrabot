@@ -447,7 +447,7 @@ module bottom_part () {
         difference() {
             
             // Main part
-            translate([0,0,55/2-15.5]) union() {
+            translate([0, 0, 12]) union() {
                 cylinder(d = robot_d, h = 2, center=true);
                 for(A = [1,-1])
                 translate([A*72,0,10])
@@ -458,8 +458,6 @@ module bottom_part () {
                     translate([0,0,-4])cylinder(d=robot_d,h=4);
                     //translate([0,0,-6])cylinder(d=95,h=6);
                 }
-                
-                
             }
             // Line sensor
             translate([0,0,10])LED_holes();
@@ -493,9 +491,9 @@ module bottom_part () {
 
             %wheels();
             
-            
             // Motor brackets holes
             motor_bracket_holes();
+            translate([0, 0, 8]) motor_bracket_holes(d=6.4, h=2 * 2, holes=[0:1:4], $fn=6);
             
             // Driver holes
             motor_driver_bracket_holes();
@@ -549,9 +547,6 @@ module middle_part (brackets_support = 1) {
             
             // Motor brackets holes - if mounting it from top
             motor_driver_bracket_holes();
-            
-            // Motor brackets holes
-            //translate([0,0,100])motor_bracket_holes();
             
             // Ball zone holes
             ball_zone_holes();
@@ -735,7 +730,7 @@ module all(){
 //all();
 //IR_sensor_bracket();
 //ball();
-bottom_part();
+!bottom_part();
 middle_part();
 upper_part();
 *uppest_part();
