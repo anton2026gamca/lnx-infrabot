@@ -45,13 +45,15 @@ module ball_zone() {
         color("white")MAXsize();
         translate([0,0,33]) difference() {
             union() {
-                translate([0,-90,0]) cube([100,30,40-0.2],center=true);
-                translate([0,0,-100])ball_zone_holes(12, 40-0.2);
+                translate([0,-90,-2.6])
+                    cube([100,30,45 - 0.4],center=true);
+                translate([0,0,-100 - 0.2])
+                    ball_zone_holes(12, 40 - 0.2);
             }
             // kicker cotout
-            translate([0,-60,-10]) {
-                cube([57,100,21],center=true);
-            }
+            // translate([0,-60,-10]) {
+            //     cube([57,100,21],center=true);
+            // }
             
             translate([0,-106.713,0])
                 cube([110,10,100],center=true);
@@ -59,9 +61,16 @@ module ball_zone() {
             for (A=[45:90:360]) {
                 rotate([0,0,A])translate([0,84,0])cube([65,4,80],center=true);
             }
-            translate([0,0,-33])wheels_cutout();
+            translate([0,0,-33]) {
+                translate([0,0,wheel_d/2]) for (A = [0:90:359]) {
+                    rotate([A,90,45]) translate([0,0,wheel_offset - 5]) 
+                        cylinder(wheel_h + 10, d = wheel_d + 6);
+                        
+                }
+            }
             ball_zone_holes(5.6);
-            
+            translate([0, 0, -33])
+                bottom_part();
         }
     }
 }
@@ -83,6 +92,6 @@ module kicker() {
     }
 }
 ball_zone();
-kicker_cutout();
-translate([0,-70,23.1])kicker();
+// kicker_cutout();
+// translate([0,-70,23.1])kicker();
 //translate([0,-110,0])ball();
