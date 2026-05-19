@@ -69,7 +69,7 @@ module bottom_part(
             wheels_cutout(wheel_offset = wheel_offset);
             motor_bracket_holes(wheel_offset = wheel_offset);
             translate([0, 0, 8])
-                motor_bracket_holes(hole_d = 6.4, hole_h = 4, holes = [0:1:4], wheel_offset = wheel_offset, $fn = 6);
+                motor_bracket_holes(hole_d = 8, hole_h = 4, holes = [0:1:4], wheel_offset = wheel_offset);
             motor_driver_bracket_holes();
             ball_zone_holes();
             translate([0, -70, 23.1])

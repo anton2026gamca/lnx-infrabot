@@ -26,7 +26,7 @@ module wheel_connector(
 module motor_bracket_holes(
     hole_d = 3.3,
     hole_h = 100,
-    holes = [0:1:6],
+    holes = [0:1:4],
     hole_set = 6.35,
     hole_offset = 6.4,
     wheel_offset = 90,
