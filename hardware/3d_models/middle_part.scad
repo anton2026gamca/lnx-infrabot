@@ -33,8 +33,8 @@ module middle_part(
             translate(rpi_pos) {
                 translate([0, 0, -10])
                     raspberry_holes();
-                if (show_raspberry)
-                    %raspberry();
+                // if (show_raspberry)
+                //     %raspberry();
             }
             translate(level_shifter_pos)
                 level_shifter_holes();

@@ -44,7 +44,7 @@ module ball_zone(
 ) {
     intersection() {
         cylinder(d = robot_d, h = robot_h);
-        translate([0, 0, zone_z])
+        translate([0, 0, zone_z]) {
             difference() {
                 union() {
                     translate([0, -90, -2.6])
@@ -69,14 +69,11 @@ module ball_zone(
                         }
                 }
                 ball_zone_holes(5.6);
-                translate([0, 0, -33])
-                    bottom_part(
-                        robot_d = robot_d,
-                        wheel_d = wheel_d,
-                        wheel_h = wheel_h,
-                        wheel_offset = wheel_offset
-                    );
+                translate([0, 12, -22.5]) {
+                    cube([180, 180, 5], center = true);
+                }
             }
+        }
     }
 }
 

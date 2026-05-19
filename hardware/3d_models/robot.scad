@@ -86,4 +86,4 @@ module robot(
     }
 }
 
-robot(show_bottom_wall = false, show_middle_wall = false, show_other_components = false);
+robot(/* show_bottom_wall = false, show_middle_wall = false,  */show_other_components = false);
