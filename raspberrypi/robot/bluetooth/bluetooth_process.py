@@ -4,6 +4,7 @@ import time
 
 from robot.bluetooth.bluetooth_manager import BluetoothManager, BluetoothMessage
 from robot.multiprocessing import shared_data
+from robot.profiling import profile_function
 
 
 _COMMAND_POLL_INTERVAL_S = 0.05
@@ -15,12 +16,14 @@ def _serialize_message(message: BluetoothMessage, sender_mac: str) -> dict:
     return data
 
 
+@profile_function
 def _refresh_shared_state(manager: BluetoothManager) -> None:
     shared_data.set_bluetooth_device_info(manager.get_device_info())
     shared_data.set_bluetooth_paired_devices_info([d.to_dict() for d in manager.list_paired_devices()])
     shared_data.set_bluetooth_devices_info([d.to_dict() for d in manager.list_paired_devices() if d.connected])
 
 
+@profile_function
 def _drain_incoming_messages(manager: BluetoothManager) -> None:
     messages_by_mac = manager.get_messages()
     if not messages_by_mac:
@@ -30,6 +33,7 @@ def _drain_incoming_messages(manager: BluetoothManager) -> None:
         shared_data.add_bluetooth_received_message(_serialize_message(message, sender_mac))
 
 
+@profile_function
 def _execute_command(manager: BluetoothManager, command: dict) -> None:
     command_id = int(command.get("id", 0))
     command_type = command.get("type", "")
@@ -157,4 +161,3 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         shared_data.set_bluetooth_process_alive(False)
         shared_data.set_bluetooth_devices_info([])
         manager.stop_server()
-

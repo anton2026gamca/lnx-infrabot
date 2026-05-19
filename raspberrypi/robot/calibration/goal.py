@@ -20,27 +20,18 @@ def set_enemy_goal_color(color: str) -> None:
     save_calibration_data()
     logger.info(f"Enemy goal color set to: {color.lower()}")
 
-def set_goal_color_range(goal_color: str, lower_hsv: tuple[int, int, int], upper_hsv: tuple[int, int, int]) -> None:
-    """Set a single goal color range (replaces all existing ranges with a single one)."""
-    if goal_color.lower() not in ['yellow', 'blue']:
-        logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
-        return
-    shared_data.set_goal_calibration(goal_color.lower(), [(lower_hsv, upper_hsv)])
-    save_calibration_data()
-    logger.info(f"Updated {goal_color.lower()} goal HSV range: lower={lower_hsv}, upper={upper_hsv}")
-
-def add_goal_color_range(goal_color: str, lower_hsv: tuple[int, int, int], upper_hsv: tuple[int, int, int]) -> None:
+def add_goal_color_range(goal_color: str, lower_hsv: tuple[int, int, int], upper_hsv: tuple[int, int, int], camera: str = "both") -> None:
     """Add an additional goal color range to the existing ranges."""
     if goal_color.lower() not in ['yellow', 'blue']:
         logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
         return
-    existing_ranges = shared_data.get_goal_calibration(goal_color.lower())
+    existing_ranges = shared_data.get_goal_calibration(goal_color.lower(), camera)
     new_ranges = existing_ranges + [(lower_hsv, upper_hsv)]
-    shared_data.set_goal_calibration(goal_color.lower(), new_ranges)
+    shared_data.set_goal_calibration(goal_color.lower(), new_ranges, camera=camera)
     save_calibration_data()
-    logger.info(f"Added {goal_color.lower()} goal color range: lower={lower_hsv}, upper={upper_hsv}")
+    logger.info(f"Added {goal_color.lower()} goal color range ({camera}): lower={lower_hsv}, upper={upper_hsv}")
 
-def set_goal_color_ranges(goal_color: str, ranges: list[tuple[tuple[int, int, int], tuple[int, int, int]]]) -> None:
+def set_goal_color_ranges(goal_color: str, ranges: list[tuple[tuple[int, int, int], tuple[int, int, int]]], camera: str = "both") -> None:
     """Set multiple goal color ranges at once.
     
     Args:
@@ -50,19 +41,19 @@ def set_goal_color_ranges(goal_color: str, ranges: list[tuple[tuple[int, int, in
     if goal_color.lower() not in ['yellow', 'blue']:
         logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
         return
-    shared_data.set_goal_calibration(goal_color.lower(), ranges)
+    shared_data.set_goal_calibration(goal_color.lower(), ranges, camera=camera)
     save_calibration_data()
-    logger.info(f"Set {len(ranges)} ranges for {goal_color.lower()} goal")
+    logger.info(f"Set {len(ranges)} ranges for {goal_color.lower()} goal ({camera})")
 
-def get_goal_color_ranges(goal_color: str) -> list[tuple[tuple[int, int, int], tuple[int, int, int]]]:
+def get_goal_color_ranges(goal_color: str, camera: str = "front") -> list[tuple[tuple[int, int, int], tuple[int, int, int]]]:
     """Get all goal color ranges for a specific color."""
     if goal_color.lower() not in ['yellow', 'blue']:
         logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
         return []
-    ranges = shared_data.get_goal_calibration(goal_color.lower())
+    ranges = shared_data.get_goal_calibration(goal_color.lower(), camera)
     return ranges if ranges is not None else []
 
-def remove_goal_color_range(goal_color: str, index: int) -> bool:
+def remove_goal_color_range(goal_color: str, index: int, camera: str = "both") -> bool:
     """Remove a goal color range by index.
     
     Returns:
@@ -71,24 +62,24 @@ def remove_goal_color_range(goal_color: str, index: int) -> bool:
     if goal_color.lower() not in ['yellow', 'blue']:
         logger.error(f"Invalid goal color: {goal_color}. Must be 'yellow' or 'blue'.")
         return False
-    ranges = shared_data.get_goal_calibration(goal_color.lower())
+    ranges = shared_data.get_goal_calibration(goal_color.lower(), camera)
     if 0 <= index < len(ranges):
         ranges.pop(index)
-        shared_data.set_goal_calibration(goal_color.lower(), ranges)
+        shared_data.set_goal_calibration(goal_color.lower(), ranges, camera=camera)
         save_calibration_data()
-        logger.info(f"Removed range {index} from {goal_color.lower()} goal")
+        logger.info(f"Removed range {index} from {goal_color.lower()} goal ({camera})")
         return True
     return False
 
-def set_goal_focal_length(focal_length_pixels: float) -> None:
+def set_goal_focal_length(focal_length_pixels: float, camera: str = "both") -> None:
     if focal_length_pixels <= 0:
         logger.error(f"Invalid focal length: {focal_length_pixels}. Must be a positive number.")
         return
-    shared_data.set_goal_focal_length(focal_length_pixels)
+    shared_data.set_goal_focal_length(focal_length_pixels, camera=camera)
     save_calibration_data()
-    logger.info(f"Goal focal length set to: {focal_length_pixels:.2f} pixels")
+    logger.info(f"Goal focal length ({camera}) set to: {focal_length_pixels:.2f} pixels")
 
-def start_goal_distance_calibration(initial_distance_mm: float, line_distance_mm: float) -> None:
+def start_goal_distance_calibration(initial_distance_mm: float, line_distance_mm: float, camera: str = "front") -> None:
     with shared_data.goal_distance_calibration_lock:
         shared_data.goal_distance_calibration_active.value = True
         shared_data.goal_distance_calibration_data.clear()
@@ -97,7 +88,8 @@ def start_goal_distance_calibration(initial_distance_mm: float, line_distance_mm
         shared_data.goal_distance_calibration_data['initial_height_pixels'] = None
         shared_data.goal_distance_calibration_data['line_height_pixels'] = None
         shared_data.goal_distance_calibration_data['phase'] = 'initial'  # 'initial' or 'driving'
-    logger.info(f"Started goal distance calibration: initial={initial_distance_mm}mm, line={line_distance_mm}mm")
+        shared_data.goal_distance_calibration_data['camera'] = camera
+    logger.info(f"Started goal distance calibration ({camera}): initial={initial_distance_mm}mm, line={line_distance_mm}mm")
 
 def stop_goal_distance_calibration() -> dict:
     with shared_data.goal_distance_calibration_lock:
@@ -122,7 +114,8 @@ def stop_goal_distance_calibration() -> dict:
         focal2 = (line_height * line_distance) / GOAL_HEIGHT_MM
         focal_length = (focal1 + focal2) / 2.0
         
-        shared_data.set_goal_focal_length(focal_length)
+        camera = data.get('camera', 'front')
+        shared_data.set_goal_focal_length(focal_length, camera=camera)
         shared_data.goal_distance_calibration_active.value = False
         
         save_calibration_data()
@@ -134,7 +127,8 @@ def stop_goal_distance_calibration() -> dict:
             'initial_height_pixels': initial_height,
             'line_height_pixels': line_height,
             'calculated_focal1': focal1,
-            'calculated_focal2': focal2
+            'calculated_focal2': focal2,
+            'camera': camera,
         }
 
 def cancel_goal_distance_calibration() -> None:
@@ -155,12 +149,15 @@ def get_goal_distance_calibration_status() -> dict:
             'initial_distance_mm': data.get('initial_distance_mm'),
             'line_distance_mm': data.get('line_distance_mm'),
             'initial_height_pixels': data.get('initial_height_pixels'),
-            'line_height_pixels': data.get('line_height_pixels')
+            'line_height_pixels': data.get('line_height_pixels'),
+            'camera': data.get('camera', 'front'),
         }
 
-def update_goal_distance_calibration(goal_result: GoalDetectionResult) -> None:
+def update_goal_distance_calibration(goal_result: GoalDetectionResult, camera: str) -> None:
     with shared_data.goal_distance_calibration_lock:
         if not shared_data.goal_distance_calibration_active.value:
+            return
+        if shared_data.goal_distance_calibration_data.get('camera', 'front') != camera:
             return
         
         phase = shared_data.goal_distance_calibration_data.get('phase')
@@ -180,4 +177,3 @@ def update_goal_distance_calibration(goal_result: GoalDetectionResult) -> None:
             if any(line_detected) and goal_result.detected and goal_result.height_pixels > 0:
                 shared_data.goal_distance_calibration_data['line_height_pixels'] = goal_result.height_pixels
                 logger.info(f"Line detected! Recorded goal height: {goal_result.height_pixels:.2f} pixels.")
-

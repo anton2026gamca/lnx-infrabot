@@ -14,12 +14,18 @@ CAMERA_FOV_DEG = 90
 
 # Camera performance
 CAMERA_BUFFER_COUNT = 2
-CAMERA_MAX_FPS = 120
+CAMERA_MAX_FPS = 60
 CAMERA_MIN_FRAME_INTERVAL = 1.0 / CAMERA_MAX_FPS
 
+# Physical cameras
+CAMERA_FRONT_INDEX = 0
+CAMERA_BACK_INDEX = 1
+CAMERA_FRONT_YAW_DEG = 0.0
+CAMERA_BACK_YAW_DEG = 180.0
+
 # Frame size calculations
-FRAME_WIDTH  = 1536
-FRAME_HEIGHT = 864
+FRAME_WIDTH  = 1536 // 2
+FRAME_HEIGHT = 864 // 2
 FRAME_SIZE_B = FRAME_HEIGHT * FRAME_WIDTH * 3  # RGB888 format (3 bytes per pixel, no alpha)
 
 # =========================== SERIAL COMMUNICATION ================================
@@ -81,9 +87,11 @@ CALIBRATION_FILE_PATH = "calibration_data.json"
 
 # ======================== OBJECT DETECTION SETTINGS ==============================
 # Scale factor for processing frames (0.5 means half resolution)
-DETECTION_FRAME_SIZE_SCALE = 0.5
+DETECTION_FRAME_SIZE_SCALE = 1.0
 DETECTION_FRAME_WIDTH = int(FRAME_WIDTH * DETECTION_FRAME_SIZE_SCALE)
 DETECTION_FRAME_HEIGHT = int(FRAME_HEIGHT * DETECTION_FRAME_SIZE_SCALE)
+
+BALL_POSSESSION_CAMERAS = ["front"]
 
 # ========================= GOAL DETECTION SETTINGS ===============================
 # Real-world goal height in millimeters
@@ -128,4 +136,3 @@ DEFAULT_BALL_CALIBRATION_HSV = [5, 150, 150, 25, 255, 255]  # [h_min,s_min,v_min
 # --- Camera-based ball tracking ---
 # Enable using camera ball detection as a data source
 AUTO_CAMERA_BALL_TRACKING_ENABLED = True
-

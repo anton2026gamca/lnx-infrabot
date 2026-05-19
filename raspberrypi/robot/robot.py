@@ -28,6 +28,9 @@ logger = utils.get_logger()
 
 
 def main():
+    # Initialize profiler
+    from robot import profiling
+    
     shared_data.set_robot_mode(RobotMode.AUTONOMOUS)
     shared_data.set_position_based_speed_enabled(False)
     calibration.load_calibration_data()
@@ -40,10 +43,10 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         pass
+    finally:
+        process_manager.stop_all_processes()
+        shared_data.cleanup()
 
-    process_manager.stop_all_processes()
-
-    shared_data.cleanup()
 
 if __name__ == "__main__":
     main()

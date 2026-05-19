@@ -4,34 +4,40 @@ import numpy as np
 from dataclasses import dataclass, field
 
 from robot.multiprocessing import shared_data
+from robot.profiling import profile_function
 from robot.vision.visualizer import DetectedObject
 from robot.config import *
 
 
+MORPH_OPEN_KERNEL_3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
-@dataclass
+
+
+@dataclass(slots=True)
 class GoalColorCalibration:
     """HSV color ranges for goal detection - supports multiple ranges per color"""
     yellow_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([20, 100, 100]), np.array([30, 255, 255]))])
     blue_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([100, 100, 100]), np.array([130, 255, 255]))])
 
-@dataclass
+@dataclass(slots=True)
 class GoalDetectionResult:
     alignment: float            # -1.0 (too far left) to 1.0 (too far right), 0.0 is centered
     detected: bool
-    center_x: int | None   # X coordinate of goal center in frame
-    area: float            # Area of detected goal in pixels
+    center_x: int | None        # X coordinate of goal center in frame
+    area: float                 # Area of detected goal in pixels
     distance_mm: float | None   # Distance to goal in millimeters
-    height_pixels: float   # Height of detected goal in pixels
+    height_pixels: float        # Height of detected goal in pixels
+    camera_yaw_deg: float = 0.0 # 0=front camera, 180=back camera
     _rect: tuple[int, int, int, int, float] | None = None  # Cached bounding rect (x, y, w, h) for visualization
 
-@dataclass
+@dataclass(slots=True)
 class PositionEstimate:
     x_mm: float
     y_mm: float
     confidence: float
 
 
+@profile_function
 def detect_goal_alignment_with_rect(
     hsv_frame: np.ndarray,
     goal_color: str = "yellow",
@@ -63,6 +69,7 @@ def detect_goal_alignment_with_rect(
     return result, detections
 
 
+@profile_function
 def _detect_goal_alignment_internal(
     hsv_frame: np.ndarray,
     goal_color: str = "yellow",
@@ -118,6 +125,7 @@ def _detect_goal_alignment_internal(
     return result
 
 
+@profile_function
 def _get_goal_bounding_rect(
     hsv_frame: np.ndarray,
     goal_color: str = "yellow",
@@ -143,26 +151,32 @@ def _get_goal_bounding_rect(
     else:
         return 0, 0, 0, 0, 0.0
     
-    mask = None
-    for lower, upper in ranges:
-        range_mask = cv2.inRange(hsv_frame, lower, upper)
-        mask = range_mask if mask is None else cv2.bitwise_or(mask, range_mask)
+    if not ranges:
+        return 0, 0, 0, 0, 0.0
+
+    mask = cv2.inRange(hsv_frame, ranges[0][0], ranges[0][1])
+    for lower, upper in ranges[1:]:
+        cv2.bitwise_or(mask, cv2.inRange(hsv_frame, lower, upper), dst=mask)
     
     if mask is None:
         return 0, 0, 0, 0, 0.0
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, MORPH_OPEN_KERNEL_3, iterations=1)
     
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
         return 0, 0, 0, 0, 0.0
     
-    largest_contour = max(contours, key=cv2.contourArea)
-    goal_area = cv2.contourArea(largest_contour)
+    largest_contour = None
+    largest_area = 0.0
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area > largest_area:
+            largest_area = area
+            largest_contour = contour
     
-    if goal_area < min_area:
+    if largest_area < min_area or largest_contour is None:
         return 0, 0, 0, 0, 0.0
     
     x, y, w, h = cv2.boundingRect(largest_contour)
@@ -178,30 +192,69 @@ def _get_goal_bounding_rect(
     return x, y, w, h, goal_height
 
 
+@profile_function
 def get_position_estimate() -> PositionEstimate | None:
-    goal_result = shared_data.get_goal_detection_result()
     hardware_data = shared_data.get_hardware_data()
-    
-    if not goal_result or not goal_result.detected or goal_result.distance_mm is None:
-        return None
-    
+
     if not hardware_data or hardware_data.compass.heading is None:
         return None
-    
-    distance_mm = goal_result.distance_mm
-    alignment = goal_result.alignment
-    
-    robot_heading_deg = hardware_data.compass.heading
-    angle_offset_deg = alignment * (CAMERA_FOV_DEG / 2.0)
-    angle_to_goal_deg = robot_heading_deg + angle_offset_deg
-    angle_to_goal_rad = math.radians(angle_to_goal_deg)
-    
-    x_mm = distance_mm * math.sin(angle_to_goal_rad) * -1
-    y_mm = distance_mm * math.cos(angle_to_goal_rad)
-    
-    area_confidence = min(1.0, goal_result.area / 50000.0)
-    alignment_confidence = 1.0 - abs(alignment)
-    confidence = (area_confidence * 0.6) + (alignment_confidence * 0.4)
-    
+
+    field_length_mm = 2190.0
+    enemy_goal_color = shared_data.get_goal_color().lower()
+    own_goal_color = "blue" if enemy_goal_color == "yellow" else "yellow"
+    enemy_goal = shared_data.get_goal_detection_result_for_color(enemy_goal_color)
+    own_goal = shared_data.get_goal_detection_result_for_color(own_goal_color)
+
+    def _candidate_from_goal(goal: GoalDetectionResult | None, goal_x: float, goal_y: float) -> tuple[float, float, float] | None:
+        if goal is None or not goal.detected or goal.distance_mm is None:
+            return None
+        distance_mm = goal.distance_mm
+        angle_to_goal_deg = (
+            hardware_data.compass.heading
+            + goal.camera_yaw_deg
+            + goal.alignment * (CAMERA_FOV_DEG / 2.0)
+        )
+        angle_to_goal_rad = math.radians(angle_to_goal_deg)
+        x_mm = goal_x - distance_mm * math.sin(angle_to_goal_rad)
+        y_mm = goal_y + distance_mm * math.cos(angle_to_goal_rad)
+
+        area_confidence = min(1.0, goal.area / 50000.0)
+        alignment_confidence = 1.0 - abs(goal.alignment)
+        distance_confidence = max(0.05, min(1.0, 2000.0 / max(distance_mm, 1.0)))
+        confidence = (area_confidence * 0.45) + (alignment_confidence * 0.25) + (distance_confidence * 0.30)
+        weight = confidence * (1.0 / max(distance_mm, 1.0))
+        return x_mm, y_mm, weight
+
+    candidates = []
+    enemy_candidate = _candidate_from_goal(enemy_goal, goal_x=0.0, goal_y=0.0)
+    own_candidate = _candidate_from_goal(own_goal, goal_x=0.0, goal_y=field_length_mm)
+    if enemy_candidate is not None:
+        candidates.append(enemy_candidate)
+    if own_candidate is not None:
+        candidates.append(own_candidate)
+
+    if not candidates:
+        return None
+
+    sum_weights = sum(weight for _, _, weight in candidates)
+    if sum_weights <= 0:
+        return None
+
+    x_mm = sum(x * weight for x, _, weight in candidates) / sum_weights
+    y_mm = sum(y * weight for _, y, weight in candidates) / sum_weights
+    y_mm = max(0.0, min(field_length_mm, y_mm))
+
+    confidence = min(1.0, sum_weights / len(candidates))
+    previous = shared_data.get_last_position_estimate()
+    if previous is not None:
+        prev_x = float(previous.get("x_mm", x_mm))
+        prev_y = float(previous.get("y_mm", y_mm))
+        distance_delta = math.sqrt((x_mm - prev_x) ** 2 + (y_mm - prev_y) ** 2)
+        smoothing_alpha = 0.62 if distance_delta < 450.0 else 0.36
+        x_mm = prev_x + (x_mm - prev_x) * smoothing_alpha
+        y_mm = prev_y + (y_mm - prev_y) * smoothing_alpha
+        confidence = min(1.0, (confidence * 0.75) + (float(previous.get("confidence", 0.0)) * 0.25))
+
+    shared_data.set_last_position_estimate(x_mm, y_mm, confidence)
     return PositionEstimate(x_mm=x_mm, y_mm=y_mm, confidence=confidence)
 

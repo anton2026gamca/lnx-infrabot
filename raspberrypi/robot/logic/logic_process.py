@@ -5,11 +5,13 @@ import time
 from . import autonomous_mode
 from robot.hardware.motors import SmartMotorsController
 from robot.multiprocessing import shared_data
+from robot.profiling import profile_function
 from robot.robot import RobotMode
 from robot.config import *
 
 
 
+@profile_function
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     motors_controller = SmartMotorsController()
 

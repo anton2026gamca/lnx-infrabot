@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 
-@dataclass
+@dataclass(slots=True)
 class DetectedObject:
     """Represents a detected object with its bounding box and metadata."""
     object_type: str  # "goal_yellow", "goal_blue", "ball", etc.
@@ -14,8 +14,9 @@ class DetectedObject:
     height: int       # Bounding box height
     confidence: float | None = None # 0.0 to 1.0, optional confidence metric
     color: tuple[int, int, int] = (-1, -1, -1) # BGR color for drawing
+    camera: str | None = None # "front" | "back" | None
 
-@dataclass
+@dataclass(slots=True)
 class ObjectTypeConfig:
     """Configuration for a specific object type."""
     color: tuple[int, int, int]   # BGR color for drawing
@@ -188,4 +189,3 @@ def draw_detections_on_frame(
     """
     visualizer = get_visualizer()
     return visualizer.draw_detections(frame, detections, draw_labels, alpha)
-

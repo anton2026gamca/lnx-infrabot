@@ -6,6 +6,7 @@ from robot import utils, vision
 from robot.hardware import line_sensors
 from robot.logic.autonomous_mode.state_machine import State, StateMachine, CrossStateData
 from robot.multiprocessing import shared_data
+from robot.profiling import profile_function
 
 from robot.vision import GoalDetectionResult, ball
 from robot.hardware.motors import SmartMotorsController
@@ -79,14 +80,17 @@ GOALKEEPER_NO_POSITION_RETREAT_SPEED = 0.35
 
 
 
+@profile_function
 def _clamp(value: float, min_value: float, max_value: float) -> float:
     return max(min_value, min(max_value, value))
 
 
+@profile_function
 def _neutral_state() -> type[State]:
     return GoalkeeperApproachState if GOALKEEPER_MODE_ENABLED else IdleState
 
 
+@profile_function
 def _goalkeeper_should_grab_ball(data: "SoccerStateMachineData") -> bool:
     if data.sensors.ball_possession or data.sensors.ball_likely_inside_robot:
         return True
@@ -108,6 +112,7 @@ def _goalkeeper_should_grab_ball(data: "SoccerStateMachineData") -> bool:
     return False
 
 
+@profile_function
 def _set_goal_tracking_rotation(state_machine: StateMachine, data: "SoccerStateMachineData") -> float:
     if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
         state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
@@ -119,10 +124,12 @@ def _set_goal_tracking_rotation(state_machine: StateMachine, data: "SoccerStateM
     return _clamp(rotate, -1.0, 1.0)
 
 
+@profile_function
 def _field_delta_to_global_angle_deg(delta_x_mm: float, delta_y_mm: float) -> float:
     return (math.degrees(math.atan2(delta_x_mm, -delta_y_mm)) + 360.0) % 360.0
 
 
+@profile_function
 def _global_to_local_angle_deg(global_angle_deg: float, heading_deg: float) -> float:
     return utils.normalize_angle_deg(global_angle_deg - heading_deg)
 
@@ -162,6 +169,7 @@ class SoccerStateMachineData(CrossStateData):
     lines: LinesData
 
 
+@profile_function
 def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
     prev_data        = state_machine.cross_state_data.sensors if isinstance(state_machine.cross_state_data, SoccerStateMachineData) else None
 
@@ -224,6 +232,7 @@ def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
     )
 
 
+@profile_function
 def _update_lines_data(state_machine: StateMachine) -> LinesData:
     prev_data = state_machine.cross_state_data.lines if isinstance(state_machine.cross_state_data, SoccerStateMachineData) else None
 
@@ -244,6 +253,7 @@ def _update_lines_data(state_machine: StateMachine) -> LinesData:
     )
 
 
+@profile_function
 def _update_cross_state_data(state_machine: StateMachine) -> SoccerStateMachineData:
     data = SoccerStateMachineData(
         sensors=_update_sensors_data(state_machine),
@@ -257,6 +267,7 @@ def _update_cross_state_data(state_machine: StateMachine) -> SoccerStateMachineD
 # State: LINE AVOIDING
 # -------------------------------------------------------------------
 class LineAvoidingState(State):
+    @profile_function
     def on_enter(self, state_machine: StateMachine) -> None:
         self.min_clear_time = 0.5
         self.clear_time_start = None
@@ -264,6 +275,7 @@ class LineAvoidingState(State):
         self.slow_duration = 1.0
         self.absolute_avoid_direction = None
         
+    @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
         position = vision.get_position_estimate()
@@ -302,6 +314,7 @@ class LineAvoidingState(State):
             else:
                 state_machine.motors.set_motors(angle=0.0, speed=0.0, rotate=0.0)
 
+    @profile_function
     def _calculate_absolute_avoid_direction(self, data: SoccerStateMachineData, position) -> float:
         detected_angles = []
 
@@ -380,6 +393,7 @@ class LineAvoidingState(State):
 # No ball detected - hold still.
 # ------------------------------------------------------------------
 class IdleState(State):
+    @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
         if data.lines.enter_avoiding_state:
@@ -409,6 +423,7 @@ class IdleState(State):
 #           the goal stays centred.
 # ------------------------------------------------------------------
 class AttackerApproachState(State):
+    @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
@@ -463,6 +478,7 @@ class AttackerApproachState(State):
 # the goal centred via rotation. If the ball is lost, re-approach.
 # ------------------------------------------------------------------
 class AttackerPushState(State):
+    @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
@@ -495,6 +511,7 @@ class AttackerPushState(State):
 # Drive toward our goal to prepare for a defensive play.
 # ------------------------------------------------------------------
 class GoalkeeperApproachState(State):
+    @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
@@ -545,6 +562,7 @@ class GoalkeeperApproachState(State):
 # behaviour accordingly.
 # ------------------------------------------------------------------
 class GoalkeeperDefendState(State):
+    @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
@@ -612,6 +630,7 @@ _state_machine = StateMachine(
     motors=_motors
 )
 
+@profile_function
 def get_state_machine() -> StateMachine:
     return _state_machine
 

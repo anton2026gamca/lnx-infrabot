@@ -21,6 +21,7 @@ This is a comprehensive WebSocket/HTTP API for controlling and monitoring a robo
 5. [Calibration Procedures](#calibration-procedures)
 6. [Bluetooth Communication](#bluetooth-communication)
 7. [Video Streaming](#video-streaming)
+8. [Profiling & Performance](#profiling--performance)
 
 ---
 
@@ -302,20 +303,35 @@ Get goal detection color and calibration ranges.
 {
   status: "ok",
   goal_color: "yellow" | "blue",
-  calibration: {
-    yellow: {
-      ranges: Array<{
-        lower: [number, number, number],  // [H, S, V]
-        upper: [number, number, number]   // [H, S, V]
-      }>
-    },
-    blue: {
-      ranges: Array<{
-        lower: [number, number, number],
-        upper: [number, number, number]
-      }>
-    }
+}
+```
+
+### `get_goal_color_calibration`
+
+Get goal color calibration ranges used for goal detection.
+
+**Request:**
+```typescript
+{
+  event: "get_goal_color_calibration",
+  data: {
+    camera: "front" | "back"
   }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok"
+  yellow_ranges: Array<{
+    lower: [number, number, number],  // [H, S, V]
+    upper: [number, number, number]   // [H, S, V]
+  }>
+  blue_ranges: Array<{
+    lower: [number, number, number],  // [H, S, V]
+    upper: [number, number, number]   // [H, S, V]
+  }>
 }
 ```
 
@@ -373,13 +389,15 @@ Get estimated robot position on the field.
 
 ### `get_detections`
 
-Get all detected objects in the current frame.
+Get detected objects, optionally filtered by camera.
 
 **Request:**
 ```typescript
 {
   event: "get_detections",
-  data: {}
+  data: {
+    camera?: "front" | "back" | "both" // Default: "both"
+  }
 }
 ```
 
@@ -387,15 +405,29 @@ Get all detected objects in the current frame.
 ```typescript
 {
   status: "ok",
-  detections: Array<{
-    object_type: string,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    confidence: number,  // 0.0 to 1.0
-    color: [number, number, number]  // [R, G, B]
-  }>
+  camera: "front" | "back" | "both",
+  detections: {
+    front?: Array<{
+      object_type: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      confidence: number,
+      color: [number, number, number], // [B, G, R]
+      camera: "front" | "back" | null
+    }>,
+    back?: Array<{
+      object_type: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      confidence: number,
+      color: [number, number, number], // [B, G, R]
+      camera: "front" | "back" | null
+    }>
+  }
 }
 ```
 
@@ -407,7 +439,9 @@ Get current ball color calibration ranges.
 ```typescript
 {
   event: "get_ball_calibration",
-  data: {}
+  data: {
+    camera?: "front" | "back" // Default: "front"
+  }
 }
 ```
 
@@ -415,6 +449,7 @@ Get current ball color calibration ranges.
 ```typescript
 {
   status: "ok",
+  camera: "front" | "back",
   ranges: Array<{
     lower: [number, number, number],  // [H, S, V]
     upper: [number, number, number]   // [H, S, V]
@@ -430,7 +465,9 @@ Get the focal length used for distance calculations.
 ```typescript
 {
   event: "get_goal_focal_length",
-  data: {}
+  data: {
+    camera?: "front" | "back" // Default: "front"
+  }
 }
 ```
 
@@ -438,6 +475,7 @@ Get the focal length used for distance calculations.
 ```typescript
 {
   status: "ok",
+  camera: "front" | "back",
   focal_length_pixels: number
 }
 ```
@@ -500,11 +538,17 @@ Get current line calibration status.
 ```typescript
 {
   status: "ok",
-  phase: number,              // 0 = idle, 1 = phase 1, 2 = phase 2
-  line_sensor_count: number,
-  min_values: number[],
-  max_values: number[],
-  thresholds: [[number, number], ...]
+  active: boolean,                         // true when calibration is running
+  phase: number,                           // 0 = idle, 1 = phase 1, 2 = phase 2
+  current_thresholds: Array<[number, number]>,
+  calibration_min: Array<number | null> | null,   // current phase min values
+  calibration_max: Array<number | null> | null,   // current phase max values
+  phase1_complete: boolean,
+  phase1_min: Array<number | null> | null,
+  phase1_max: Array<number | null> | null,
+  phase2_complete: boolean,
+  phase2_min: Array<number | null> | null,
+  phase2_max: Array<number | null> | null
 }
 ```
 
@@ -525,10 +569,12 @@ Get goal distance calibration status.
 {
   status: "ok",
   active: boolean,
-  initial_distance_mm: number,
-  line_distance_mm: number,
-  samples: number,
-  distance_constant: number | null
+  phase?: "initial" | "driving",
+  initial_distance_mm?: number,
+  line_distance_mm?: number,
+  initial_height_pixels?: number | null,
+  line_height_pixels?: number | null,
+  camera?: "front" | "back"
 }
 ```
 
@@ -630,49 +676,43 @@ Update motor control settings.
 
 ### `set_goal_settings`
 
-Update goal color and calibration ranges.
+Update goal settings
 
-**Request (New Format - Multiple Ranges):**
+**Request:**
 ```typescript
 {
   event: "set_goal_settings",
   data: {
     goal_color?: "yellow" | "blue",
-    calibration?: {
-      yellow?: {
-        ranges: Array<{
-          lower: [number, number, number],  // [H, S, V]
-          upper: [number, number, number]
-        }>
-      },
-      blue?: {
-        ranges: Array<{
-          lower: [number, number, number],
-          upper: [number, number, number]
-        }>
-      }
-    }
   }
 }
 ```
 
-**Request (Legacy Format - Single Range):**
+**Response:**
 ```typescript
 {
-  event: "set_goal_settings",
-  data: {
-    goal_color?: "yellow" | "blue",
-    calibration?: {
-      yellow?: {
-        lower: [number, number, number],
-        upper: [number, number, number]
-      },
-      blue?: {
-        lower: [number, number, number],
-        upper: [number, number, number]
-      }
-    }
-  }
+  status: "ok" | "error",
+  error?: string
+}
+```
+
+### `set_goal_color_calibration`
+
+Update goal color calibration ranges
+
+**Request:**
+```typescript
+{
+  event: "set_goal_color_calibration"
+  camera: "front" | "back" | "both"
+  yellow_ranges?: Array<{
+    lower: [number, number, number],  // [H, S, V]
+    upper: [number, number, number]
+  }>
+  blue_ranges?: Array<{
+    lower: [number, number, number],
+    upper: [number, number, number]
+  }>
 }
 ```
 
@@ -688,26 +728,16 @@ Update goal color and calibration ranges.
 
 Update ball color calibration ranges.
 
-**Request (New Format - Multiple Ranges):**
+**Request:**
 ```typescript
 {
   event: "set_ball_calibration",
   data: {
+    camera?: "front" | "back" | "both", // Default: "both"
     ranges: Array<{
       lower: [number, number, number],  // [H, S, V]
       upper: [number, number, number]
     }>
-  }
-}
-```
-
-**Request (Legacy Format - Single Range):**
-```typescript
-{
-  event: "set_ball_calibration",
-  data: {
-    lower: [number, number, number],    // [H, S, V]
-    upper: [number, number, number]
   }
 }
 ```
@@ -729,7 +759,8 @@ Set the focal length for goal distance calculations.
 {
   event: "set_goal_focal_length",
   data: {
-    focal_length_pixels: number  // Must be positive
+    focal_length_pixels: number,  // Must be positive
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -805,7 +836,8 @@ Calibrate ball distance detection. Place ball at a known distance and call this 
 {
   event: "camera_ball_distance_calibration",
   data: {
-    known_distance_mm: number  // Distance from camera to ball in millimeters
+    known_distance_mm: number,  // Distance from camera to ball in millimeters
+    camera?: "front" | "back"   // Default: "front"
   }
 }
 ```
@@ -815,6 +847,36 @@ Calibrate ball distance detection. Place ball at a known distance and call this 
 {
   status: "ok" | "error",
   calibration_constant?: number,
+  error?: string
+}
+```
+
+### `camera_auto_calibration`
+
+Temporarily enable camera AWB and AE so the camera can adapt to current lighting, then disable both again and copy the learned values to all other cameras.
+
+**Request:**
+```typescript
+{
+  event: "camera_auto_calibration",
+  data: {
+    camera?: "front" | "back", // Default: "front"
+    settle_time_s?: number              // Seconds to keep AWB/AE enabled (default: 2.0)
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  camera?: "front" | "back" | "both",
+  result?: {
+    color_gains: [number, number],    // [red_gain, blue_gain]
+    exposure_time: number | null,     // microseconds
+    analogue_gain: number | null,
+    settle_time_s: number
+  },
   error?: string
 }
 ```
@@ -830,7 +892,8 @@ Add a new HSV range for goal color detection.
   data: {
     goal_color: "yellow" | "blue",
     lower: [number, number, number],  // [H, S, V]
-    upper: [number, number, number]   // [H, S, V]
+    upper: [number, number, number],  // [H, S, V]
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -857,7 +920,8 @@ Remove a goal color range by index.
   event: "remove_goal_color_range",
   data: {
     goal_color: "yellow" | "blue",
-    index: number  // Index of the range to remove
+    index: number,  // Index of the range to remove
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -884,7 +948,8 @@ Add a new HSV range for ball color detection.
   event: "add_ball_color_range",
   data: {
     lower: [number, number, number],  // [H, S, V]
-    upper: [number, number, number]   // [H, S, V]
+    upper: [number, number, number],  // [H, S, V]
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -910,7 +975,8 @@ Remove a ball color range by index.
 {
   event: "remove_ball_color_range",
   data: {
-    index: number  // Index of the range to remove
+    index: number,  // Index of the range to remove
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -1012,7 +1078,8 @@ Begin goal distance calibration. Drive robot toward goal until it hits the line.
   event: "start_goal_distance_calibration",
   data: {
     initial_distance?: number,  // Initial distance in mm (default: 200)
-    line_distance?: number      // Expected line distance in mm (default: 200)
+    line_distance?: number,     // Expected line distance in mm (default: 200)
+    camera?: "front" | "back"   // Default: "front"
   }
 }
 ```
@@ -1042,7 +1109,8 @@ Stop goal distance calibration and save results.
 ```typescript
 {
   status: "ok" | "error",
-  distance_constant?: number,
+  focal_length_pixels?: number,
+  camera?: "front" | "back",
   message?: string,
   error?: string
 }
@@ -1078,6 +1146,7 @@ Analyze selected image regions and compute HSV ranges.
 {
   event: "compute_hsv_from_regions",
   data: {
+    camera?: "front" | "back",  // Default: "front"
     regions: Array<{
       x: number,       // X coordinate
       y: number,       // Y coordinate
@@ -1491,7 +1560,7 @@ Set Bluetooth pairing mode (enable or disable discoverability).
 
 ### `subscribe_video`
 
-Start receiving video frames from the robot's camera.
+Start receiving video frames from the robot cameras.
 
 **Request:**
 ```typescript
@@ -1499,7 +1568,8 @@ Start receiving video frames from the robot's camera.
   event: "subscribe_video",
   data: {
     fps?: number,              // Frames per second (default from config)
-    show_detections?: boolean  // Overlay detection boxes (default: true)
+    show_detections?: boolean, // Overlay detection boxes on the streamed camera(s) (default: true)
+    camera?: "front" | "back" | "both" // Default: "both"
   }
 }
 ```
@@ -1515,12 +1585,17 @@ Start receiving video frames from the robot's camera.
 
 **Emitted Events:**
 
-**`video_frame`** - Binary JPEG frame data (repeated until unsubscribed)
+**`video_frame_front`** - Binary JPEG frame data from the front camera
 ```typescript
 <bytes>  // Raw JPEG image data
 ```
 
-The client receives raw JPEG bytes which can be decoded and displayed as video. Frames are sent continuously at the specified FPS rate.
+**`video_frame_back`** - Binary JPEG frame data from the back camera
+```typescript
+<bytes>  // Raw JPEG image data
+```
+
+When `camera: "both"` is used, the server emits both `video_frame_front` and `video_frame_back`.
 
 ### `unsubscribe_video`
 
@@ -1541,6 +1616,195 @@ Stop receiving video frames.
   error?: string
 }
 ```
+
+---
+
+## Profiling & Performance
+
+The API provides real-time control over profiling data collection. Profiling tracks function execution times, lock contention, and process metrics across all robot processes. Use the profiling endpoints to enable/disable collection at runtime, retrieve performance metrics, and analyze bottlenecks.
+
+### `profiling_start`
+
+Start collecting profiling data.
+
+**Request:**
+```typescript
+{
+  event: "profiling_start",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  message: string,
+  error?: string
+}
+```
+
+**Description:** Initializes the profiling collector and begins recording function execution times, lock contention events, and process metrics. Previous collected data is cleared when starting a new collection session.
+
+### `profiling_stop`
+
+Stop collecting profiling data without clearing accumulated data.
+
+**Request:**
+```typescript
+{
+  event: "profiling_stop",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  message: string,
+  error?: string
+}
+```
+
+**Description:** Stops the profiler from collecting new events. Data collected so far remains available for retrieval via `profiling_report`.
+
+### `profiling_status`
+
+Get current profiling status and statistics.
+
+**Request:**
+```typescript
+{
+  event: "profiling_status",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  is_collecting: boolean,
+  total_function_events: number,
+  total_lock_events: number,
+  total_processes: number,
+  collection_duration: number  // seconds
+}
+```
+
+**Description:** Returns the current profiling state including whether collection is active and basic statistics about collected data.
+
+### `profiling_report`
+
+Get detailed profiling report with metrics and statistics.
+
+**Request:**
+```typescript
+{
+  event: "profiling_report",
+  data: {
+    include_stack_traces?: boolean  // Default: false (stack traces omitted to reduce network size)
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  report?: {
+    metadata: {
+      collection_duration: number,
+      start_time: number,
+      end_time: number,
+      total_function_events: number,
+      total_lock_events: number,
+      total_processes: number,
+      is_collecting: boolean
+    },
+    processes: {
+      [process_name]: {
+        process_name: string,
+        process_id: number,
+        start_time: number,
+        stop_time: number,
+        function_count: number,
+        lock_events_count: number
+      }
+    },
+    functions: {
+      by_name: {
+        [function_name]: {
+          count: number,
+          total_time: number,
+          min_time: number,
+          max_time: number,
+          avg_time: number,
+          name: string
+        }
+      },
+      sorted_by_total_time: [...]  // Top functions by total execution time
+    },
+    locks: {
+      by_name: {
+        [lock_name]: {
+          acquire_count: number,
+          total_wait_time: number,
+          max_wait_time: number,
+          contentions: number
+        }
+      },
+      sorted_by_contention: [...]  // Locks sorted by contention count
+    },
+    timeline: {
+      processes: [...],       // Process lifecycle events (max 1000)
+      functions: [...],       // Function call events (max 1000)
+      locks: [...]            // Lock events (max 1000)
+    }
+  },
+  error?: string
+}
+```
+
+**Description:** Returns comprehensive profiling data including:
+- **Metadata:** Collection duration and event counts
+- **Processes:** Per-process statistics and lifecycle
+- **Functions:** Execution time statistics for all profiled functions
+- **Locks:** Lock contention and wait time statistics
+- **Timeline:** Time-series event data
+
+**Data Fields Explanation:**
+- `count` - Number of times the event occurred
+- `total_time` - Sum of all durations (seconds)
+- `avg_time` - Average time per occurrence
+- `min_time`, `max_time` - Minimum and maximum durations
+- `contentions` - Number of times a lock was contested
+- `total_wait_time` - Total time processes waited for this lock
+- `max_wait_time` - Maximum single wait duration
+
+### `profiling_clear`
+
+Clear all collected profiling data and reset the collector.
+
+**Request:**
+```typescript
+{
+  event: "profiling_clear",
+  data: {}
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  message: string,
+  error?: string
+}
+```
+
+**Description:** Clears all collected profiling data. After clearing, the profiler remains in its current state (collecting or stopped). Start a new session with `profiling_start` to begin fresh data collection.
 
 ---
 
@@ -1592,7 +1856,8 @@ socket.on('connect', () => {
   // Subscribe to video
   socket.emit('subscribe_video', {
     fps: 30,
-    show_detections: true
+    show_detections: true,
+    camera: 'both'
   });
 });
 
@@ -1601,9 +1866,15 @@ socket.on('important_sensor_data_change', (data) => {
   console.log('Sensor data changed:', data);
 });
 
-// Listen for video frames
-socket.on('video_frame', (frameData) => {
-  // frameData is binary JPEG data
+socket.on('video_frame_front', (frameData) => {
+  // Front camera (binary JPEG data)
+  const blob = new Blob([frameData], { type: 'image/jpeg' });
+  const url = URL.createObjectURL(blob);
+  // Display in <img src={url} /> or canvas
+});
+
+socket.on('video_frame_back', (frameData) => {
+  // Back camera (binary JPEG data)
   const blob = new Blob([frameData], { type: 'image/jpeg' });
   const url = URL.createObjectURL(blob);
   // Display in <img src={url} /> or canvas
@@ -1616,26 +1887,12 @@ socket.on('disconnect', () => {
 
 ---
 
-## Configuration Constants
-
-The following configuration values affect API behavior:
-
-| Constant | Purpose |
-|----------|---------|
-| `AUTH_TOKEN` | Authentication token (base64 encoded for transmission) |
-| `API_HOST` | Server host address |
-| `API_PORT` | Server port number |
-| `API_VIDEO_TARGET_FPS` | Default video frame rate |
-| `API_VIDEO_JPEG_QUALITY` | JPEG compression quality (0-100) |
-
----
-
 ## Notes
 
 - All timestamps are in seconds (Unix epoch)
 - All distances in calibration are in millimeters (mm)
 - All angles in degrees (0-360)
-- HSV ranges: H[0-179], S[0-255], V[0-255] (OpenCV convention)
+- HSV ranges: H (0-179), S (0-255), V (0-255) (OpenCV convention)
 - State monitoring interval: 100ms
 - Video frames are compressed as JPEG with configured quality
 - Disconnected clients are automatically cleaned up after failed emission attempts

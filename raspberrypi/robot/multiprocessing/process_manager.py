@@ -1,7 +1,8 @@
 import logging
 import multiprocessing
+import os
 
-from robot import utils
+from robot import profiling, utils
 from robot.api import api_process
 from robot.bluetooth import bluetooth_process
 from robot.hardware import hardware_process
@@ -23,12 +24,17 @@ class Process:
     def run(self):
         if self.logger is None:
             self.logger = utils.get_logger(self.name)
+
+        profiling.register_process(self.name, os.getpid())
+
         try:
             self.function(stop_event=self.stop_event, logger=self.logger)
         except KeyboardInterrupt:
             pass
         except Exception as e:
             self.logger.error(f"{e}", exc_info=True)
+        finally:
+            profiling.unregister_process(self.name, os.getpid())
 
     def stop(self):
         self.stop_event.set()

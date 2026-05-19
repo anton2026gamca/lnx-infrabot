@@ -83,18 +83,19 @@ module uppest_part_new() {
     height = 20;
     thickness = 2.5;
     ir_rotation_offset = 53;
-    ir_height_offset = 10;
+    ir_height_offset = 15;
     ir_holders_d = 4;
     camera_holder_d = 9;
-    camera_holder_offset = 4.5;
+    camera_holder_offset = 5;
+    camera_holder_thickness = 6;
 
     translate([0,0,187]) {
-        difference() {
-            cube([154, thickness, height], center=true);
-            translate([0, 0, -15.5 - height / 2 + camera_holder_d])
-                rotate([-45, 0, 0])
-                    cube([25.4, 50, 20], center=true);
-        }
+        // difference() {
+        cube([154, thickness, height], center=true);
+        //     translate([0, 0, -15.5 - height / 2 + camera_holder_d])
+        //         rotate([-45, 0, 0])
+        //             cube([25.4, 50, 20], center=true);
+        // }
 
         translate([0, 0, height / 2 + ir_height_offset]) 
             rotate([0, 0, ir_rotation_offset])
@@ -111,8 +112,8 @@ module uppest_part_new() {
                                     cylinder(d1=0, d2=ir_holders_d, h=4, center=false);
                             }
 
-                            translate([0, 0, ir_height_offset])
-                                cylinder(d=1.6, h=ir_height_offset, center=true);
+                            translate([0, 0, 1])
+                                cylinder(d=1.9, h=ir_height_offset, center=false);
                         }
                     }
                 }
@@ -135,16 +136,18 @@ module uppest_part_new() {
                 }
             }
 
-            translate([dir * 16.7, 0, camera_holder_d / 2 - height / 2]) {
-                rotate([0,90,0]) {
-                    translate([0, -camera_holder_offset - thickness / 2, 0]) {
-                        difference() {
-                            union() {
-                                cylinder(d=camera_holder_d, h=8, center=true);
-                                translate([0, camera_holder_offset / 2, 0])
-                                    cube([camera_holder_d, camera_holder_offset, 8], center=true);
+            for (rotation = [0, 180]) {
+                translate([dir * (12.7 + camera_holder_thickness / 2), 0, camera_holder_d / 2 - height / 2]) {
+                    rotate([0, 90, rotation]) {
+                        translate([0, -camera_holder_offset - thickness / 2, 0]) {
+                            difference() {
+                                union() {
+                                    cylinder(d=camera_holder_d, h=camera_holder_thickness, center=true);
+                                    translate([0, camera_holder_offset / 2, 0])
+                                        cube([camera_holder_d, camera_holder_offset, camera_holder_thickness], center=true);
+                                }
+                                cylinder(d=3.3, h=16, center=true);
                             }
-                            cylinder(d=3.3, h=16, center=true);
                         }
                     }
                 }
@@ -734,7 +737,7 @@ module all(){
 middle_part();
 upper_part();
 *uppest_part();
-*uppest_part_new();
+uppest_part_new();
 //bottom_part();
 *bottom_wall();
 *middle_wall(0);
@@ -747,10 +750,9 @@ ball_zone();
     camera();
 }
 *translate([0,50,190])rotate([0,0,180]){//back camera
-    rotate([0,180,0])translate([0,0,-3.5])camera_bracket_holder_new();
-    translate([0,42.5,-21.5])rotate([-20,180,180]){
+    translate([0,16,-3.7])rotate([20,0,0]){
         camera_bracket();
-        camera();
+        %camera();
     }
 }
 *ball_zone();
