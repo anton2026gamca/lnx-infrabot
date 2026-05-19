@@ -29,23 +29,20 @@ module raspberry_bracket_holes() {
             cylinder(h = 200, d = 3.3, center=true);
     }
 }
-module raspberry_holes() {
-    translate([	-39.0,-24.5,0])cylinder(d = 2.8, h = 100, center=true);
-    translate([-39.0,+24.5,0])cylinder(d = 2.8, h = 100, center=true);
-    translate([+19.0,-24.5,0])cylinder(d = 2.8, h = 100, center=true);
-    translate([+19.0,+24.5,0])cylinder(d = 2.8, h = 100, center=true);
+module raspberry_holes(dia = 2.8, height = 100) {
+    translate([	-39.0,-24.5,0])cylinder(d = dia, h = height, center=false);
+    translate([-39.0,+24.5,0])cylinder(d = dia, h = height, center=false);
+    translate([+19.0,-24.5,0])cylinder(d = dia, h = height, center=false);
+    translate([+19.0,+24.5,0])cylinder(d = dia, h = height, center=false);
 }
 module raspberry_bracket() {
     difference() {
         union() {
             cube([85,56,2],center=true);
-            translate([	-39.0,-24.5,3.5])cylinder(d = 6, h = 5, center=true);
-            translate([-39.0,+24.5,3.5])cylinder(d = 6, h = 5, center=true);
-            translate([+19.0,-24.5,3.5])cylinder(d = 6, h = 5, center=true);
-            translate([+19.0,+24.5,3.5])cylinder(d = 6, h = 5, center=true);
+            raspberry_holes(6, 5);
         }
         raspberry_bracket_holes();
-        raspberry_holes();
+        translate([0,0,-10])raspberry_holes();
     }
 }
 module raspberry() {
