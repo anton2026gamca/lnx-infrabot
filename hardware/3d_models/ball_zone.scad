@@ -55,9 +55,9 @@ module ball_zone(
                 translate([0, -106.713, 0])
                     cube([110, 10, 100], center = true);
                 ball_zone_cutout(robot_d = robot_d);
-                for (angle = [45:90:360]) {
-                    rotate([0, 0, angle])
-                        translate([0, 84, 0])
+                for (dir = [-1, 1]) {
+                    rotate([0, 0, 180 + dir * 45])
+                        translate([dir * -8.6, 84, 0])
                             cube([65, 4, 80], center = true);
                 }
                 translate([0, 0, -33]) {
