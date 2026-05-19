@@ -13,7 +13,7 @@ use <ir_sensor.scad>;
 use <camera_bracket.scad>;
 use <line_sensor_shield.scad>;
 use <motor_driver_bracket.scad>;
-
+use <wheels.scad>;
 
 module camera_front_bracket() {
     translate([0, -52.3, 104.3])
@@ -66,7 +66,7 @@ module robot(
                 show_raspberry = show_other_components
             );
         if (show_middle_wall)
-            middle_wall();
+            middle_wall(robot_d = robot_d);
         if (show_upper)
             upper_part(robot_d = robot_d, wheel_offset = wheel_offset);
         if (show_top)
@@ -86,4 +86,20 @@ module robot(
     }
 }
 
-robot(/* show_bottom_wall = false, show_middle_wall = false,  */show_other_components = false);
+robot(
+    show_bottom = false,
+    show_middle = true,
+    show_upper = true,
+    show_top = false,
+    show_ball_zone = false,
+    show_bottom_wall = true,
+    show_middle_wall = true,
+    show_handle = false,
+    show_handle_bracket = false,
+    show_camera_front = false,
+    show_camera_back = false,
+    show_motor_driver_brackets = false,
+    show_line_sensor_shield = false,
+    show_other_components = false
+);
+%wheels();

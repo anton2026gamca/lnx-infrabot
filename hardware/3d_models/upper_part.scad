@@ -24,7 +24,7 @@ module upper_part(
             rotate([0, 0, angle]) {
                 side = 45;
                 inner_d = side / tan(180 / 8);
-                translate([wheel_offset + inner_d / 2 - 4, 0, 50]) {
+                translate([wheel_offset + inner_d / 2 - 3.8, 0, 50]) {
                     rotate([0, 0, 45])
                         cube([inner_d, inner_d, 100], center = true);
                 }
@@ -49,7 +49,7 @@ module upper_part(
         }
         translate([-55, 65, 50])
             rotate([0, 0, 45])
-                cube([19, 13, 100], center = true);
+                cube([19, 13.5, 100], center = true);
     }
 
     translate([0, 0, 96]) {
