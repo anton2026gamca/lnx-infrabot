@@ -50,6 +50,8 @@ module middle_wall(robot_d = 215) {
                                 }
                             }
                         }
+                        rotate([0,0,45])translate([100,0,0])
+                            cube([100,12,5], center = true);
                         translate([0,0,-10+33-30])for (A = [1, -1]) {
                             translate([A*55-A*25/2,90,5.5+25/2])rotate([0,A*45,0])
                                 cube([2 + 35, 28, 40], center = true);
@@ -64,14 +66,23 @@ module middle_wall(robot_d = 215) {
                         translate([0, -(180 / 2 - 12 + 50), 0])
                             cube([100, 100, 100], center = true);
                         platform_connection_holes(6.2);
+                        
+                        
+                        
                     }
                 }
                 for (angle = [0, 180]) {
                     rotate([0, 0, angle]) {
                         translate([88, 0, 0]) {
                             for (side = [1, -1]) {
-                                translate([-5, side * (44), -17])
-                                    cube([14, 2, 5.8], center = true);
+                                if ((side == -1 && angle == 0) || 
+                                    (side == 1 && angle == 180))
+                                    translate([-5, side * (44), 0])
+                                        cube([14, 2, 40 - 0.2], center = true);
+                                else
+                                    translate([-5, side * (44), -17])
+                                        cube([14, 2, 5.8], center = true);
+                            
                             }
                         }
                     }
