@@ -4,7 +4,7 @@ use <robot_shared.scad>;
 
 
 
-module middle_wall(robot_d = 215) {
+module middle_wall(robot_d = 215, usb_hole = 1) {
     translate([0, 0, 42])intersection() {
         cylinder(d=215, h=200, center=true);
 
@@ -50,8 +50,10 @@ module middle_wall(robot_d = 215) {
                                 }
                             }
                         }
-                        rotate([0,0,45])translate([100,0,0])
-                            cube([100,12,5], center = true);
+                        if (usb_hole)
+                            rotate([0,0,45])translate([100,0,0])
+                                cube([100,12,5], center = true);
+                        
                         translate([0,0,-10+33-30])for (A = [1, -1]) {
                             translate([A*55-A*25/2,90,5.5+25/2])rotate([0,A*45,0])
                                 cube([2 + 35, 28, 40], center = true);

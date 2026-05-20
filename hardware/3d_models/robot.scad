@@ -35,6 +35,9 @@ module robot(
     robot_h = 220,
     rpi_pos = [0, -30, 55],
     level_shifter_pos = [-35, 32, 57.4],
+    
+    teensy_usb_hole = true,
+    
     show_bottom = true,
     show_middle = true,
     show_upper = true,
@@ -66,7 +69,7 @@ module robot(
                 show_raspberry = show_other_components
             );
         if (show_middle_wall)
-            middle_wall(robot_d = robot_d);
+            middle_wall(robot_d = robot_d, usb_hole = teensy_usb_hole);
         if (show_upper)
             upper_part(robot_d = robot_d, wheel_offset = wheel_offset);
         if (show_top)
