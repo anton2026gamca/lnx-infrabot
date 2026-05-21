@@ -1,6 +1,7 @@
 import logging
 import multiprocessing.synchronize
 import numpy as np
+import threading
 import time
 
 from robot import utils
@@ -28,7 +29,11 @@ def _initialize_cameras(logger: logging.Logger) -> list[str]:
 
 
 @profile_function
-def _handle_auto_calibration(calibration_request: dict, available_cameras: list[str], logger: logging.Logger) -> None:
+def _handle_auto_calibration(
+    calibration_request: dict,
+    available_cameras: list[str],
+    logger: logging.Logger,
+) -> None:
     request_id = int(calibration_request.get("request_id", 0))
     target_camera = str(calibration_request.get("camera", "front")).lower()
     settle_time_s = float(calibration_request.get("settle_time_s", 2.0))
@@ -59,46 +64,90 @@ def _handle_auto_calibration(calibration_request: dict, available_cameras: list[
 
 
 @profile_function
-def _capture_frames(available_cameras: list[str], logger: logging.Logger) -> bool:
-    had_capture_error = False
-    for camera_name in available_cameras:
+def _capture_camera_loop(
+    camera_name: str,
+    stop_event: multiprocessing.synchronize.Event,
+    shutdown_event: threading.Event,
+    pause_event: threading.Event,
+    capture_counts: dict[str, int],
+    capture_counts_lock: threading.Lock,
+    logger: logging.Logger,
+) -> None:
+    while not stop_event.is_set() and not shutdown_event.is_set():
         try:
+            if pause_event.is_set():
+                time.sleep(0.001)
+                continue
             frame = camera.capture_frame(camera_name=camera_name)
             shared_data.set_camera_frame(frame, camera_name=camera_name)
+            with capture_counts_lock:
+                capture_counts[camera_name] = capture_counts.get(camera_name, 0) + 1
         except Exception as e:
-            had_capture_error = True
             logger.error(f"Error capturing {camera_name} frame: {e}", exc_info=True)
             shared_data.set_camera_frame(None, camera_name=camera_name)
-    return had_capture_error
+            time.sleep(0.001)
 
 
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
+    shutdown_event = threading.Event()
+    pause_event = threading.Event()
+    capture_threads: list[threading.Thread] = []
     try:
         if utils.get_default_logger_level() == logging.DEBUG:
             logging.getLogger("picamera2.picamera2").setLevel(logging.INFO)
 
-        captured_frames = 0
         last_debug_msg_time = time.perf_counter()
 
         available_cameras = _initialize_cameras(logger)
 
         if not available_cameras:
             raise RuntimeError("No cameras available")
+
+        capture_counts: dict[str, int] = {camera_name: 0 for camera_name in available_cameras}
+        capture_counts_lock = threading.Lock()
+
+        for camera_name in available_cameras:
+            capture_thread = threading.Thread(
+                target=_capture_camera_loop,
+                name=f"camera-capture-{camera_name}",
+                args=(
+                    camera_name,
+                    stop_event,
+                    shutdown_event,
+                    pause_event,
+                    capture_counts,
+                    capture_counts_lock,
+                    logger,
+                ),
+                daemon=True,
+            )
+            capture_thread.start()
+            capture_threads.append(capture_thread)
         
         while not stop_event.is_set():
             calibration_request = shared_data.claim_camera_auto_calibration_request()
             if calibration_request:
-                _handle_auto_calibration(calibration_request, available_cameras, logger)
+                pause_event.set()
+                try:
+                    _handle_auto_calibration(calibration_request, available_cameras, logger)
+                finally:
+                    pause_event.clear()
 
-            had_capture_error = _capture_frames(available_cameras, logger)
-            captured_frames += 1
-            if had_capture_error:
-                time.sleep(0.001)
-            
             if time.perf_counter() > last_debug_msg_time + 1:
-                logger.debug(f"Camera Capture FPS: {captured_frames}")
-                captured_frames = 0
+                with capture_counts_lock:
+                    camera_fps = {
+                        camera_name: capture_counts.get(camera_name, 0)
+                        for camera_name in available_cameras
+                    }
+                    for camera_name in available_cameras:
+                        capture_counts[camera_name] = 0
+                camera_fps_msg = ", ".join(
+                    f"{camera_name}={camera_fps.get(camera_name, 0)}"
+                    for camera_name in available_cameras
+                )
+                logger.debug(f"Camera Capture FPS: {camera_fps_msg}")
                 last_debug_msg_time = time.perf_counter()
+            time.sleep(0.001)
     except KeyboardInterrupt:
         pass
     except Exception as e:
@@ -109,4 +158,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 shared_data.set_camera_frame(FrameData(frame=black_frame, timestamp=time.time()), camera_name=camera_name)
         except Exception | KeyboardInterrupt:
             pass
-
+    finally:
+        shutdown_event.set()
+        for capture_thread in capture_threads:
+            capture_thread.join(timeout=1.0)
