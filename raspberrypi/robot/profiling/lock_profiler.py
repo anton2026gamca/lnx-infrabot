@@ -40,7 +40,7 @@ class ProfiledLock:
             acquire_time = time.time() - start_time
             current_pid = os.getpid()
 
-            if collector and acquire_time >= 0.001:
+            if collector and acquire_time >= 0.00002:
                 collector.collect_lock_event(
                     lock_name=self._name,
                     event_type="acquire",

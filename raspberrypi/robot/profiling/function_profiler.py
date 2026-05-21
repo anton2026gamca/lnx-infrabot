@@ -34,7 +34,7 @@ def profile_function(func: Callable) -> Callable:
         finally:
             duration = time.time() - start_time
 
-            if collector and duration > 0.001:
+            if collector and duration >= 0.00002:
                 module = func.__module__
                 name = func.__qualname__
                 pid = os.getpid()

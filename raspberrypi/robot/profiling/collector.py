@@ -10,7 +10,7 @@ from collections import defaultdict, deque
 
 
 
-MAX_TIMELINE_EVENTS = 1000
+MAX_TIMELINE_EVENTS = 5000
 EVENT_QUEUE_MAXSIZE = 4000
 REPORT_CACHE_TTL_S = 0.2
 
