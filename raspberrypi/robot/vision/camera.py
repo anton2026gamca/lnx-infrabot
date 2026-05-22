@@ -9,7 +9,7 @@ except ImportError:
 
 from robot import utils
 from robot.config import *
-from robot.profiling import profile_function
+from robot.profiling import profile_function, sleep
 
 
 
@@ -77,7 +77,7 @@ def calibrate_auto_controls(camera_name: str = "front", settle_time_s: float = 2
     
     picam.set_controls({"AwbEnable": True, "AeEnable": True})
     
-    time.sleep(settle_time_s)
+    sleep(settle_time_s)
     
     metadata = picam.capture_metadata()
     gains = metadata.get("ColourGains")
@@ -159,4 +159,3 @@ def calibrate_color_gains(camera_name: str = "front") -> tuple[float, float] | N
     if not isinstance(gains, list) or len(gains) != 2:
         return None
     return (float(gains[0]), float(gains[1]))
-

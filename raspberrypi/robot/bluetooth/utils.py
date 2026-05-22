@@ -8,6 +8,7 @@ import time
 
 from robot import calibration
 from robot.multiprocessing import shared_data
+from robot.profiling import sleep
 
 
 _DEFAULT_TIMEOUT_S = 3.0
@@ -29,7 +30,7 @@ def _execute_command(
         result = shared_data.get_bluetooth_command_result(command_id, pop=pop_result)
         if result is not None:
             return result
-        time.sleep(poll_interval_s)
+        sleep(poll_interval_s)
 
     return {
         "command_id": command_id,

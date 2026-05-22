@@ -5,7 +5,7 @@ import multiprocessing.synchronize
 from robot import calibration, utils
 from robot.hardware import line_sensors, teensy
 from robot.multiprocessing import shared_data
-from robot.profiling import profile_function
+from robot.profiling import sleep
 
 from robot.hardware.teensy import TeensyCommunicator
 from robot.config import *
@@ -70,7 +70,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 if data is None and attempt_start_time != 0 and attempt_start_time + 0.5 < time.perf_counter():
                     logger.warning(f"No data received from Teensy for 0.5 seconds, retrying connection... (attempt {attempts})")
                     communicator.close()
-                    time.sleep(0.1)
+                    sleep(0.1)
                     communicator.connect()
                     attempt_start_time = time.perf_counter()
                     attempts += 1
@@ -90,11 +90,10 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
                 time_elapsed = time.perf_counter() - start_time
                 if time_elapsed < COMMUNICATION_LOOP_PERIOD:
-                    time.sleep(max(0.0, COMMUNICATION_LOOP_PERIOD - time_elapsed - 0.001))
+                    sleep(max(0.0, COMMUNICATION_LOOP_PERIOD - time_elapsed - 0.001))
             except Exception as e:
                 logger.error(f"{e}", exc_info=True)
-                time.sleep(0.05)
+                sleep(0.05)
 
             if stop_event.is_set():
                 return
-

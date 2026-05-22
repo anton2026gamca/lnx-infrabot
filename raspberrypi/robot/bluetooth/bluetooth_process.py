@@ -1,10 +1,8 @@
 import logging
 import multiprocessing.synchronize
-import time
-
 from robot.bluetooth.bluetooth_manager import BluetoothManager, BluetoothMessage
 from robot.multiprocessing import shared_data
-from robot.profiling import profile_function
+from robot.profiling import profile_function, sleep
 
 
 _COMMAND_POLL_INTERVAL_S = 0.05
@@ -153,7 +151,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
             _drain_incoming_messages(manager)
             _refresh_shared_state(manager)
-            time.sleep(_COMMAND_POLL_INTERVAL_S)
+            sleep(_COMMAND_POLL_INTERVAL_S)
 
     except Exception as e:
         logger.error(f"Bluetooth process crashed: {e}", exc_info=True)

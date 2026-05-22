@@ -6,7 +6,7 @@ import time
 
 from robot import utils
 from robot.multiprocessing import shared_data
-from robot.profiling import profile_function
+from robot.profiling import profile_function, sleep
 from robot.vision import camera
 
 from robot.vision.camera import FrameData
@@ -76,7 +76,7 @@ def _capture_camera_loop(
     while not stop_event.is_set() and not shutdown_event.is_set():
         try:
             if pause_event.is_set():
-                time.sleep(0.001)
+                sleep(0.001)
                 continue
             frame = camera.capture_frame(camera_name=camera_name)
             shared_data.set_camera_frame(frame, camera_name=camera_name)
@@ -85,7 +85,7 @@ def _capture_camera_loop(
         except Exception as e:
             logger.error(f"Error capturing {camera_name} frame: {e}", exc_info=True)
             shared_data.set_camera_frame(None, camera_name=camera_name)
-            time.sleep(0.001)
+            sleep(0.001)
 
 
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
@@ -147,7 +147,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 )
                 logger.debug(f"Camera Capture FPS: {camera_fps_msg}")
                 last_debug_msg_time = time.perf_counter()
-            time.sleep(0.001)
+            sleep(0.001)
     except KeyboardInterrupt:
         pass
     except Exception as e:

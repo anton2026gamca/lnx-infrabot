@@ -11,6 +11,7 @@ import socketio
 from fastapi import FastAPI
 
 from robot import calibration, utils, vision
+from robot.profiling import async_sleep
 import robot.bluetooth.utils as bluetooth_utils
 from robot.hardware import line_sensors
 from robot.logic import autonomous_mode
@@ -87,7 +88,7 @@ async def _monitor_state_changes() -> None:
     
     try:
         while True:
-            await asyncio.sleep(check_interval)
+            await async_sleep(check_interval)
             
             try:
                 # Get current state
@@ -198,7 +199,7 @@ async def _video_loop(sid: str, fps: float, show_detections: bool, camera: str) 
     try:
         while True:
             if sleep_time:
-                await asyncio.sleep(sleep_time)
+                await async_sleep(sleep_time)
 
             emit_front = camera in ("front", "both")
             emit_back = camera in ("back", "both")
@@ -916,7 +917,7 @@ async def camera_auto_calibration(sid: str, data: dict | None = None):
                     payload = result.get("result", {})
                     return _ok(camera=payload.get("camera", camera_name), result=payload.get("result", {}))
                 return _err(result.get("error") or "Camera auto calibration failed")
-            await asyncio.sleep(0.05)
+            await async_sleep(0.05)
 
         return _err("Camera auto calibration timed out")
     except Exception as exc:

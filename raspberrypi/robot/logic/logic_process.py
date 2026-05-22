@@ -5,7 +5,7 @@ import time
 from . import autonomous_mode
 from robot.hardware.motors import SmartMotorsController
 from robot.multiprocessing import shared_data
-from robot.profiling import profile_function
+from robot.profiling import profile_function, sleep
 from robot.robot import RobotMode
 from robot.config import *
 
@@ -21,7 +21,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         mode = shared_data.get_robot_mode()
         if mode == RobotMode.IDLE:
             motors_controller.reset()
-            time.sleep(IDLE_SLEEP_DURATION)
+            sleep(IDLE_SLEEP_DURATION)
         elif mode == RobotMode.MANUAL:
             control = shared_data.get_manual_control()
             motors_controller.set_motors(control.move_angle, control.move_speed, control.rotate)
@@ -33,5 +33,4 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         elapsed = time.time() - start_time
         sleep_duration = max(0.0, LOGIC_LOOP_PERIOD - elapsed - 0.001)
         if sleep_duration > 0:
-            time.sleep(sleep_duration)
-
+            sleep(sleep_duration)

@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from robot import calibration, utils, vision
 from robot.multiprocessing import shared_data
-from robot.profiling import profile_function
+from robot.profiling import profile_function, sleep
 
 from robot.vision import GoalColorCalibration, GoalDetectionResult, DetectedObject
 from robot.config import *
@@ -271,7 +271,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         while not stop_event.is_set():
             elapsed = time.perf_counter() - last_process_time
             if elapsed < target_period * 0.95:
-                time.sleep(max(0.0, target_period - elapsed - 0.0005))
+                sleep(max(0.0, target_period - elapsed - 0.0005))
                 continue
 
             now = time.perf_counter()
@@ -303,7 +303,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
             if not frame_entries:
                 frame_skip_count += 1
                 if frame_skip_count > 2:
-                    time.sleep(0.001)
+                    sleep(0.001)
                 continue
 
             frame_skip_count = 0
