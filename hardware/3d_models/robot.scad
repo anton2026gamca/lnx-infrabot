@@ -35,9 +35,7 @@ module robot(
     robot_h = 220,
     rpi_pos = [0, -30, 55],
     level_shifter_pos = [-35, 32, 57.4],
-    
-    teensy_usb_hole = true,
-    
+    show_teensy_usb_hole = true,
     show_bottom = true,
     show_middle = true,
     show_upper = true,
@@ -69,7 +67,7 @@ module robot(
                 show_raspberry = show_other_components
             );
         if (show_middle_wall)
-            middle_wall(robot_d = robot_d, usb_hole = teensy_usb_hole);
+            middle_wall(robot_d = robot_d, usb_hole = show_teensy_usb_hole);
         if (show_upper)
             upper_part(robot_d = robot_d, wheel_offset = wheel_offset);
         if (show_top)
@@ -86,23 +84,10 @@ module robot(
             motor_driver_brackets();
         if (show_line_sensor_shield)
             line_sensor_shield();
+        if (show_other_components)
+            %wheels(wheel_d = wheel_d, wheel_h = wheel_h, wheel_offset = wheel_offset);
     }
 }
 
-robot(
-    show_bottom = false,
-    show_middle = true,
-    show_upper = true,
-    show_top = false,
-    show_ball_zone = false,
-    show_bottom_wall = true,
-    show_middle_wall = true,
-    show_handle = false,
-    show_handle_bracket = false,
-    show_camera_front = false,
-    show_camera_back = false,
-    show_motor_driver_brackets = false,
-    show_line_sensor_shield = false,
-    show_other_components = false
-);
-%wheels();
+robot(show_other_components = false);
+
