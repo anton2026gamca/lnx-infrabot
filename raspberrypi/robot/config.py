@@ -27,8 +27,8 @@ CAMERA_FRONT_YAW_DEG = 0.0
 CAMERA_BACK_YAW_DEG = 180.0
 
 # Frame size calculations
-FRAME_WIDTH  = 1536 // 2
-FRAME_HEIGHT = 864 // 2
+FRAME_WIDTH  = 1536 // 4  # = 768
+FRAME_HEIGHT = 864 // 4   # = 432
 FRAME_SIZE_B = FRAME_HEIGHT * FRAME_WIDTH * 3  # RGB888 format (3 bytes per pixel, no alpha)
 
 # =========================== SERIAL COMMUNICATION ================================
@@ -105,13 +105,6 @@ DEFAULT_FOCAL_LENGTH_PIXELS = 1000.0
 DEFAULT_LINE_AVOIDING_ENABLED = True
 DEFAULT_ROTATION_CORRECTION_ENABLED = True
 
-# ===================== AUTONOMOUS BEHAVIOUR SETTINGS =============================
-
-# --- General ---
-# Global speed multiplier for all autonomous movements (reduce for debugging)
-AUTO_SPEED_MULTIPLIER = 1.0
-# Angle offset to apply to the ball angle (degrees)
-IR_BALL_ANGLE_OFFSET_DEG = -10.0
 # --- Position-based speed scaling ---
 # When enabled, the robot uses goal distance to slow down near the enemy line
 DEFAULT_POSITION_BASED_SPEED_ENABLED = True
@@ -124,6 +117,12 @@ AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM = 300.0
 AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM = 1900.0
 # Apply lowest speed multiplier when distance from nearest slow speed start is >= this (mm)
 AUTO_POSITION_SLOW_END_DISTANCE_MM = 200.0
+
+# --- General ---
+# Global speed multiplier for all autonomous movements (reduce for debugging)
+AUTO_SPEED_MULTIPLIER = 1.0
+# Angle offset to apply to the ball angle (degrees)
+IR_BALL_ANGLE_OFFSET_DEG = -53.0
 
 # --- Ball possession camera check ---
 # Ball possession area as percentage of frame dimensions
@@ -139,3 +138,4 @@ DEFAULT_BALL_CALIBRATION_HSV = [5, 150, 150, 25, 255, 255]  # [h_min,s_min,v_min
 # --- Camera-based ball tracking ---
 # Enable using camera ball detection as a data source
 AUTO_CAMERA_BALL_TRACKING_ENABLED = True
+

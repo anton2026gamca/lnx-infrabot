@@ -44,7 +44,7 @@ def init(camera_name: str = "front", camera_index: int | None = None):
     picam = Picamera2(camera_num=int(camera_index))
     camera_config = picam.create_preview_configuration(
         main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"},
-        controls={"FrameRate": CAMERA_MAX_FPS},
+        controls={"FrameRate": max(CAMERA_MAX_FPS, 120)},
         buffer_count = CAMERA_BUFFER_COUNT,
         queue = False,
     )

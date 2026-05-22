@@ -13,6 +13,8 @@ from robot.hardware.motors import SmartMotorsController
 from robot.config import *
 
 
+logger = utils.get_logger("Soccer State Machine")
+
 # ===================== AUTONOMOUS SOCCER SETTINGS =====================
 
 # --- General ---
@@ -22,57 +24,87 @@ FIELD_LENGTH_MM = 2190.0
 
 # --- Approach ---
 # Forward speed component while approaching the ball
-AUTO_APPROACH_SPEED = 1.0
+APPROACH_SPEED = 1.0
 # The ratio between the ball angle & distance and the angle that the robot should move in
 # while approaching the ball.
-AUTO_IR_BALL_APPROACH_ANGLE_RATIO = 0.001
+IR_BALL_APPROACH_ANGLE_RATIO = 0.001
 # Similar ratio for camera-based ball tracking, using the camera ball angle instead of IR.
-AUTO_CAM_BALL_APPROACH_ANGLE_RATIO = 1.3
+CAM_BALL_APPROACH_ANGLE_RATIO = 1.3
 # The threshold distance to consider the ball "close enough" to initiate pushing (3000 nearest, 0 farthest)
-AUTO_BALL_CLOSE_THRESHOLD = 2500
+IR_BALL_CLOSE_THRESHOLD = 2500
 # Angular window around 0° where ball is considered "in front" of the robot
-AUTO_BALL_FRONT_THRESHOLD_DEG = 15.0
+BALL_FRONT_THRESHOLD_DEG = 15.0
 
 # --- Pushing ---
 # Speed when pushing the ball toward the goal
-AUTO_PUSH_SPEED = 1.0
+PUSH_SPEED = 1.0
 # Maximum angle to apply for steering while pushing (deg, when ball is at edge of possession area)
-AUTO_PUSH_STEERING_MAX_ANGLE_DEG = 45.0
+PUSH_STEERING_MAX_ANGLE_DEG = 45.0
 # Distance at which we consider the goal "scored" (stop pushing)
-AUTO_GOAL_SCORED_DISTANCE_MM = 600.0
+GOAL_SCORED_DISTANCE_MM = 600.0
 
 # --- Ball possession camera check ---
-AUTO_BALL_POSSESSION_AREA_WIDTH_DEG = CAMERA_FOV_DEG * AUTO_BALL_POSSESSION_AREA_WIDTH_PERCENT / 100.0
+BALL_POSSESSION_AREA_WIDTH_DEG = CAMERA_FOV_DEG * AUTO_BALL_POSSESSION_AREA_WIDTH_PERCENT / 100.0
 # IR angle range considered "inside" the robot if the ball was possessed by camera in previous frame (deg)
-AUTO_BALL_INSIDE_ROBOT_IR_ANGLE_RANGE_DEG = 40.0
+BALL_INSIDE_ROBOT_IR_ANGLE_RANGE_DEG = 40.0
 
 # --- Camera-based ball tracking (for approach state) ---
 # Use camera detection as primary up to this distance (mm), then fall back to IR
-AUTO_CAMERA_BALL_TRACKING_MAX_DISTANCE_MM = 1000.0
+CAMERA_BALL_TRACKING_MAX_DISTANCE_MM = 1000.0
 # Max allowed angle difference between camera and IR ball angles to use camera tracking
-AUTO_CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG = 45.0
+CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG = 45.0
 
 # --- Goal-tracking rotation ---
 # Gain applied to goal alignment error to produce rotation command while approaching/pushing
-AUTO_GOAL_TRACK_ROTATE_GAIN = 0.7
+GOAL_TRACK_ROTATE_GAIN = 0.7
 # Rotation speed used while searching for the goal (no goal visible)
-AUTO_GOAL_SEARCH_ROTATE_SPEED = 1.0
+GOAL_SEARCH_ROTATE_SPEED = 1.0
 
 
-# Goalkeeper positioning/behaviour tuning
-GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM = 320.0
-GOALKEEPER_POSITION_TOLERANCE_X_MM = 130.0
-GOALKEEPER_POSITION_TOLERANCE_Y_MM = 120.0
+# ===================== GOALKEEPER SETTINGS =====================
+
+# Distance from our goal centre while defending
+GOALKEEPER_DEFEND_RADIUS_MM = 550.0
+
+# Smaller radius when protecting corners/posts
+GOALKEEPER_CORNER_RADIUS_MM = 300.0
+
+# Maximum sideways movement angle on the defend arc
+GOALKEEPER_MAX_ARC_ANGLE_DEG = 70.0
+
+# How strongly the robot follows the ball angle on the arc
+GOALKEEPER_BALL_ANGLE_TO_ARC_RATIO = 0.85
+
+# Position tolerance before entering defend state
+GOALKEEPER_POSITION_TOLERANCE_MM = 120.0
+
+# Goal distance limit before re-entering approach
+GOALKEEPER_MAX_DEFEND_GOAL_DISTANCE_MM = 800.0
+
+# How long we may lose the goal before recovering
+GOALKEEPER_GOAL_LOST_TOLERANCE_TICKS = 15
+
+# Movement speeds
 GOALKEEPER_APPROACH_MAX_SPEED = 1.0
-GOALKEEPER_DEFEND_MAX_SPEED = 0.65
-GOALKEEPER_DEFEND_STOP_RADIUS_MM = 80.0
-GOALKEEPER_NEAR_BALL_CAMERA_DISTANCE_MM = 300.0
-GOALKEEPER_NEAR_BALL_IR_THRESHOLD = AUTO_BALL_CLOSE_THRESHOLD - 150
-GOALKEEPER_NEAR_BALL_ANGLE_THRESHOLD_DEG = 35.0
-GOALKEEPER_BALL_TRACK_X_MM_PER_DEG = 10.0
-GOALKEEPER_BALL_TRACK_MAX_X_MM = 550.0
-GOALKEEPER_NO_POSITION_RETREAT_SPEED = 0.35
+GOALKEEPER_DEFEND_MAX_SPEED = 0.7
+GOALKEEPER_RECOVER_SPEED = 0.35
 
+# Corner detection
+GOALKEEPER_CORNER_START_ANGLE_DEG = 70.0
+
+# Rotation
+GOALKEEPER_BALL_ROTATE_GAIN = 0.02
+GOALKEEPER_GOAL_ALIGN_ROTATE_GAIN = 0.4
+
+# Goal-line protection
+GOALKEEPER_GOAL_LINE_SENSOR_IDX = 6
+GOALKEEPER_GOAL_LINE_PUSHOFF_TICKS = 12
+GOALKEEPER_GOAL_LINE_PUSHOFF_SPEED = 0.6
+
+# When to attack the ball
+GOALKEEPER_NEAR_BALL_ANGLE_THRESHOLD_DEG = 35.0
+GOALKEEPER_NEAR_BALL_CAMERA_DISTANCE_MM = 300.0
+GOALKEEPER_NEAR_BALL_IR_THRESHOLD = IR_BALL_CLOSE_THRESHOLD - 150
 
 
 @profile_function
@@ -108,15 +140,19 @@ def _goalkeeper_should_grab_ball(data: "SoccerStateMachineData") -> bool:
 
 
 @profile_function
-def _set_goal_tracking_rotation(state_machine: StateMachine, data: "SoccerStateMachineData") -> float:
-    if not data.sensors.goal.detected or not shared_data.get_always_facing_goal_enabled():
-        state_machine.motors.set_functions_enabled(rotation_correction_enabled=True)
-        state_machine.motors.target_heading = 0
-        return 0.0
+def _get_goal_tracking_rotation(
+    state_machine: StateMachine,
+    data: "SoccerStateMachineData",
+    own_goal: bool = False,
+) -> float:
+    goal = data.sensors.own_goal if own_goal else data.sensors.enemy_goal
 
-    state_machine.motors.set_functions_enabled(rotation_correction_enabled=False)
-    rotate = data.sensors.goal.alignment * AUTO_GOAL_TRACK_ROTATE_GAIN * AUTO_SPEED_MULTIPLIER
-    return _clamp(rotate, -1.0, 1.0)
+    if goal.detected:
+        rotate = goal.alignment * GOAL_TRACK_ROTATE_GAIN
+        return _clamp(rotate, -1.0, 1.0)
+    else:
+        state_machine.motors.target_heading = 0.0
+        return 0.0
 
 
 @profile_function
@@ -129,10 +165,19 @@ def _global_to_local_angle_deg(global_angle_deg: float, heading_deg: float) -> f
     return utils.normalize_angle_deg(global_angle_deg - heading_deg)
 
 
+@profile_function
+def _goalkeeper_goal_line_sensor_fired(lines_detected: list[bool]) -> bool:
+    if GOALKEEPER_GOAL_LINE_SENSOR_IDX < len(lines_detected):
+        return lines_detected[GOALKEEPER_GOAL_LINE_SENSOR_IDX]
+    return False
+
+
+
 @dataclass
 class SensorsData:
     heading: float
-    goal: GoalDetectionResult
+    enemy_goal: GoalDetectionResult
+    own_goal: GoalDetectionResult
     
     cam_ball_angle: float
     cam_ball_distance: float
@@ -147,6 +192,7 @@ class SensorsData:
     ir_ball_detected: bool
     ir_possession: bool
 
+    ball_angle: float | None
     ball_possession: bool
     _ball_possession_ticks: int
     ball_likely_inside_robot: bool
@@ -169,7 +215,12 @@ class SoccerStateMachineData(CrossStateData):
 def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
     prev_data        = state_machine.cross_state_data.sensors if isinstance(state_machine.cross_state_data, SoccerStateMachineData) else None
 
-    goal             = shared_data.get_goal_detection_result() or GoalDetectionResult(0.0, False, None, 0.0, None, 0.0)
+    enemy_goal_color = shared_data.get_goal_color().lower()
+    own_goal_color   = "blue" if enemy_goal_color == "yellow" else "yellow"
+    enemy_goal       = shared_data.get_goal_detection_result_for_color(enemy_goal_color)
+    own_goal         = shared_data.get_goal_detection_result_for_color(own_goal_color)
+    if enemy_goal is None: enemy_goal = GoalDetectionResult(0.0, False, None, 0.0, None, 0.0)
+    if own_goal   is None: own_goal   = GoalDetectionResult(0.0, False, None, 0.0, None, 0.0)
     hardware         = shared_data.get_hardware_compass_ir()
     heading          = utils.normalize_angle_deg(hardware[0]) if hardware[0] != 999.0 else 999.0
 
@@ -178,15 +229,15 @@ def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
     ir_ball_detected = ir_ball_angle != 999 and ir_ball_distance != 0
     ir_possession    = (
         ir_ball_detected
-        and abs(ir_ball_angle) < AUTO_BALL_FRONT_THRESHOLD_DEG
-        and ir_ball_distance > AUTO_BALL_CLOSE_THRESHOLD # The IR distance value is flipped (higher means closer)
+        and abs(ir_ball_angle) < BALL_FRONT_THRESHOLD_DEG
+        and ir_ball_distance > IR_BALL_CLOSE_THRESHOLD # The IR distance value is flipped (higher means closer)
     )
 
     cam_ball         = shared_data.get_camera_ball_data()
     cam_ball.angle   = utils.normalize_angle_deg(cam_ball.angle) if cam_ball and cam_ball.detected else 999
     cam_ball_valid   = (
-        cam_ball.detected and cam_ball.distance <= AUTO_CAMERA_BALL_TRACKING_MAX_DISTANCE_MM
-        and (not ir_ball_detected or abs(ir_ball_angle - cam_ball.angle) < AUTO_CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG)
+        cam_ball.detected and cam_ball.distance <= CAMERA_BALL_TRACKING_MAX_DISTANCE_MM
+        and (not ir_ball_detected or abs(ir_ball_angle - cam_ball.angle) < CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG)
     )
     use_cam_ball     = shared_data.get_camera_ball_usage_enabled() and cam_ball_valid
     cam_possession   = shared_data.get_camera_ball_possession()
@@ -202,12 +253,13 @@ def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
 
     ball_likely_inside_robot = (
         _last_cam_possession_elapsed_ticks <= 3 and not cam_ball.detected
-        and (not ir_ball_detected or abs(ir_ball_angle) > AUTO_BALL_INSIDE_ROBOT_IR_ANGLE_RANGE_DEG)
+        and (not ir_ball_detected or abs(ir_ball_angle) > BALL_INSIDE_ROBOT_IR_ANGLE_RANGE_DEG)
     )
 
     return SensorsData(
         heading,
-        goal,
+        enemy_goal,
+        own_goal,
         
         cam_ball.angle,
         cam_ball.distance,
@@ -222,6 +274,7 @@ def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
         ir_ball_detected,
         ir_possession,
         
+        cam_ball.angle if use_cam_ball else ir_ball_angle if ir_ball_detected else None,
         ball_possession,
         _ball_possession_ticks,
         ball_likely_inside_robot
@@ -277,7 +330,7 @@ class LineAvoidingState(State):
         position = vision.get_position_estimate()
         current_time = time.time()
 
-        rotate = _set_goal_tracking_rotation(state_machine, data)
+        rotate = _get_goal_tracking_rotation(state_machine, data)
         
         currently_detected = any(data.lines.detected)
         
@@ -436,15 +489,15 @@ class AttackerApproachState(State):
             return
 
         move_angle = 0.0
-        move_speed = AUTO_APPROACH_SPEED
-        rotate = _set_goal_tracking_rotation(state_machine, data)
+        move_speed = APPROACH_SPEED
+        rotate = _get_goal_tracking_rotation(state_machine, data)
 
         if data.sensors.use_cam_ball:
-            if abs(data.sensors.cam_ball_angle) > AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:
-                move_angle = data.sensors.cam_ball_angle * AUTO_CAM_BALL_APPROACH_ANGLE_RATIO
+            if abs(data.sensors.cam_ball_angle) > BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:
+                move_angle = data.sensors.cam_ball_angle * CAM_BALL_APPROACH_ANGLE_RATIO
                 move_angle = max(-180, min(180, move_angle))
         else:
-            move_angle = utils.normalize_angle_deg(data.sensors.ir_ball_angle + data.sensors.heading) * data.sensors.ir_ball_distance * AUTO_IR_BALL_APPROACH_ANGLE_RATIO
+            move_angle = utils.normalize_angle_deg(data.sensors.ir_ball_angle + data.sensors.heading) * data.sensors.ir_ball_distance * IR_BALL_APPROACH_ANGLE_RATIO
             move_angle = max(-180, min(180, move_angle))
 
         position = vision.get_position_estimate()
@@ -486,136 +539,282 @@ class AttackerPushState(State):
             state_machine.transition(GoalkeeperApproachState if data.is_goalkeeper else AttackerApproachState)
             return
 
-        move_speed = AUTO_PUSH_SPEED
+        move_speed = PUSH_SPEED
         move_angle = 0.0
 
-        if data.sensors.goal.distance_mm is not None and data.sensors.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
+        if data.sensors.enemy_goal.distance_mm is not None and data.sensors.enemy_goal.distance_mm < GOAL_SCORED_DISTANCE_MM:
             state_machine.transition(_neutral_state(state_machine))
             return
 
-        rotate = _set_goal_tracking_rotation(state_machine, data)
+        rotate = _get_goal_tracking_rotation(state_machine, data)
 
         if data.sensors.use_cam_ball:
-            move_angle = -data.sensors.cam_ball_angle / (AUTO_BALL_POSSESSION_AREA_WIDTH_DEG / 2.0) * AUTO_PUSH_STEERING_MAX_ANGLE_DEG
+            move_angle = -data.sensors.cam_ball_angle / (BALL_POSSESSION_AREA_WIDTH_DEG / 2.0) * PUSH_STEERING_MAX_ANGLE_DEG
             move_angle = max(-90, min(90, move_angle))
 
         move_speed *= AUTO_SPEED_MULTIPLIER
         state_machine.motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
 
+
 # ------------------------------------------------------------------
 # State: GOALKEEPER APPROACH
-# Drive toward our goal to prepare for a defensive play.
+# Navigate back to the defensive position in front of our goal.
 # ------------------------------------------------------------------
 class GoalkeeperApproachState(State):
+    @profile_function
+    def on_enter(self, state_machine: StateMachine) -> None:
+        self._goal_line_pushoff_ticks = 0
+        logger.info("Goalkeeper entering APPROACH state, navigating to defend position")
+
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
-        if data.lines.enter_avoiding_state:
-            state_machine.transition(LineAvoidingState)
+        # -------------------------------------------------
+        # Goal line protection
+        # -------------------------------------------------
+
+        if _goalkeeper_goal_line_sensor_fired(data.lines.detected):
+            self._goal_line_pushoff_ticks = GOALKEEPER_GOAL_LINE_PUSHOFF_TICKS
+
+        if self._goal_line_pushoff_ticks > 0:
+            self._goal_line_pushoff_ticks -= 1
+
+            state_machine.motors.set_motors(
+                angle=0.0,
+                speed=GOALKEEPER_GOAL_LINE_PUSHOFF_SPEED * AUTO_SPEED_MULTIPLIER,
+                rotate=0.0,
+            )
             return
+
+        # -------------------------------------------------
+        # Grab nearby balls
+        # -------------------------------------------------
 
         if _goalkeeper_should_grab_ball(data):
             state_machine.transition(AttackerApproachState)
             return
 
-        rotate = _set_goal_tracking_rotation(state_machine, data)
+        # -------------------------------------------------
+        # Recover position
+        # -------------------------------------------------
+
         position = vision.get_position_estimate()
 
         if position is None:
-            move_speed = GOALKEEPER_NO_POSITION_RETREAT_SPEED * AUTO_SPEED_MULTIPLIER
-            state_machine.motors.set_motors(angle=180.0, speed=move_speed, rotate=rotate)
+            state_machine.motors.set_motors(
+                angle=180.0,
+                speed=GOALKEEPER_RECOVER_SPEED * AUTO_SPEED_MULTIPLIER,
+                rotate=0.0,
+            )
             return
 
-        target_x_mm = 0.0
-        target_y_mm = FIELD_LENGTH_MM - GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM
+        target_x = 0.0
+        target_y = FIELD_LENGTH_MM - GOALKEEPER_DEFEND_RADIUS_MM
 
-        delta_x = target_x_mm - position.x_mm
-        delta_y = target_y_mm - position.y_mm
+        delta_x = target_x - position.x_mm
+        delta_y = target_y - position.y_mm
+
+        distance = math.sqrt(delta_x * delta_x + delta_y * delta_y)
+
+        # -------------------------------------------------
+        # Ready to defend
+        # -------------------------------------------------
+
+        logger.info(f"Goalkeeper approach: distance to defend position = {distance:.1f} mm")
+        logger.info(f"Goalkeeper approach: own goal detected = {data.sensors.own_goal.detected}, own goal distance = {data.sensors.own_goal.distance_mm} mm")
 
         if (
-            abs(delta_x) <= GOALKEEPER_POSITION_TOLERANCE_X_MM
-            and abs(delta_y) <= GOALKEEPER_POSITION_TOLERANCE_Y_MM
+            data.sensors.own_goal.detected
+            and distance <= GOALKEEPER_POSITION_TOLERANCE_MM
         ):
             state_machine.transition(GoalkeeperDefendState)
             return
 
+        # -------------------------------------------------
+        # Movement
+        # -------------------------------------------------
+
         global_angle = _field_delta_to_global_angle_deg(delta_x, delta_y)
-        local_move_angle = _global_to_local_angle_deg(global_angle, data.sensors.heading)
 
-        distance_mm = math.sqrt(delta_x * delta_x + delta_y * delta_y)
-        move_speed = _clamp(distance_mm / 700.0, 0.28, GOALKEEPER_APPROACH_MAX_SPEED)
-        move_speed *= AUTO_SPEED_MULTIPLIER
+        heading = data.sensors.heading if data.sensors.heading != 999.0 else 0.0
 
-        state_machine.motors.set_motors(angle=local_move_angle, speed=move_speed, rotate=rotate)
+        local_angle = _global_to_local_angle_deg(global_angle, heading)
+
+        speed = _clamp(
+            distance / 500.0,
+            0.2,
+            GOALKEEPER_APPROACH_MAX_SPEED
+        )
+
+        speed *= AUTO_SPEED_MULTIPLIER
+
+        # -------------------------------------------------
+        # Rotation
+        # -------------------------------------------------
+
+        rotate = _get_goal_tracking_rotation(
+            state_machine,
+            data,
+            own_goal=True,
+        )
+
+        state_machine.motors.set_motors(
+            angle=local_angle,
+            speed=speed,
+            rotate=rotate,
+        )
 
 
 # ------------------------------------------------------------------
 # State: GOALKEEPER DEFEND
-# Stay in front of the goal and react to the ball's position to block
-# shots. If we get the ball, switch to AttackerPushState and signal
-# to teammate that we're taking possession so they can adjust their
-# behaviour accordingly.
 # ------------------------------------------------------------------
 class GoalkeeperDefendState(State):
+    @profile_function
+    def on_enter(self, state_machine: StateMachine) -> None:
+        self._goal_lost_ticks = 0
+        self._goal_line_pushoff_ticks = 0
+        logger.info("Goalkeeper entering DEFEND state, actively defending the goal")
+
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
-        if data.lines.enter_avoiding_state:
-            state_machine.transition(LineAvoidingState)
+        # -------------------------------------------------
+        # Goal line protection
+        # -------------------------------------------------
+
+        if _goalkeeper_goal_line_sensor_fired(data.lines.detected):
+            self._goal_line_pushoff_ticks = GOALKEEPER_GOAL_LINE_PUSHOFF_TICKS
+
+        if self._goal_line_pushoff_ticks > 0:
+            self._goal_line_pushoff_ticks -= 1
+
+            rotate = _get_goal_tracking_rotation(state_machine, data, own_goal=True)
+
+            state_machine.motors.set_motors(
+                angle=0.0,
+                speed=GOALKEEPER_GOAL_LINE_PUSHOFF_SPEED * AUTO_SPEED_MULTIPLIER,
+                rotate=rotate,
+            )
             return
+
+        # -------------------------------------------------
+        # Grab nearby balls
+        # -------------------------------------------------
 
         if _goalkeeper_should_grab_ball(data):
             state_machine.transition(AttackerApproachState)
             return
 
-        rotate = _set_goal_tracking_rotation(state_machine, data)
-        position = vision.get_position_estimate()
+        # -------------------------------------------------
+        # Goal visibility check
+        # -------------------------------------------------
 
-        if position is None:
-            move_speed = GOALKEEPER_NO_POSITION_RETREAT_SPEED * AUTO_SPEED_MULTIPLIER
-            state_machine.motors.set_motors(angle=180.0, speed=move_speed, rotate=rotate)
-            return
-
-        target_y_mm = FIELD_LENGTH_MM - GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM
-
-        ball_angle = None
-        if data.sensors.use_cam_ball:
-            ball_angle = data.sensors.cam_ball_angle
-        elif data.sensors.ir_ball_detected:
-            ball_angle = data.sensors.ir_ball_angle
-
-        target_x_mm = 0.0
-        if ball_angle is not None:
-            target_x_mm = position.x_mm + ball_angle * GOALKEEPER_BALL_TRACK_X_MM_PER_DEG
-            target_x_mm = _clamp(target_x_mm, -GOALKEEPER_BALL_TRACK_MAX_X_MM, GOALKEEPER_BALL_TRACK_MAX_X_MM)
-
-        delta_x = target_x_mm - position.x_mm
-        delta_y = target_y_mm - position.y_mm
+        if data.sensors.own_goal.detected:
+            self._goal_lost_ticks = 0
+        else:
+            self._goal_lost_ticks += 1
 
         if (
-            abs(delta_x) > GOALKEEPER_POSITION_TOLERANCE_X_MM * 2.0
-            or abs(delta_y) > GOALKEEPER_POSITION_TOLERANCE_Y_MM * 2.0
+            self._goal_lost_ticks > GOALKEEPER_GOAL_LOST_TOLERANCE_TICKS
+            or (
+                data.sensors.own_goal.detected
+                and data.sensors.own_goal.distance_mm is not None
+                and data.sensors.own_goal.distance_mm > GOALKEEPER_MAX_DEFEND_GOAL_DISTANCE_MM
+            )
         ):
             state_machine.transition(GoalkeeperApproachState)
             return
 
-        distance_mm = math.sqrt(delta_x * delta_x + delta_y * delta_y)
-        if distance_mm < GOALKEEPER_DEFEND_STOP_RADIUS_MM:
-            state_machine.motors.set_motors(angle=0.0, speed=0.0, rotate=rotate)
+        # -------------------------------------------------
+        # Position estimate
+        # -------------------------------------------------
+
+        position = vision.get_position_estimate()
+
+        if position is None:
+            state_machine.transition(GoalkeeperApproachState)
             return
 
-        if ball_angle is not None and abs(ball_angle) > 90:
-            pass
+        # -------------------------------------------------
+        # Ball tracking
+        # -------------------------------------------------
 
-        global_angle = _field_delta_to_global_angle_deg(delta_x, delta_y)
-        local_move_angle = _global_to_local_angle_deg(global_angle, data.sensors.heading)
+        ball_angle = data.sensors.ball_angle
 
-        move_speed = _clamp(distance_mm / 500.0, 0.18, GOALKEEPER_DEFEND_MAX_SPEED)
-        move_speed *= AUTO_SPEED_MULTIPLIER
+        if ball_angle is None:
+            ball_angle = 0.0
 
-        state_machine.motors.set_motors(angle=local_move_angle, speed=move_speed, rotate=rotate)
+        arc_angle = _clamp(
+            ball_angle * GOALKEEPER_BALL_ANGLE_TO_ARC_RATIO,
+            -GOALKEEPER_MAX_ARC_ANGLE_DEG,
+            GOALKEEPER_MAX_ARC_ANGLE_DEG,
+        )
+
+        radius = GOALKEEPER_DEFEND_RADIUS_MM
+
+        if abs(ball_angle) >= GOALKEEPER_CORNER_START_ANGLE_DEG:
+            radius = GOALKEEPER_CORNER_RADIUS_MM
+
+        # -------------------------------------------------
+        # Arc target
+        # -------------------------------------------------
+
+        target_x = (
+            math.sin(math.radians(arc_angle))
+            * radius
+        )
+
+        target_y = (
+            FIELD_LENGTH_MM
+            - math.cos(math.radians(arc_angle)) * radius
+        )
+
+        # -------------------------------------------------
+        # Move toward target
+        # -------------------------------------------------
+
+        delta_x = target_x - position.x_mm
+        delta_y = target_y - position.y_mm
+
+        distance = math.sqrt(delta_x * delta_x + delta_y * delta_y)
+
+        global_angle = _field_delta_to_global_angle_deg(
+            delta_x,
+            delta_y
+        )
+
+        heading = data.sensors.heading if data.sensors.heading != 999.0 else 0.0
+
+        local_angle = _global_to_local_angle_deg(
+            global_angle,
+            heading
+        )
+
+        speed = _clamp(
+            distance / 350.0,
+            0.0,
+            GOALKEEPER_DEFEND_MAX_SPEED
+        )
+
+        speed *= AUTO_SPEED_MULTIPLIER
+
+        # -------------------------------------------------
+        # Rotation
+        # -------------------------------------------------
+
+        rotate = _get_goal_tracking_rotation(
+            state_machine,
+            data,
+            own_goal=True,
+        )
+
+        state_machine.motors.set_motors(
+            angle=local_angle,
+            speed=speed,
+            rotate=rotate,
+        )
 
 
 _motors = SmartMotorsController()
@@ -640,4 +839,3 @@ def get_attacker_state_machine() -> StateMachine:
 
 def get_goalkeeper_state_machine() -> StateMachine:
     return goalkeeper_state_machine
-

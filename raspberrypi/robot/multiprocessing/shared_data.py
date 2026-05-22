@@ -633,7 +633,6 @@ def get_goal_calibration(color: str, camera: str = "front") -> list[tuple[tuple[
             return [((100, 100, 100), (130, 255, 255))]
     return list(ranges)
 
-goal_detection_result = _manager.dict({'data': None})
 goal_detection_result_yellow = _manager.dict({'data': None})
 goal_detection_result_blue = _manager.dict({'data': None})
 
@@ -669,7 +668,6 @@ def _goal_result_from_tuple(data: tuple | None) -> GoalDetectionResult | None:
 @profile_function
 def _set_goal_detection_result_to_store(store: DictProxy, result: GoalDetectionResult | None) -> None:
     store['data'] = _goal_result_to_tuple(result)
-
 @profile_function
 def _get_goal_detection_result_from_store(store: DictProxy) -> GoalDetectionResult | None:
     return _goal_result_from_tuple(store.get('data'))
@@ -678,18 +676,22 @@ def _get_goal_detection_result_from_store(store: DictProxy) -> GoalDetectionResu
 def set_goal_detection_result_for_color(color: str, result: GoalDetectionResult | None) -> None:
     store = goal_detection_result_yellow if color.lower() == 'yellow' else goal_detection_result_blue
     _set_goal_detection_result_to_store(store, result)
-
 @profile_function
 def get_goal_detection_result_for_color(color: str) -> GoalDetectionResult | None:
     store = goal_detection_result_yellow if color.lower() == 'yellow' else goal_detection_result_blue
     return _get_goal_detection_result_from_store(store)
 
 @profile_function
-def set_goal_detection_result(result: GoalDetectionResult | None) -> None:
-    _set_goal_detection_result_to_store(goal_detection_result, result)
+def get_enemy_goal_detection_result() -> GoalDetectionResult | None:
+    enemy_color = get_goal_color()
+    get_goal_detection_result_for_color(enemy_color)
+
 @profile_function
-def get_goal_detection_result() -> GoalDetectionResult | None:
-    return _get_goal_detection_result_from_store(goal_detection_result)
+def get_own_goal_deteciton_result() -> GoalDetectionResult | None:
+    enemy_color = get_goal_color()
+    own_color = "blue" if enemy_color == "yellow" else "yellow"
+    get_goal_detection_result_for_color(own_color)
+
 
 goal_focal_length_front = multiprocessing.Value('d', DEFAULT_FOCAL_LENGTH_PIXELS)
 goal_focal_length_back = multiprocessing.Value('d', DEFAULT_FOCAL_LENGTH_PIXELS)

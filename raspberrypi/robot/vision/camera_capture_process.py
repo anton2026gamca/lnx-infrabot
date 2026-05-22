@@ -131,10 +131,16 @@ def _capture_camera_loop(
             if pause_event.is_set():
                 sleep(0.001)
                 continue
+            start_t = time.perf_counter()
             frame = camera.capture_frame(camera_name=camera_name)
             shared_data.set_camera_frame(frame, camera_name=camera_name)
             with capture_counts_lock:
                 capture_counts[camera_name] = capture_counts.get(camera_name, 0) + 1
+            end_t = time.perf_counter()
+            elapsed = end_t - start_t
+            sleep_t = 1.0 / CAMERA_MAX_FPS - elapsed
+            if sleep_t > 0:
+                sleep(sleep_t)
         except Exception as e:
             logger.error(f"Error capturing {camera_name} frame: {e}", exc_info=True)
             shared_data.set_camera_frame(None, camera_name=camera_name)

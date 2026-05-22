@@ -479,11 +479,11 @@ async def get_goal_color_calibration(sid: str, data: dict | None = None):
 @sio.event
 async def get_goal_detection(sid: str, data: dict | None = None):
     try:
-        result = shared_data.get_goal_detection_result()
         enemy_color = shared_data.get_goal_color().lower()
         own_color = "blue" if enemy_color == "yellow" else "yellow"
         yellow_result = shared_data.get_goal_detection_result_for_color("yellow")
         blue_result = shared_data.get_goal_detection_result_for_color("blue")
+        result = yellow_result if enemy_color == "yellow" else blue_result
 
         def _result_to_dict(goal_result):
             if goal_result is None:

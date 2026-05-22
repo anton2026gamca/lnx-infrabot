@@ -3,6 +3,7 @@ import time
 
 from robot import utils
 from robot.hardware.motors import SmartMotorsController
+from robot.profiling.function_profiler import profile_function
 
 
 logger = utils.get_logger("State Machine")
@@ -45,12 +46,14 @@ class StateMachine:
         self.current_state = initial_state()
         self.current_state.on_enter(self)
 
+    @profile_function
     def tick(self):
         if self.current_state is not None:
             self.current_state.tick(self)
         if self.queued_transition is not None:
             self._do_queued_transition()
 
+    @profile_function
     def transition(self, new_state: type[State]):
         self.queued_transition = new_state
 

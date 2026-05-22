@@ -390,7 +390,6 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
             enemy_result = yellow_result if enemy_goal_color == "yellow" else blue_result
             own_result = blue_result if own_goal_color == "blue" else yellow_result
-            shared_data.set_goal_detection_result(enemy_result)
 
             ir_ball_angle = None
             ir_ball_detected = False
