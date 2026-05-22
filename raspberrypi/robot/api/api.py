@@ -94,11 +94,11 @@ async def _monitor_state_changes() -> None:
                 current_mode = shared_data.get_robot_mode()
                 current_goal_color = shared_data.get_goal_color()
                 current_line_detected = line_sensors.get_line_detected()
-                current_hw_data = shared_data.get_hardware_data()
-                current_ir_data = current_hw_data.ir if current_hw_data else None
+                current_hw_data = shared_data.get_hardware_compass_ir()
+                current_ir_angle = current_hw_data[1]
                 current_cam_data = shared_data.get_camera_ball_data()
                 
-                current_ir_detected = current_ir_data.angle != 999 if current_ir_data else False
+                current_ir_detected = current_ir_angle != 999
                 current_cam_detected = current_cam_data.detected if current_cam_data else False
                 current_ball_detected = current_cam_detected or current_ir_detected
 

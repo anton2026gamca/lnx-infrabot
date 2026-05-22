@@ -67,9 +67,6 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 communicator.send_motors_message(motor_speeds, kicker_state)
                 messages_sent += 1
 
-                if data is None:
-                    data = shared_data.get_hardware_data()
-
                 if data is None and attempt_start_time != 0 and attempt_start_time + 0.5 < time.perf_counter():
                     logger.warning(f"No data received from Teensy for 0.5 seconds, retrying connection... (attempt {attempts})")
                     communicator.close()
@@ -78,12 +75,11 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                     attempt_start_time = time.perf_counter()
                     attempts += 1
 
-                if shared_data.check_and_clear_compass_reset():
-                    if data:
-                        logger.info("Resetting compass position")
-                        compass_offset["heading"] -= data.compass.heading
-                        compass_offset["pitch"] -= data.compass.pitch
-                        compass_offset["roll"] -= data.compass.roll
+                if data is not None and shared_data.check_and_clear_compass_reset():
+                    logger.info("Resetting compass position")
+                    compass_offset["heading"] -= data.compass.heading
+                    compass_offset["pitch"] -= data.compass.pitch
+                    compass_offset["roll"] -= data.compass.roll
 
                 if time.perf_counter() > last_log_time + 1:
                     logger.debug(f"Messages - Recieved: {messages_received}, Sent: {messages_sent}, Corrupted: {corrupted_messages}")

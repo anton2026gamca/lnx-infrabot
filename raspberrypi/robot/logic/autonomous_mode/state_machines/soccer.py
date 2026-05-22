@@ -174,11 +174,11 @@ def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
     prev_data        = state_machine.cross_state_data.sensors if isinstance(state_machine.cross_state_data, SoccerStateMachineData) else None
 
     goal             = shared_data.get_goal_detection_result() or GoalDetectionResult(0.0, False, None, 0.0, None, 0.0)
-    hardware         = shared_data.get_hardware_data()
-    heading          = utils.normalize_angle_deg(hardware.compass.heading) if hardware else 0
+    hardware         = shared_data.get_hardware_compass_ir()
+    heading          = utils.normalize_angle_deg(hardware[0]) if hardware[0] != 999.0 else 999.0
 
-    ir_ball_angle    = utils.normalize_angle_deg(hardware.ir.angle) if hardware else 999
-    ir_ball_distance = hardware.ir.distance if hardware else 0
+    ir_ball_angle    = utils.normalize_angle_deg(hardware[1]) if hardware[1] != 999.0 else 999.0
+    ir_ball_distance = hardware[2]
     ir_ball_detected = ir_ball_angle != 999 and ir_ball_distance != 0
     ir_possession    = (
         ir_ball_detected
@@ -318,8 +318,8 @@ class LineAvoidingState(State):
     def _calculate_absolute_avoid_direction(self, data: SoccerStateMachineData, position) -> float:
         detected_angles = []
 
-        hardware_data = shared_data.get_hardware_data()
-        robot_heading = hardware_data.compass.heading if hardware_data else 0
+        hardware_data = shared_data.get_hardware_compass_ir()
+        robot_heading = hardware_data[0] if hardware_data[0] != 999.0 else 0.0
 
         for i, detected in enumerate(data.lines.detected):
             if detected and i < len(LINE_SENSOR_LOCATIONS):

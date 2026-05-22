@@ -50,19 +50,33 @@ def get_running_state() -> RunningStateData | None:
     with running_state_lock:
         if not running_state:
             return None
-        return RunningStateData(
-            running=running_state.get('running', False),
-            bt_module_enabled=running_state.get('bt_module_enabled', False),
-            main_switch_value=running_state.get('main_switch_enabled', False),
-            bt_module_value=running_state.get('module_value', False),
-        )
+        running = running_state.get('running', False)
+        bt_module_enabled = running_state.get('bt_module_enabled', False)
+        main_switch_value = running_state.get('main_switch_enabled', False)
+        bt_module_value = running_state.get('module_value', False)
+    return RunningStateData(
+        running=running,
+        bt_module_enabled=bt_module_enabled,
+        main_switch_value=main_switch_value,
+        bt_module_value=bt_module_value,
+    )
 
 
 # Hardware data
 hardware_data = _manager.dict()
-hardware_data_lock  = profiling.create_profiled_lock("hardware_data_lock")
+hardware_data_lock = profiling.create_profiled_lock("hardware_data_lock")
+hardware_compass_heading = multiprocessing.Value('d', 999.0)
+hardware_ir_angle = multiprocessing.Value('d', 999.0)
+hardware_ir_distance = multiprocessing.Value('d', 0.0)
 @profile_function
 def set_hardware_data(data: ParsedTeensyData | None):
+    compass_heading = data.compass.heading if data and data.compass else None
+    ir_angle = data.ir.angle if data and data.ir else None
+    ir_distance = data.ir.distance if data and data.ir else None
+    hardware_compass_heading.value = float(compass_heading) if compass_heading is not None else 999.0
+    hardware_ir_angle.value = float(ir_angle) if ir_angle is not None else 999.0
+    hardware_ir_distance.value = float(ir_distance) if ir_distance is not None else 0.0
+
     dict_data = {
         'compass': {
             'heading': data.compass.heading if data else None,
@@ -85,30 +99,38 @@ def set_hardware_data(data: ParsedTeensyData | None):
 
 @profile_function
 def get_hardware_data() -> ParsedTeensyData | None:
-    data_dict = None
     with hardware_data_lock:
         if not hardware_data:
             return None
-        data_dict = dict(hardware_data)
-    if not data_dict:
-        return None
-    data = ParsedTeensyData(
+        compass_data = hardware_data.get('compass') or {}
+        ir_data = hardware_data.get('ir') or {}
+        line_sensors = hardware_data.get('line_sensors')
+        raw = hardware_data.get('raw')
+        timestamp = hardware_data.get('timestamp')
+    return ParsedTeensyData(
         compass=CompassData(
-            heading=data_dict['compass']['heading'],
-            pitch=data_dict['compass']['pitch'],
-            roll=data_dict['compass']['roll'],
+            heading=compass_data.get('heading', 999.0),
+            pitch=compass_data.get('pitch', 999.0),
+            roll=compass_data.get('roll', 999.0),
         ),
         ir=IRData(
-            angle=data_dict['ir']['angle'],
-            distance=data_dict['ir']['distance'],
-            sensors=data_dict['ir']['sensors'],
-            status=data_dict['ir']['status'],
+            angle=ir_data.get('angle', 999.0),
+            distance=ir_data.get('distance', 0.0),
+            sensors=ir_data.get('sensors', []),
+            status=ir_data.get('status', -1),
         ),
-        line=data_dict['line_sensors'],
-        raw=data_dict['raw'],
-        timestamp=data_dict['timestamp'],
+        line=line_sensors or [],
+        raw=raw,
+        timestamp=timestamp or 0.0,
     )
-    return data
+
+@profile_function
+def get_hardware_compass_ir() -> tuple[float, float, float]:
+    return (
+        float(hardware_compass_heading.value),
+        float(hardware_ir_angle.value),
+        float(hardware_ir_distance.value),
+    )
 
 
 # Motor and kicker state
@@ -216,7 +238,7 @@ frame_buffers = {
     "front": front_frame_buffer,
     "back": back_frame_buffer,
 }
-frame_lock  = profiling.create_profiled_lock("frame_lock")
+frame_lock = profiling.create_profiled_lock("frame_lock")
 
 @profile_function
 def set_camera_frame(frame: FrameData | None, camera_name: str = "front"):
@@ -250,7 +272,7 @@ def get_camera_frame(camera_name: str = "front") -> FrameData | None:
 
 
 # Camera auto calibration (handled by camera_capture_process)
-camera_auto_calibration_lock  = profiling.create_profiled_lock("camera_auto_calibration_lock")
+camera_auto_calibration_lock = profiling.create_profiled_lock("camera_auto_calibration_lock")
 camera_auto_calibration_request = _manager.dict()
 camera_auto_calibration_result = _manager.dict()
 camera_auto_calibration_next_request_id = multiprocessing.Value('i', 1)
@@ -320,11 +342,9 @@ def get_camera_auto_calibration_result(request_id: int) -> dict | None:
 
 # Detected objects by camera
 detected_objects = _manager.list()
-detected_objects_lock  = profiling.create_profiled_lock("detected_objects_lock")
 @profile_function
 def get_detected_objects_raw() -> list[dict]:
-    with detected_objects_lock:
-        return detected_objects[:]
+    return detected_objects[:]
 @profile_function
 def get_detected_objects() -> list[DetectedObject]:
     detections_list = get_detected_objects_raw()
@@ -344,24 +364,23 @@ def get_detected_objects() -> list[DetectedObject]:
     return result
 @profile_function
 def set_detected_objects(detections: list[DetectedObject]) -> None:
-    with detected_objects_lock:
-        detected_objects[:] = []
-        for det in detections:
-            det_dict = {
-                'object_type': det.object_type,
-                'x': det.x,
-                'y': det.y,
-                'width': det.width,
-                'height': det.height,
-                'confidence': det.confidence,
-                'color': det.color,
-                'camera': det.camera
-            }
-            detected_objects.append(det_dict)
+    payload = []
+    for det in detections:
+        payload.append({
+            'object_type': det.object_type,
+            'x': det.x,
+            'y': det.y,
+            'width': det.width,
+            'height': det.height,
+            'confidence': det.confidence,
+            'color': det.color,
+            'camera': det.camera
+        })
+    detected_objects[:] = payload
 
 
 # Line detection and calibration
-line_calibration_lock  = profiling.create_profiled_lock("line_calibration_lock")
+line_calibration_lock = profiling.create_profiled_lock("line_calibration_lock")
 line_detection_thresholds = multiprocessing.Array('i', [val for pair in DEFAULT_LINE_DETECTION_THRESHOLDS for val in pair])
 @profile_function
 def get_line_detection_thresholds() -> list[list[int]]:
@@ -375,7 +394,7 @@ def set_line_detection_thresholds(thresholds: list[list[int]]) -> None:
             line_detection_thresholds[i * 2] = thresholds[i][0]  # min
             line_detection_thresholds[i * 2 + 1] = thresholds[i][1]  # max
 
-line_detected_lock  = profiling.create_profiled_lock("line_detected_lock")
+line_detected_lock = profiling.create_profiled_lock("line_detected_lock")
 line_detected = multiprocessing.Array('b', [False] * LINE_SENSOR_COUNT)
 line_calibration_min = multiprocessing.Array('d', [float('inf')] * LINE_SENSOR_COUNT)
 line_calibration_max = multiprocessing.Array('d', [float('-inf')] * LINE_SENSOR_COUNT)
@@ -387,19 +406,14 @@ line_calibration_phase2_max = multiprocessing.Array('d', [float('-inf')] * LINE_
 
 
 # Goal detection and calibration
-goal_detection_lock  = profiling.create_profiled_lock("goal_detection_lock")
 
-goal_color = multiprocessing.Array('c', b'yellow'.ljust(10))
+goal_color = multiprocessing.Value('b', True)  # True = yellow, False = blue
 @profile_function
 def set_goal_color(color: str) -> None:
-    with goal_detection_lock:
-        color_bytes = color.encode()[:10].ljust(10)
-        for i in range(10):
-            goal_color[i] = color_bytes[i:i+1]
+    goal_color.value = True if color.lower() == 'yellow' else False
 @profile_function
 def get_goal_color() -> str:
-    with goal_detection_lock:
-        return bytes(goal_color[:]).decode().strip()
+    return 'yellow' if goal_color.value else 'blue'
 
 goal_calibration_yellow_front = _manager.dict()
 goal_calibration_yellow_back = _manager.dict()
@@ -414,13 +428,10 @@ def _get_goal_calibration_store(color: str, camera: str) -> DictProxy:
 
 @profile_function
 def _init_goal_calibration_store(cal_dict: DictProxy, color: str) -> None:
-    cal_dict['count'] = 1
     if color.lower() == 'yellow':
-        cal_dict['range_0_lower'] = [20, 100, 100]
-        cal_dict['range_0_upper'] = [30, 255, 255]
+        cal_dict['ranges'] = [([20, 100, 100], [30, 255, 255])]
     else:
-        cal_dict['range_0_lower'] = [100, 100, 100]
-        cal_dict['range_0_upper'] = [130, 255, 255]
+        cal_dict['ranges'] = [([100, 100, 100], [130, 255, 255])]
 
 for _store, _color in [
     (goal_calibration_yellow_front, "yellow"),
@@ -442,16 +453,15 @@ def set_goal_calibration(
         color: 'yellow' or 'blue'
         ranges: List of tuples, each tuple is (lower_hsv, upper_hsv) where each is [h, s, v]
     """
-    with goal_detection_lock:
-        camera_name = _normalize_camera_name(camera, allow_both=True)
-        target_cameras = ("front", "back") if camera_name == "both" else (camera_name,)
-        for target_camera in target_cameras:
-            cal_dict = _get_goal_calibration_store(color, target_camera)
-            cal_dict.clear()
-            cal_dict['count'] = len(ranges)
-            for idx, (lower, upper) in enumerate(ranges):
-                cal_dict[f'range_{idx}_lower'] = [int(lower[0]), int(lower[1]), int(lower[2])]
-                cal_dict[f'range_{idx}_upper'] = [int(upper[0]), int(upper[1]), int(upper[2])]
+    camera_name = _normalize_camera_name(camera, allow_both=True)
+    target_cameras = ("front", "back") if camera_name == "both" else (camera_name,)
+    payload = [
+        ([int(lower[0]), int(lower[1]), int(lower[2])], [int(upper[0]), int(upper[1]), int(upper[2])])
+        for lower, upper in ranges
+    ]
+    for target_camera in target_cameras:
+        cal_dict = _get_goal_calibration_store(color, target_camera)
+        cal_dict['ranges'] = payload
 
 @profile_function
 def get_goal_calibration(color: str, camera: str = "front") -> list[tuple[tuple[int, int, int], tuple[int, int, int]]]:
@@ -460,74 +470,74 @@ def get_goal_calibration(color: str, camera: str = "front") -> list[tuple[tuple[
     Returns:
         List of tuples, each tuple is (lower_hsv, upper_hsv) where each is [h, s, v]
     """
-    with goal_detection_lock:
-        camera_name = _normalize_camera_name(camera)
-        cal_dict = _get_goal_calibration_store(color, camera_name)
-        
-        if not cal_dict or 'count' not in cal_dict:
-            if color.lower() == 'yellow':
-                return [((20, 100, 100), (30, 255, 255))]
-            else:
-                return [((100, 100, 100), (130, 255, 255))]
-        
-        count = cal_dict['count']
-        ranges = []
-        for idx in range(count):
-            lower = cal_dict.get(f'range_{idx}_lower', [0, 0, 0])
-            upper = cal_dict.get(f'range_{idx}_upper', [0, 0, 0])
-            ranges.append((lower, upper))
-        return ranges
+    camera_name = _normalize_camera_name(camera)
+    cal_dict = _get_goal_calibration_store(color, camera_name)
+    ranges = cal_dict.get('ranges') if cal_dict else None
 
-goal_detection_result = _manager.dict()
-goal_detection_result_yellow = _manager.dict()
-goal_detection_result_blue = _manager.dict()
+    if not ranges:
+        if color.lower() == 'yellow':
+            return [((20, 100, 100), (30, 255, 255))]
+        else:
+            return [((100, 100, 100), (130, 255, 255))]
+    return list(ranges)
+
+goal_detection_result = _manager.dict({'data': None})
+goal_detection_result_yellow = _manager.dict({'data': None})
+goal_detection_result_blue = _manager.dict({'data': None})
 
 @profile_function
-def _set_goal_detection_result_to_store(store: DictProxy, result: GoalDetectionResult | None) -> None:
-    store.clear()
-    if result:
-        store['alignment'] = result.alignment
-        store['goal_detected'] = result.detected
-        store['goal_center_x'] = result.center_x
-        store['goal_area'] = result.area
-        store['distance_mm'] = result.distance_mm
-        store['goal_height_pixels'] = result.height_pixels
-        store['camera_yaw_deg'] = result.camera_yaw_deg
-
-@profile_function
-def _get_goal_detection_result_from_store(store: DictProxy) -> GoalDetectionResult | None:
-    if not store:
+def _goal_result_to_tuple(result: GoalDetectionResult | None) -> tuple | None:
+    if result is None:
         return None
-    return GoalDetectionResult(
-        alignment=store.get('alignment', 0.0),
-        detected=store.get('goal_detected', False),
-        center_x=store.get('goal_center_x', None),
-        area=store.get('goal_area', 0.0),
-        distance_mm=store.get('distance_mm', None),
-        height_pixels=store.get('goal_height_pixels', 0.0),
-        camera_yaw_deg=store.get('camera_yaw_deg', 0.0)
+    return (
+        float(result.alignment),
+        bool(result.detected),
+        result.center_x,
+        float(result.area),
+        result.distance_mm,
+        float(result.height_pixels),
+        float(result.camera_yaw_deg),
     )
 
 @profile_function
+def _goal_result_from_tuple(data: tuple | None) -> GoalDetectionResult | None:
+    if not data:
+        return None
+    alignment, detected, center_x, area, distance_mm, height_pixels, camera_yaw_deg = data
+    return GoalDetectionResult(
+        alignment=alignment,
+        detected=detected,
+        center_x=center_x,
+        area=area,
+        distance_mm=distance_mm,
+        height_pixels=height_pixels,
+        camera_yaw_deg=camera_yaw_deg,
+    )
+
+@profile_function
+def _set_goal_detection_result_to_store(store: DictProxy, result: GoalDetectionResult | None) -> None:
+    store['data'] = _goal_result_to_tuple(result)
+
+@profile_function
+def _get_goal_detection_result_from_store(store: DictProxy) -> GoalDetectionResult | None:
+    return _goal_result_from_tuple(store.get('data'))
+
+@profile_function
 def set_goal_detection_result_for_color(color: str, result: GoalDetectionResult | None) -> None:
-    with goal_detection_lock:
-        store = goal_detection_result_yellow if color.lower() == 'yellow' else goal_detection_result_blue
-        _set_goal_detection_result_to_store(store, result)
+    store = goal_detection_result_yellow if color.lower() == 'yellow' else goal_detection_result_blue
+    _set_goal_detection_result_to_store(store, result)
 
 @profile_function
 def get_goal_detection_result_for_color(color: str) -> GoalDetectionResult | None:
-    with goal_detection_lock:
-        store = goal_detection_result_yellow if color.lower() == 'yellow' else goal_detection_result_blue
-        return _get_goal_detection_result_from_store(store)
+    store = goal_detection_result_yellow if color.lower() == 'yellow' else goal_detection_result_blue
+    return _get_goal_detection_result_from_store(store)
 
 @profile_function
 def set_goal_detection_result(result: GoalDetectionResult | None) -> None:
-    with goal_detection_lock:
-        _set_goal_detection_result_to_store(goal_detection_result, result)
+    _set_goal_detection_result_to_store(goal_detection_result, result)
 @profile_function
 def get_goal_detection_result() -> GoalDetectionResult | None:
-    with goal_detection_lock:
-        return _get_goal_detection_result_from_store(goal_detection_result)
+    return _get_goal_detection_result_from_store(goal_detection_result)
 
 goal_focal_length_front = multiprocessing.Value('d', DEFAULT_FOCAL_LENGTH_PIXELS)
 goal_focal_length_back = multiprocessing.Value('d', DEFAULT_FOCAL_LENGTH_PIXELS)
@@ -545,16 +555,19 @@ def set_goal_focal_length(focal_length: float, camera: str = "both") -> None:
 
 goal_distance_calibration_active = multiprocessing.Value('b', False)
 goal_distance_calibration_data = _manager.dict()
-goal_distance_calibration_lock  = profiling.create_profiled_lock("goal_distance_calibration_lock")
+goal_distance_calibration_lock = profiling.create_profiled_lock("goal_distance_calibration_lock")
 
 # Ball detection and calibration
 ball_calibration_front = _manager.dict()
 ball_calibration_back = _manager.dict()
 @profile_function
 def _init_ball_calibration_store(cal_dict: DictProxy) -> None:
-    cal_dict['count'] = 1
-    cal_dict['range_0_lower'] = [DEFAULT_BALL_CALIBRATION_HSV[0], DEFAULT_BALL_CALIBRATION_HSV[1], DEFAULT_BALL_CALIBRATION_HSV[2]]
-    cal_dict['range_0_upper'] = [DEFAULT_BALL_CALIBRATION_HSV[3], DEFAULT_BALL_CALIBRATION_HSV[4], DEFAULT_BALL_CALIBRATION_HSV[5]]
+    cal_dict['ranges'] = [
+        (
+            [DEFAULT_BALL_CALIBRATION_HSV[0], DEFAULT_BALL_CALIBRATION_HSV[1], DEFAULT_BALL_CALIBRATION_HSV[2]],
+            [DEFAULT_BALL_CALIBRATION_HSV[3], DEFAULT_BALL_CALIBRATION_HSV[4], DEFAULT_BALL_CALIBRATION_HSV[5]],
+        )
+    ]
 for _store in [ball_calibration_front, ball_calibration_back]:
     _init_ball_calibration_store(_store)
 
@@ -569,16 +582,15 @@ def set_ball_calibration(ranges: list[tuple[list[int], list[int]]], camera: str 
     Args:
         ranges: List of tuples, each tuple is (lower_hsv, upper_hsv) where each is [h, s, v]
     """
-    with goal_detection_lock:
-        camera_name = _normalize_camera_name(camera, allow_both=True)
-        target_cameras = ("front", "back") if camera_name == "both" else (camera_name,)
-        for target_camera in target_cameras:
-            cal_dict = _get_ball_calibration_store(target_camera)
-            cal_dict.clear()
-            cal_dict['count'] = len(ranges)
-            for idx, (lower, upper) in enumerate(ranges):
-                cal_dict[f'range_{idx}_lower'] = [int(lower[0]), int(lower[1]), int(lower[2])]
-                cal_dict[f'range_{idx}_upper'] = [int(upper[0]), int(upper[1]), int(upper[2])]
+    camera_name = _normalize_camera_name(camera, allow_both=True)
+    target_cameras = ("front", "back") if camera_name == "both" else (camera_name,)
+    payload = [
+        ([int(lower[0]), int(lower[1]), int(lower[2])], [int(upper[0]), int(upper[1]), int(upper[2])])
+        for lower, upper in ranges
+    ]
+    for target_camera in target_cameras:
+        cal_dict = _get_ball_calibration_store(target_camera)
+        cal_dict['ranges'] = payload
 
 @profile_function
 def get_ball_calibration(camera: str = "front") -> list[tuple[list[int], list[int]]]:
@@ -587,21 +599,15 @@ def get_ball_calibration(camera: str = "front") -> list[tuple[list[int], list[in
     Returns:
         List of tuples, each tuple is (lower_hsv, upper_hsv) where each is [h, s, v]
     """
-    with goal_detection_lock:
-        camera_name = _normalize_camera_name(camera)
-        ball_calibration = _get_ball_calibration_store(camera_name)
-        if not ball_calibration or 'count' not in ball_calibration:
-            # Return default single range
-            return [([DEFAULT_BALL_CALIBRATION_HSV[0], DEFAULT_BALL_CALIBRATION_HSV[1], DEFAULT_BALL_CALIBRATION_HSV[2]], 
-                     [DEFAULT_BALL_CALIBRATION_HSV[3], DEFAULT_BALL_CALIBRATION_HSV[4], DEFAULT_BALL_CALIBRATION_HSV[5]])]
-        
-        count = ball_calibration['count']
-        ranges = []
-        for idx in range(count):
-            lower = ball_calibration.get(f'range_{idx}_lower', [0, 0, 0])
-            upper = ball_calibration.get(f'range_{idx}_upper', [0, 0, 0])
-            ranges.append((lower, upper))
-        return ranges
+    camera_name = _normalize_camera_name(camera)
+    ball_calibration = _get_ball_calibration_store(camera_name)
+    ranges = ball_calibration.get('ranges') if ball_calibration else None
+
+    if not ranges:
+        # Return default single range
+        return [([DEFAULT_BALL_CALIBRATION_HSV[0], DEFAULT_BALL_CALIBRATION_HSV[1], DEFAULT_BALL_CALIBRATION_HSV[2]],
+                 [DEFAULT_BALL_CALIBRATION_HSV[3], DEFAULT_BALL_CALIBRATION_HSV[4], DEFAULT_BALL_CALIBRATION_HSV[5]])]
+    return list(ranges)
 
 camera_ball_possession = multiprocessing.Value('b', False)
 @profile_function
@@ -611,13 +617,28 @@ def set_camera_ball_possession(possessed: bool) -> None:
 def get_camera_ball_possession() -> bool:
     return bool(camera_ball_possession.value)
 
-camera_ball_position_lock  = profiling.create_profiled_lock("camera_ball_position_lock")
+camera_ball_position_lock = profiling.create_profiled_lock("camera_ball_position_lock")
 camera_ball_angle = multiprocessing.Value('d', 999.0)  # 999 = not detected
 camera_ball_distance = multiprocessing.Value('d', 999.0)
 camera_ball_detected = multiprocessing.Value('b', False)
 camera_ball_area_pixels = multiprocessing.Value('d', 0.0)
-camera_ball_front = _manager.dict({'angle': 999.0, 'distance': 999.0, 'detected': False, 'area_pixels': 0.0})
-camera_ball_back = _manager.dict({'angle': 999.0, 'distance': 999.0, 'detected': False, 'area_pixels': 0.0})
+camera_ball_front = _manager.dict({'data': (999.0, 999.0, False, 0.0)})
+camera_ball_back = _manager.dict({'data': (999.0, 999.0, False, 0.0)})
+
+@profile_function
+def _camera_ball_to_tuple(ball_data: CameraBallData) -> tuple:
+    return (float(ball_data.angle), float(ball_data.distance), bool(ball_data.detected), float(ball_data.area_pixels))
+
+@profile_function
+def _camera_ball_from_tuple(data: tuple | None) -> CameraBallData:
+    if not data:
+        return CameraBallData(999.0, 999.0, False, 0.0)
+    angle, distance, detected, area_pixels = data
+    return CameraBallData(float(angle), float(distance), bool(detected), float(area_pixels))
+
+@profile_function
+def _update_camera_ball_store(store: DictProxy, ball_data: CameraBallData) -> None:
+    store['data'] = _camera_ball_to_tuple(ball_data)
 
 @profile_function
 def set_camera_ball_data(ball_data: CameraBallData) -> None:
@@ -629,12 +650,18 @@ def set_camera_ball_data(ball_data: CameraBallData) -> None:
 
 @profile_function
 def set_camera_ball_data_for_camera(camera: str, ball_data: CameraBallData) -> None:
-    with camera_ball_position_lock:
-        target = camera_ball_front if _normalize_camera_name(camera) == "front" else camera_ball_back
-        target['angle'] = ball_data.angle
-        target['distance'] = ball_data.distance
-        target['detected'] = ball_data.detected
-        target['area_pixels'] = ball_data.area_pixels
+    target = camera_ball_front if _normalize_camera_name(camera) == "front" else camera_ball_back
+    _update_camera_ball_store(target, ball_data)
+
+@profile_function
+def set_camera_ball_data_for_cameras(ball_data_by_camera: dict[str, CameraBallData]) -> None:
+    if not ball_data_by_camera:
+        return
+
+    for camera_name, ball_data in ball_data_by_camera.items():
+        normalized = _normalize_camera_name(camera_name)
+        target = camera_ball_front if normalized == "front" else camera_ball_back
+        _update_camera_ball_store(target, ball_data)
 
 @profile_function
 def get_camera_ball_data() -> CameraBallData:
@@ -648,14 +675,9 @@ def get_camera_ball_data() -> CameraBallData:
 
 @profile_function
 def get_camera_ball_data_for_camera(camera: str = "front") -> CameraBallData:
-    with camera_ball_position_lock:
-        source = camera_ball_front if _normalize_camera_name(camera) == "front" else camera_ball_back
-        return CameraBallData(
-            angle=float(source.get('angle', 999.0)),
-            distance=float(source.get('distance', 999.0)),
-            detected=bool(source.get('detected', False)),
-            area_pixels=float(source.get('area_pixels', 0.0)),
-        )
+    source = camera_ball_front if _normalize_camera_name(camera) == "front" else camera_ball_back
+    data = source.get('data') if source else None
+    return _camera_ball_from_tuple(data)
 
 
 camera_ball_distance_calibration_constant_front = multiprocessing.Value('d', 10000.0)  # Default constant
@@ -712,7 +734,7 @@ def set_position_based_speed_enabled(enabled: bool) -> None:
 def get_position_based_speed_enabled() -> bool:
     return position_based_speed_enabled.value
 
-position_estimate_lock  = profiling.create_profiled_lock("position_estimate_lock")
+position_estimate_lock = profiling.create_profiled_lock("position_estimate_lock")
 last_position_estimate = _manager.dict()
 @profile_function
 def set_last_position_estimate(x_mm: float, y_mm: float, confidence: float) -> None:
@@ -749,7 +771,7 @@ bt_command_results = _manager.dict()
 bt_next_command_id = multiprocessing.Value('i', 1)
 bt_process_alive = multiprocessing.Value('b', False)
 bt_other_robot_info = _manager.dict()
-bt_lock  = profiling.create_profiled_lock("bt_lock")
+bt_lock = profiling.create_profiled_lock("bt_lock")
 
 
 @profile_function

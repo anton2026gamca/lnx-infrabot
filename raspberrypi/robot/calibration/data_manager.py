@@ -116,10 +116,7 @@ def load_calibration_data() -> None:
         if goal_data:
             goal_color = goal_data.get("goal_color")
             if goal_color in ['yellow', 'blue']:
-                with shared_data.goal_detection_lock:
-                    color_bytes = goal_color.encode()[:10].ljust(10)
-                    for i in range(10):
-                        shared_data.goal_color[i] = color_bytes[i:i+1]
+                shared_data.set_goal_color(goal_color)
 
             goal_by_camera = goal_data.get("by_camera", {}) if isinstance(goal_data.get("by_camera"), dict) else {}
             focal_by_camera = goal_data.get("focal_length_pixels_by_camera", {}) if isinstance(goal_data.get("focal_length_pixels_by_camera"), dict) else {}

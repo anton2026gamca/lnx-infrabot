@@ -42,25 +42,25 @@ class MessageType:
     RUNNING_STATE = "running_state"
 
 
-@dataclass
+@dataclass(slots=True)
 class CompassData:
     heading: int
     pitch: int
     roll: int
 
-@dataclass
+@dataclass(slots=True)
 class IRData:
     angle: int
     distance: int
     sensors: list[int]
     status: int
 
-@dataclass
+@dataclass(slots=True)
 class ParsedTeensyData:
     compass: CompassData
     ir: IRData
     line: list[int]  # 12 sensors with (min, max) values
-    raw: bytes
+    raw: bytes | None
     timestamp: float
 
 

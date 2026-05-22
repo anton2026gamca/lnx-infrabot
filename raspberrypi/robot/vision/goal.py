@@ -194,9 +194,10 @@ def _get_goal_bounding_rect(
 
 @profile_function
 def get_position_estimate() -> PositionEstimate | None:
-    hardware_data = shared_data.get_hardware_data()
+    hardware_data = shared_data.get_hardware_compass_ir()
+    heading = hardware_data[0]
 
-    if not hardware_data or hardware_data.compass.heading is None:
+    if heading == 999.0:
         return None
 
     field_length_mm = 2190.0
@@ -210,7 +211,7 @@ def get_position_estimate() -> PositionEstimate | None:
             return None
         distance_mm = goal.distance_mm
         angle_to_goal_deg = (
-            hardware_data.compass.heading
+            heading
             + goal.camera_yaw_deg
             + goal.alignment * (CAMERA_FOV_DEG / 2.0)
         )

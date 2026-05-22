@@ -309,10 +309,10 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
             frame_skip_count = 0
             enemy_goal_color = shared_data.get_goal_color().lower()
             own_goal_color = "blue" if enemy_goal_color == "yellow" else "yellow"
-            hardware = shared_data.get_hardware_data()
+            heading_deg, ir_angle, ir_distance = shared_data.get_hardware_compass_ir()
             robot_heading_deg = None
-            if hardware is not None and hardware.compass.heading is not None:
-                robot_heading_deg = utils.normalize_angle_deg(hardware.compass.heading)
+            if heading_deg != 999.0:
+                robot_heading_deg = utils.normalize_angle_deg(heading_deg)
 
             all_detections: list[DetectedObject] = []
             goal_results_by_camera: dict[str, dict[str, GoalDetectionResult]] = {
@@ -370,15 +370,13 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 camera_ball_data = camera_result["camera_ball_data"]
                 camera_ball_data_by_camera[camera_name] = camera_ball_data
                 camera_runtime_state[camera_name]["last_camera_ball_data"] = camera_ball_data
-                shared_data.set_camera_ball_data_for_camera(camera_name, camera_ball_data_by_camera[camera_name])
                 if camera_name in BALL_POSSESSION_CAMERAS:
                     camera_runtime_state[camera_name]["last_ball_possessed"] = bool(camera_result["ball_possessed"])
 
                 all_detections.extend(camera_result["detections"])
 
             # Keep per-camera shared state fresh even if only one camera delivered a new frame this cycle.
-            for camera_name, _ in CAMERA_CONFIG:
-                shared_data.set_camera_ball_data_for_camera(camera_name, camera_ball_data_by_camera[camera_name])
+            shared_data.set_camera_ball_data_for_cameras(camera_ball_data_by_camera)
 
             goals_by_color: dict[str, list[GoalDetectionResult]] = {"yellow": [], "blue": []}
             for camera_name, _ in CAMERA_CONFIG:
@@ -396,9 +394,9 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
             ir_ball_angle = None
             ir_ball_detected = False
-            if hardware is not None and hardware.ir.angle is not None and hardware.ir.distance is not None:
-                ir_ball_angle = utils.normalize_angle_deg(hardware.ir.angle)
-                ir_ball_detected = ir_ball_angle != 999 and hardware.ir.distance != 0
+            if ir_angle != 999.0 and ir_distance != 0:
+                ir_ball_angle = utils.normalize_angle_deg(ir_angle)
+                ir_ball_detected = True
 
             ball_candidates = [
                 camera_ball_data_by_camera[camera_name]
@@ -444,4 +442,3 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 )
                 frames_processed = 0
                 last_debug_msg_time = time.perf_counter()
-

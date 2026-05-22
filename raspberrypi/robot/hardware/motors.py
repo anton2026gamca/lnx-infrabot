@@ -4,7 +4,7 @@ import time
 from robot import utils, vision
 from robot.hardware import line_sensors
 from robot.multiprocessing import shared_data
-
+from robot.profiling import profile_function
 from robot.config import *
 
 
@@ -74,9 +74,10 @@ class SmartMotorsController(MotorsController):
         self.line_avoiding_enabled = True
         self.position_based_speed_enabled = True
 
+    @profile_function
     def set_motors(self, angle: float, speed: float, rotate: float):
-        hardware_data = shared_data.get_hardware_data()
-        current_heading = hardware_data.compass.heading if hardware_data else None
+        hardware_data = shared_data.get_hardware_compass_ir()
+        current_heading = hardware_data[0] if hardware_data[0] != 999.0 else None
 
         rotation_correction_enabled = shared_data.get_rotation_correction_enabled() and self.rotation_correction_enabled
 
@@ -185,6 +186,7 @@ class SmartMotorsController(MotorsController):
         motors = calculate_speeds(move_angle, move_speed * 255, total_rotation * 255)
         shared_data.set_motor_speeds(motors)
 
+    @profile_function
     def set_functions_enabled(self, rotation_correction_enabled: bool | None = None, line_avoiding_enabled: bool | None = None, position_based_speed_enabled: bool | None = None):
         """
         Enable or disable smart functions. If a parameter is None, it will not change the current state of that function.
@@ -197,6 +199,7 @@ class SmartMotorsController(MotorsController):
         if position_based_speed_enabled is not None:
             self.position_based_speed_enabled = position_based_speed_enabled
     
+    @profile_function
     def reset(self):
         super().reset()
         self.target_heading = None
