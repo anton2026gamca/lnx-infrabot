@@ -607,6 +607,26 @@ async def get_goal_focal_length(sid: str, data: dict | None = None):
 
 
 @sio.event
+async def get_camera_settings(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        camera = str(d.get("camera", "both")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
+        if camera == "both":
+            settings = {
+                "front": shared_data.get_camera_settings("front"),
+                "back": shared_data.get_camera_settings("back"),
+            }
+        else:
+            settings = shared_data.get_camera_settings(camera)
+        return _ok(camera=camera, settings=settings)
+    except Exception as exc:
+        logger.error(f"get_camera_settings: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
 async def get_all_state_machines(sid: str, data: dict | None = None):
     try:
         machines = autonomous_mode.get_available_state_machines()
@@ -812,6 +832,68 @@ async def set_goal_focal_length(sid: str, data: dict | None = None):
 
 
 @sio.event
+async def set_camera_settings(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        camera = str(d.get("camera", "both")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
+
+        color_gains = d.get("color_gains")
+        if color_gains is not None:
+            if not isinstance(color_gains, list) or len(color_gains) != 2:
+                return _err("color_gains must be a list of exactly 2 numbers")
+            if not all(isinstance(v, (int, float)) and float(v) > 0 for v in color_gains):
+                return _err("color_gains values must be positive numbers")
+
+        exposure_time = d.get("exposure_time")
+        if exposure_time is not None:
+            if isinstance(exposure_time, str):
+                try:
+                    exposure_time = float(exposure_time)
+                except ValueError:
+                    return _err("exposure_time must be a positive number")
+            if not isinstance(exposure_time, (int, float)) or float(exposure_time) <= 0:
+                return _err("exposure_time must be a positive number")
+
+        analogue_gain = d.get("analogue_gain")
+        if analogue_gain is not None:
+            if isinstance(analogue_gain, str):
+                try:
+                    analogue_gain = float(analogue_gain)
+                except ValueError:
+                    return _err("analogue_gain must be a positive number")
+            if not isinstance(analogue_gain, (int, float)) or float(analogue_gain) <= 0:
+                return _err("analogue_gain must be a positive number")
+
+        if color_gains is None and exposure_time is None and analogue_gain is None:
+            return _err("Provide at least one setting: color_gains, exposure_time, or analogue_gain")
+
+        request_id = shared_data.request_camera_settings_update(
+            camera=camera,
+            color_gains=[float(color_gains[0]), float(color_gains[1])] if color_gains is not None else None,
+            exposure_time=float(exposure_time) if exposure_time is not None else None,
+            analogue_gain=float(analogue_gain) if analogue_gain is not None else None,
+        )
+        if request_id is None:
+            return _err("A camera settings update is already in progress")
+
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while asyncio.get_running_loop().time() < deadline:
+            result = shared_data.get_camera_settings_update_result(request_id)
+            if result and result.get("done", False):
+                if result.get("success", False):
+                    return _ok(camera=camera, settings=result.get("settings", {}))
+                return _err(result.get("error") or "Camera settings update failed")
+            await async_sleep(0.05)
+
+        return _err("Camera settings update timed out")
+    except Exception as exc:
+        logger.error(f"set_camera_settings: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
 async def set_autonomous_state(sid: str, data: dict | None = None):
     try:
         state_machine = (data or {}).get("state_machine")
@@ -888,7 +970,7 @@ async def camera_ball_distance_calibration(sid: str, data: dict | None = None):
 async def camera_auto_calibration(sid: str, data: dict | None = None):
     try:
         d = data or {}
-        camera_name = str(d.get("camera", "both")).lower()
+        camera_name = str(d.get("camera", "front")).lower()
         if camera_name not in ("front", "back"):
             return _err("camera must be one of: front, back")
 

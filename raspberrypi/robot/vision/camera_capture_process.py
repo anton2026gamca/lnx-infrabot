@@ -5,6 +5,7 @@ import threading
 import time
 
 from robot import utils
+from robot import calibration
 from robot.multiprocessing import shared_data
 from robot.profiling import profile_function, sleep
 from robot.vision import camera
@@ -49,6 +50,15 @@ def _handle_auto_calibration(
                 continue
             camera.apply_auto_calibration_result(camera_name, calibration_result)
 
+        for camera_name in available_cameras:
+            shared_data.set_camera_settings(
+                color_gains=calibration_result.get("color_gains"),
+                exposure_time=calibration_result.get("exposure_time"),
+                analogue_gain=calibration_result.get("analogue_gain"),
+                camera=camera_name,
+            )
+        calibration.save_calibration_data()
+
         shared_data.set_camera_auto_calibration_result(
             request_id=request_id,
             success=True,
@@ -57,6 +67,49 @@ def _handle_auto_calibration(
     except Exception as e:
         logger.error(f"Camera auto calibration failed: {e}", exc_info=True)
         shared_data.set_camera_auto_calibration_result(
+            request_id=request_id,
+            success=False,
+            error=str(e),
+        )
+
+
+@profile_function
+def _handle_manual_camera_settings_update(
+    request: dict,
+    available_cameras: list[str],
+    logger: logging.Logger,
+) -> None:
+    request_id = int(request.get("request_id", 0))
+    target_camera = str(request.get("camera", "both")).lower()
+    target_cameras = available_cameras if target_camera == "both" else [target_camera]
+    color_gains = request.get("color_gains")
+    exposure_time = request.get("exposure_time")
+    analogue_gain = request.get("analogue_gain")
+
+    try:
+        for camera_name in target_cameras:
+            if camera_name not in available_cameras:
+                raise RuntimeError(f"{camera_name} camera is not available")
+            camera.set_manual_controls(
+                camera_name=camera_name,
+                color_gains=color_gains,
+                exposure_time=exposure_time,
+                analogue_gain=analogue_gain,
+            )
+
+        calibration.save_calibration_data()
+        applied_settings = {
+            camera_name: shared_data.get_camera_settings(camera_name)
+            for camera_name in target_cameras
+        }
+        shared_data.set_camera_settings_update_result(
+            request_id=request_id,
+            success=True,
+            settings=applied_settings,
+        )
+    except Exception as e:
+        logger.error(f"Manual camera settings update failed: {e}", exc_info=True)
+        shared_data.set_camera_settings_update_result(
             request_id=request_id,
             success=False,
             error=str(e),
@@ -125,6 +178,14 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
             capture_threads.append(capture_thread)
         
         while not stop_event.is_set():
+            camera_settings_request = shared_data.claim_camera_settings_update_request()
+            if camera_settings_request:
+                pause_event.set()
+                try:
+                    _handle_manual_camera_settings_update(camera_settings_request, available_cameras, logger)
+                finally:
+                    pause_event.clear()
+
             calibration_request = shared_data.claim_camera_auto_calibration_request()
             if calibration_request:
                 pause_event.set()

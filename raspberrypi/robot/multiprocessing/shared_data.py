@@ -340,6 +340,158 @@ def get_camera_auto_calibration_result(request_id: int) -> dict | None:
         return dict(camera_auto_calibration_result)
 
 
+# Camera controls
+camera_settings_lock = profiling.create_profiled_lock("camera_settings_lock")
+camera_settings_front = _manager.dict()
+camera_settings_back = _manager.dict()
+
+def _default_camera_settings_payload() -> dict:
+    return {
+        "color_gains": [float(CAMERA_DEFAULT_COLOR_GAINS[0]), float(CAMERA_DEFAULT_COLOR_GAINS[1])],
+        "exposure_time": int(CAMERA_DEFAULT_EXPOSURE_TIME),
+        "analogue_gain": float(CAMERA_DEFAULT_ANALOGUE_GAIN),
+    }
+
+@profile_function
+def _get_camera_settings_store(camera: str) -> DictProxy:
+    return camera_settings_front if camera == "front" else camera_settings_back
+
+@profile_function
+def _init_camera_settings_store(store: DictProxy) -> None:
+    if "color_gains" not in store or "exposure_time" not in store or "analogue_gain" not in store:
+        store.clear()
+        store.update(_default_camera_settings_payload())
+
+for _store in [camera_settings_front, camera_settings_back]:
+    _init_camera_settings_store(_store)
+
+@profile_function
+def get_camera_settings(camera: str = "front") -> dict:
+    camera_name = _normalize_camera_name(camera)
+    with camera_settings_lock:
+        store = _get_camera_settings_store(camera_name)
+        _init_camera_settings_store(store)
+        color_gains = store.get("color_gains", [CAMERA_DEFAULT_COLOR_GAINS[0], CAMERA_DEFAULT_COLOR_GAINS[1]])
+        if not isinstance(color_gains, list) or len(color_gains) != 2:
+            color_gains = [CAMERA_DEFAULT_COLOR_GAINS[0], CAMERA_DEFAULT_COLOR_GAINS[1]]
+        exposure_time = int(store.get("exposure_time", CAMERA_DEFAULT_EXPOSURE_TIME))
+        analogue_gain = float(store.get("analogue_gain", CAMERA_DEFAULT_ANALOGUE_GAIN))
+        return {
+            "camera": camera_name,
+            "color_gains": [float(color_gains[0]), float(color_gains[1])],
+            "exposure_time": exposure_time,
+            "analogue_gain": analogue_gain,
+        }
+
+@profile_function
+def set_camera_settings(
+    color_gains: list[float] | tuple[float, float] | None = None,
+    exposure_time: int | float | None = None,
+    analogue_gain: float | None = None,
+    camera: str = "both",
+) -> None:
+    camera_name = _normalize_camera_name(camera, allow_both=True)
+    target_cameras = ("front", "back") if camera_name == "both" else (camera_name,)
+
+    with camera_settings_lock:
+        for target_camera in target_cameras:
+            store = _get_camera_settings_store(target_camera)
+            _init_camera_settings_store(store)
+            existing_color_gains = store.get("color_gains", [CAMERA_DEFAULT_COLOR_GAINS[0], CAMERA_DEFAULT_COLOR_GAINS[1]])
+            if not isinstance(existing_color_gains, list) or len(existing_color_gains) != 2:
+                existing_color_gains = [CAMERA_DEFAULT_COLOR_GAINS[0], CAMERA_DEFAULT_COLOR_GAINS[1]]
+
+            next_color_gains = [
+                float(color_gains[0]) if color_gains is not None else float(existing_color_gains[0]),
+                float(color_gains[1]) if color_gains is not None else float(existing_color_gains[1]),
+            ]
+            next_exposure_time = int(exposure_time if exposure_time is not None else store.get("exposure_time", CAMERA_DEFAULT_EXPOSURE_TIME))
+            next_analogue_gain = float(analogue_gain if analogue_gain is not None else store.get("analogue_gain", CAMERA_DEFAULT_ANALOGUE_GAIN))
+
+            store.clear()
+            store.update({
+                "color_gains": next_color_gains,
+                "exposure_time": next_exposure_time,
+                "analogue_gain": next_analogue_gain,
+            })
+
+
+# Manual camera settings update requests (handled by camera_capture_process)
+camera_settings_update_lock = profiling.create_profiled_lock("camera_settings_update_lock")
+camera_settings_update_request = _manager.dict()
+camera_settings_update_result = _manager.dict()
+camera_settings_update_next_request_id = multiprocessing.Value('i', 1)
+
+@profile_function
+def request_camera_settings_update(
+    camera: str = "both",
+    color_gains: list[float] | None = None,
+    exposure_time: int | float | None = None,
+    analogue_gain: float | None = None,
+) -> int | None:
+    with camera_settings_update_lock:
+        if camera_settings_update_request.get("active", False):
+            return None
+        request_id = int(camera_settings_update_next_request_id.value)
+        camera_settings_update_next_request_id.value += 1
+
+        camera_name = _normalize_camera_name(camera, allow_both=True)
+        camera_settings_update_request.clear()
+        camera_settings_update_request.update({
+            "active": True,
+            "request_id": request_id,
+            "camera": camera_name,
+            "color_gains": list(color_gains) if color_gains is not None else None,
+            "exposure_time": float(exposure_time) if exposure_time is not None else None,
+            "analogue_gain": float(analogue_gain) if analogue_gain is not None else None,
+            "requested_at": time.time(),
+        })
+
+        camera_settings_update_result.clear()
+        camera_settings_update_result.update({
+            "request_id": request_id,
+            "done": False,
+            "success": False,
+        })
+        return request_id
+
+@profile_function
+def claim_camera_settings_update_request() -> dict | None:
+    with camera_settings_update_lock:
+        if not camera_settings_update_request.get("active", False):
+            return None
+        request = dict(camera_settings_update_request)
+        camera_settings_update_request["active"] = False
+        return request
+
+@profile_function
+def set_camera_settings_update_result(
+    request_id: int,
+    success: bool,
+    settings: dict | None = None,
+    error: str | None = None,
+) -> None:
+    with camera_settings_update_lock:
+        camera_settings_update_result.clear()
+        camera_settings_update_result.update({
+            "request_id": int(request_id),
+            "done": True,
+            "success": bool(success),
+            "settings": dict(settings or {}),
+            "error": error,
+            "completed_at": time.time(),
+        })
+
+@profile_function
+def get_camera_settings_update_result(request_id: int) -> dict | None:
+    with camera_settings_update_lock:
+        if not camera_settings_update_result:
+            return None
+        if int(camera_settings_update_result.get("request_id", -1)) != int(request_id):
+            return None
+        return dict(camera_settings_update_result)
+
+
 # Detected objects by camera
 detected_objects = _manager.list()
 @profile_function

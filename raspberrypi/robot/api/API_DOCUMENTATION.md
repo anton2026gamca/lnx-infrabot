@@ -480,6 +480,47 @@ Get the focal length used for distance calculations.
 }
 ```
 
+### `get_camera_settings`
+
+Get current manual camera control values (persisted calibration values).
+
+**Request:**
+```typescript
+{
+  event: "get_camera_settings",
+  data: {
+    camera?: "front" | "back" | "both" // Default: "both"
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok",
+  camera: "front" | "back" | "both",
+  settings: {
+    front?: {
+      camera: "front",
+      color_gains: [number, number], // [red_gain, blue_gain]
+      exposure_time: number,          // microseconds
+      analogue_gain: number
+    },
+    back?: {
+      camera: "back",
+      color_gains: [number, number], // [red_gain, blue_gain]
+      exposure_time: number,          // microseconds
+      analogue_gain: number
+    }
+  } | {
+    camera: "front" | "back",
+    color_gains: [number, number], // [red_gain, blue_gain]
+    exposure_time: number,          // microseconds
+    analogue_gain: number
+  }
+}
+```
+
 ### `get_all_state_machines`
 
 Get list of available autonomous state machines.
@@ -774,6 +815,48 @@ Set the focal length for goal distance calculations.
 }
 ```
 
+### `set_camera_settings`
+
+Manually set camera control values and apply them immediately. These values are persisted to calibration storage.
+
+**Request:**
+```typescript
+{
+  event: "set_camera_settings",
+  data: {
+    camera?: "front" | "back" | "both", // Default: "both"
+    color_gains?: [number, number],     // [red_gain, blue_gain], positive values
+    exposure_time?: number,             // microseconds, positive
+    analogue_gain?: number              // positive
+  }
+}
+```
+
+**Note:** Provide at least one of `color_gains`, `exposure_time`, or `analogue_gain`.
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  camera?: "front" | "back" | "both",
+  settings?: {
+    front?: {
+      camera: "front",
+      color_gains: [number, number],
+      exposure_time: number,
+      analogue_gain: number
+    },
+    back?: {
+      camera: "back",
+      color_gains: [number, number],
+      exposure_time: number,
+      analogue_gain: number
+    }
+  },
+  error?: string
+}
+```
+
 ### `set_autonomous_state`
 
 Configure autonomous mode settings.
@@ -853,7 +936,7 @@ Calibrate ball distance detection. Place ball at a known distance and call this 
 
 ### `camera_auto_calibration`
 
-Temporarily enable camera AWB and AE so the camera can adapt to current lighting, then disable both again and copy the learned values to all other cameras.
+Temporarily enable camera AWB and AE so the camera can adapt to current lighting, then disable both again and copy the learned values to all other cameras. The resulting gains/exposure values are also saved to calibration storage.
 
 **Request:**
 ```typescript

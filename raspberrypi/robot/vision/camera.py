@@ -23,6 +23,17 @@ class FrameData:
 _picams: dict = {}
 
 
+def _build_controls_from_settings(settings: dict) -> dict:
+    gains = settings.get("color_gains", [CAMERA_DEFAULT_COLOR_GAINS[0], CAMERA_DEFAULT_COLOR_GAINS[1]])
+    return {
+        "AwbEnable": False,
+        "AeEnable": False,
+        "ColourGains": (float(gains[0]), float(gains[1])),
+        "ExposureTime": int(settings.get("exposure_time", CAMERA_DEFAULT_EXPOSURE_TIME)),
+        "AnalogueGain": float(settings.get("analogue_gain", CAMERA_DEFAULT_ANALOGUE_GAIN)),
+    }
+
+
 @profile_function
 def init(camera_name: str = "front", camera_index: int | None = None):
     """Must be called from within the process that will use it."""
@@ -38,13 +49,9 @@ def init(camera_name: str = "front", camera_index: int | None = None):
         queue = False,
     )
     picam.configure(camera_config)
-    picam.set_controls({
-        "AwbEnable": False,
-        "AeEnable": False,
-        "ColourGains": (1.84, 2.05),
-        "ExposureTime": 10000,
-        "AnalogueGain": 3.0
-    })
+    from robot.multiprocessing import shared_data
+    settings = shared_data.get_camera_settings(camera_name)
+    picam.set_controls(_build_controls_from_settings(settings))
     picam.start()
     _picams[camera_name] = picam
 
@@ -148,6 +155,36 @@ def apply_auto_calibration_result(camera_name: str, calibration_result: dict) ->
         "analogue_gain": float(analogue_gain) if analogue_gain is not None else None,
         "settle_time_s": float(settle_time_s) if settle_time_s is not None else None,
     }
+
+
+@profile_function
+def set_manual_controls(
+    camera_name: str = "front",
+    color_gains: list[float] | tuple[float, float] | None = None,
+    exposure_time: int | float | None = None,
+    analogue_gain: float | None = None,
+) -> dict:
+    picam = _picams.get(camera_name)
+    if picam is None:
+        raise RuntimeError("Camera not initialized. Call init_camera() first.")
+
+    from robot.multiprocessing import shared_data
+    shared_data.set_camera_settings(
+        color_gains=[float(color_gains[0]), float(color_gains[1])] if color_gains is not None else None,
+        exposure_time=float(exposure_time) if exposure_time is not None else None,
+        analogue_gain=float(analogue_gain) if analogue_gain is not None else None,
+        camera=camera_name,
+    )
+    settings = shared_data.get_camera_settings(camera_name)
+    controls = _build_controls_from_settings(settings)
+    picam.set_controls(controls)
+
+    _logger.info(
+        f"({camera_name.title()} Camera) Manual controls updated. "
+        f"Gains={controls['ColourGains']}, ExposureTime={controls['ExposureTime']}, "
+        f"AnalogueGain={controls['AnalogueGain']}"
+    )
+    return settings
 
 
 @profile_function
