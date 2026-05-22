@@ -19,6 +19,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         start_time = time.time()
 
         mode = shared_data.get_robot_mode()
+    
         if mode == RobotMode.IDLE:
             motors_controller.reset()
             sleep(IDLE_SLEEP_DURATION)

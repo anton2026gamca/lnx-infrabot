@@ -8,7 +8,7 @@ from robot.logic.autonomous_mode.state_machine import State, StateMachine, Cross
 from robot.multiprocessing import shared_data
 from robot.profiling import profile_function
 
-from robot.vision import GoalDetectionResult, ball
+from robot.vision import GoalDetectionResult
 from robot.hardware.motors import SmartMotorsController
 from robot.config import *
 
@@ -59,11 +59,6 @@ AUTO_GOAL_TRACK_ROTATE_GAIN = 0.7
 AUTO_GOAL_SEARCH_ROTATE_SPEED = 1.0
 
 
-# Toggle between standard attacker behaviour and goalkeeper behaviour.
-# When enabled, the robot will prioritize defending our goal and only
-# switch to attacking states when a nearby ball can be grabbed.
-GOALKEEPER_MODE_ENABLED = False
-
 # Goalkeeper positioning/behaviour tuning
 GOALKEEPER_TARGET_Y_FROM_OUR_GOAL_MM = 320.0
 GOALKEEPER_POSITION_TOLERANCE_X_MM = 130.0
@@ -86,8 +81,8 @@ def _clamp(value: float, min_value: float, max_value: float) -> float:
 
 
 @profile_function
-def _neutral_state() -> type[State]:
-    return GoalkeeperApproachState if GOALKEEPER_MODE_ENABLED else IdleState
+def _neutral_state(state_machine: StateMachine) -> type[State]:
+    return GoalkeeperApproachState if isinstance(state_machine.cross_state_data, SoccerStateMachineData) and state_machine.cross_state_data.is_goalkeeper else IdleState
 
 
 @profile_function
@@ -167,6 +162,7 @@ class LinesData:
 class SoccerStateMachineData(CrossStateData):
     sensors: SensorsData
     lines: LinesData
+    is_goalkeeper: bool = False
 
 
 @profile_function
@@ -252,12 +248,12 @@ def _update_lines_data(state_machine: StateMachine) -> LinesData:
         detection_history=history
     )
 
-
 @profile_function
-def _update_cross_state_data(state_machine: StateMachine) -> SoccerStateMachineData:
+def _update_cross_state_data(state_machine: StateMachine, is_goalkeeper: bool | None = None) -> SoccerStateMachineData:
     data = SoccerStateMachineData(
         sensors=_update_sensors_data(state_machine),
-        lines=_update_lines_data(state_machine)
+        lines=_update_lines_data(state_machine),
+        is_goalkeeper=is_goalkeeper if is_goalkeeper is not None else (isinstance(state_machine.cross_state_data, SoccerStateMachineData) and state_machine.cross_state_data.is_goalkeeper)
     )
     state_machine.cross_state_data = data
     return data
@@ -304,7 +300,7 @@ class LineAvoidingState(State):
             ) if data.lines.detection_history else False
             
             if time_without_detection > self.min_clear_time and not recent_detections_exist:
-                state_machine.transition(_neutral_state())
+                state_machine.transition(_neutral_state(state_machine))
                 return
             
             time_since_exit = current_time - self.line_exit_time if self.line_exit_time else 0
@@ -400,7 +396,7 @@ class IdleState(State):
             state_machine.transition(LineAvoidingState)
             return
 
-        if GOALKEEPER_MODE_ENABLED:
+        if data.is_goalkeeper:
             state_machine.transition(GoalkeeperApproachState)
             return
 
@@ -436,7 +432,7 @@ class AttackerApproachState(State):
             return
 
         if not data.sensors.ir_ball_detected and (not data.sensors.cam_ball_detected or not data.sensors.use_cam_ball):
-            state_machine.transition(_neutral_state())
+            state_machine.transition(_neutral_state(state_machine))
             return
 
         move_angle = 0.0
@@ -487,14 +483,14 @@ class AttackerPushState(State):
             return
 
         if not data.sensors.ball_possession and not data.sensors.ball_likely_inside_robot:
-            state_machine.transition(GoalkeeperApproachState if GOALKEEPER_MODE_ENABLED else AttackerApproachState)
+            state_machine.transition(GoalkeeperApproachState if data.is_goalkeeper else AttackerApproachState)
             return
 
         move_speed = AUTO_PUSH_SPEED
         move_angle = 0.0
 
         if data.sensors.goal.distance_mm is not None and data.sensors.goal.distance_mm < AUTO_GOAL_SCORED_DISTANCE_MM:
-            state_machine.transition(_neutral_state())
+            state_machine.transition(_neutral_state(state_machine))
             return
 
         rotate = _set_goal_tracking_rotation(state_machine, data)
@@ -624,13 +620,24 @@ class GoalkeeperDefendState(State):
 
 _motors = SmartMotorsController()
 _motors.set_functions_enabled(line_avoiding_enabled=False)
-_state_machine = StateMachine(
-    name="Soccer State Machine",
-    initial_state=GoalkeeperApproachState if GOALKEEPER_MODE_ENABLED else IdleState,
-    motors=_motors
+attacker_state_machine = StateMachine(
+    name="Attacker State Machine",
+    initial_state=IdleState,
+    motors=_motors,
 )
+_update_cross_state_data(attacker_state_machine, is_goalkeeper=False)
+    
+goalkeeper_state_machine = StateMachine(
+    name="Goalkeeper State Machine",
+    initial_state=GoalkeeperApproachState,
+    motors=_motors,
+)
+_update_cross_state_data(goalkeeper_state_machine, is_goalkeeper=True)
 
-@profile_function
-def get_state_machine() -> StateMachine:
-    return _state_machine
+
+def get_attacker_state_machine() -> StateMachine:
+    return attacker_state_machine
+
+def get_goalkeeper_state_machine() -> StateMachine:
+    return goalkeeper_state_machine
 

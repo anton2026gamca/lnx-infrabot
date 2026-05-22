@@ -32,11 +32,11 @@ class StateMachine:
     queued_transition: type[State] | None
     cross_state_data: CrossStateData | None
 
-    def __init__(self, name: str, initial_state: type[State], motors: SmartMotorsController):
+    def __init__(self, name: str, initial_state: type[State], motors: SmartMotorsController, cross_state_data: CrossStateData | None = None):
         self.name = name
 
         self.queued_transition = None
-        self.cross_state_data = None
+        self.cross_state_data = cross_state_data
         
         self.initial_state = initial_state
         self.motors = motors
