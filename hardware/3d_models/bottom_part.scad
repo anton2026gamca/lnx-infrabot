@@ -7,7 +7,7 @@ use <motor_bracket.scad>;
 use <motor_driver_bracket.scad>;
 use <kicker.scad>;
 
-module led_holes(diode_d = 7, height = 10, ring_radius = 45, angles = [0:15:359]) {
+module led_holes(diode_d = 9, height = 10, ring_radius = 45, angles = [0:15:359]) {
     for (angle = angles) {
         rotate([0, 0, angle])
             translate([0, ring_radius, 0])
