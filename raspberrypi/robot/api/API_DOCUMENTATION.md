@@ -360,8 +360,31 @@ Get current goal detection result.
   alignment: number,           // -1.0 to 1.0 (center alignment)
   goal_center_x: number | null,
   goal_area: number,
-  distance_mm: number,
-  goal_height_pixels: number
+  distance_mm: number | null,  // may be null if not available
+  goal_height_pixels: number,
+  camera_yaw_deg: number,
+  goals_by_color: {
+    yellow: {
+      goal_detected: boolean,
+      alignment: number,
+      goal_center_x: number | null,
+      goal_area: number,
+      distance_mm: number | null,
+      goal_height_pixels: number,
+      camera_yaw_deg: number,
+    },
+    blue: {
+      goal_detected: boolean,
+      alignment: number,
+      goal_center_x: number | null,
+      goal_area: number,
+      distance_mm: number | null,
+      goal_height_pixels: number,
+      camera_yaw_deg: number,
+    }
+  },
+  enemy_goal_color: "yellow" | "blue",
+  own_goal_color: "yellow" | "blue",
 }
 ```
 
