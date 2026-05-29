@@ -5,6 +5,7 @@ import os
 from robot import profiling, utils
 from robot.api import api_process
 from robot.bluetooth import bluetooth_process
+from robot.display import display_process
 from robot.hardware import hardware_process
 from robot.logic import logic_process
 from robot.vision import camera_capture_process, camera_processing_process
@@ -44,6 +45,7 @@ class Process:
 
 processes: list[Process] = [
     Process("Hardware Process", hardware_process.run),
+    Process("Display Process", display_process.run),
     Process("Camera Capture Process", camera_capture_process.run),
     Process("Camera Processing Process", camera_processing_process.run),
     Process("Logic Process", logic_process.run),
@@ -96,4 +98,3 @@ def stop_all_processes():
             continue
         stop_process(process)
     processes.reverse()
-

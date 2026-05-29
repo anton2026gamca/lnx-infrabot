@@ -11,3 +11,7 @@ python-multipart>=0.0.5
 # Serial communication
 pyserial>=3.5
 
+# Display
+luma.oled>=3.14.0
+Pillow>=11.2.1
+

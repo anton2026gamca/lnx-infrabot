@@ -72,7 +72,7 @@ lnx-infrabot/
 - **Prerequisites:**
     - **Raspberry Pi 5** with **Raspberry Pi OS Lite** installed
 
-1. **Configure UART and Camera**  
+1. **Configure UART, I2C and Camera**  
    Edit `/boot/firmware/config.txt` using a text editor like `nano`:
    ```sh
    sudo nano /boot/firmware/config.txt
@@ -84,10 +84,16 @@ lnx-infrabot/
 
    # Camera
    camera_auto_detect=0
-   dtoverlay=imx708
+   dtoverlay=imx708,cam0
+   dtoverlay=imx708,cam1
    ```
    After editing, press `Ctrl+X` and then `Y` to exit and save.
-   Disable the serial console with `sudo raspi-config` if needed.
+
+   Enable I2C:
+   ```bash
+   sudo raspi-config
+   ```
+   Go to `Interface Options` -> `I2C`, select `Yes` and press `Enter`
 
    ```bash
    sudo reboot
@@ -121,7 +127,8 @@ lnx-infrabot/
 
 4. **Install Dependencies**
    ```bash
-   sudo apt install git python3.13-dev libcap-dev libgl1 libcamera-apps python3-libcamera
+   sudo apt update
+   sudo apt install git python3.13-dev libcap-dev libgl1 libcamera-apps python3-libcamera i2c-tools python3-gpiozero python3-lgpio
    sudo apt install python3-picamera2 --no-install-recommends
    ```
 
@@ -137,7 +144,7 @@ lnx-infrabot/
 6. **Set Up Python Virtual Environment**
    ```bash
    cd raspberrypi
-   python3 -m venv .venv
+   python3 -m venv --system-site-packages .venv
    source .venv/bin/activate
    ```
 
