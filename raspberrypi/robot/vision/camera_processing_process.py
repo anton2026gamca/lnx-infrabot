@@ -388,6 +388,11 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 goal_result = camera_result["goal_result"]
                 goal_results_by_camera[camera_name][goal_color] = goal_result
                 camera_runtime_state[camera_name]["last_goal_results"][goal_color] = goal_result
+
+                other_goal_color = "blue" if goal_color == "yellow" else "yellow"
+                empty_result = _empty_goal_result(goal_result.camera_yaw_deg)
+                goal_results_by_camera[camera_name][other_goal_color] = empty_result
+                camera_runtime_state[camera_name]["last_goal_results"][other_goal_color] = empty_result
                 if goal_color == enemy_goal_color:
                     calibration.update_goal_distance_calibration(goal_result, camera_name)
 
@@ -399,7 +404,6 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
                 all_detections.extend(camera_result["detections"])
 
-            # Keep per-camera shared state fresh even if only one camera delivered a new frame this cycle.
             shared_data.set_camera_ball_data_for_cameras(camera_ball_data_by_camera)
 
             goals_by_color: dict[str, list[GoalDetectionResult]] = {"yellow": [], "blue": []}
