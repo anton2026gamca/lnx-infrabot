@@ -926,6 +926,7 @@ bt_commands = _manager.list()
 bt_command_results = _manager.dict()
 bt_next_command_id = multiprocessing.Value('i', 1)
 bt_process_alive = multiprocessing.Value('b', False)
+bt_enabled = multiprocessing.Value('b', True)
 bt_other_robot_info = _manager.dict()
 bt_lock = profiling.create_profiled_lock("bt_lock")
 
@@ -938,6 +939,16 @@ def set_bluetooth_process_alive(alive: bool) -> None:
 @profile_function
 def get_bluetooth_process_alive() -> bool:
     return bool(bt_process_alive.value)
+
+
+@profile_function
+def set_bluetooth_enabled(enabled: bool) -> None:
+    bt_enabled.value = bool(enabled)
+
+
+@profile_function
+def get_bluetooth_enabled() -> bool:
+    return bool(bt_enabled.value)
 
 
 @profile_function

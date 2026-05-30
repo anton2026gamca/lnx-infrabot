@@ -15,6 +15,7 @@ from luma.core.interface.serial import i2c
 from luma.oled.device import ssd1306
 from PIL import Image, ImageDraw, ImageFont
 
+import robot.bluetooth.utils as bluetooth_utils
 from robot.config import CAMERA_FOV_DEG, LINE_SENSOR_COUNT, LINE_SENSOR_MAX_VALUE, LINE_SENSOR_MIN_VALUE
 from robot.display.rendering import draw_mono_text
 from robot.logic import autonomous_mode
@@ -336,6 +337,7 @@ def _build_main_menu() -> MenuScreen:
             MenuItem("Status", lambda: StatusScreen()),
             MenuItem("Reset Compass", _reset_compass),
             MenuItem(_goal_color_menu_label, _build_goal_color_menu),
+            MenuItem(_bluetooth_menu_label, _build_bluetooth_menu),
             MenuItem(_mode_menu_label, _build_mode_menu),
             MenuItem(_state_machine_menu_label, _build_state_machine_menu),
         ],
@@ -390,6 +392,19 @@ def _build_goal_color_menu() -> MenuScreen:
     return MenuScreen(items, selected_index=selected_index)
 
 
+def _build_bluetooth_menu() -> MenuScreen:
+    options = [True, False]
+    labels = ["Enabled", "Disabled"]
+    current = shared_data.get_bluetooth_enabled()
+    selected_index = 0 if current else 1
+
+    items = [
+        MenuItem(labels[idx], lambda enabled=option: _set_bluetooth_enabled(enabled))
+        for idx, option in enumerate(options)
+    ]
+    return MenuScreen(items, selected_index=selected_index)
+
+
 def _reset_compass() -> Screen:
     shared_data.request_compass_reset()
     return MessageScreen(["Compass reset"])
@@ -410,6 +425,11 @@ def _set_goal_color(color: str) -> Screen:
     return MessageScreen(["Enemy goal:", _goal_color_label(color)])
 
 
+def _set_bluetooth_enabled(enabled: bool) -> Screen:
+    bluetooth_utils.set_bluetooth_enabled(enabled)
+    return MessageScreen(["Bluetooth:", "Enabled" if enabled else "Disabled"])
+
+
 def _mode_menu_label() -> str:
     return f"Mode: {_mode_label(shared_data.get_robot_mode())}"
 
@@ -421,6 +441,10 @@ def _state_machine_menu_label() -> str:
 
 def _goal_color_menu_label() -> str:
     return f"Enemy goal: {_goal_color_label(shared_data.get_goal_color())}"
+
+
+def _bluetooth_menu_label() -> str:
+    return f"BT Comm: {_format_bool(shared_data.get_bluetooth_enabled())}"
 
 
 def _build_status_pages(now: float, line_display: str | None = None) -> list[list[str]]:
@@ -447,6 +471,7 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
     bluetooth_info = shared_data.get_bluetooth_other_robot_info()
     bluetooth_mac_address = bluetooth_info.get("mac_address")
     bluetooth_status = _bluetooth_other_robot_status(bluetooth_mac_address)
+    bluetooth_enabled = _format_bool(shared_data.get_bluetooth_enabled())
 
     return [
         [
@@ -465,8 +490,8 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
             _format_goal_line("O", own_color, own_goal),
         ],
         [
-            f"BT: {bluetooth_status}",
-            f"MAC: {bluetooth_mac_address or '--'}",
+            f"BT Comm: {bluetooth_enabled}",
+            f"State: {bluetooth_status}",
             _bluetooth_other_robot_detail_line(bluetooth_info),
         ],
         [

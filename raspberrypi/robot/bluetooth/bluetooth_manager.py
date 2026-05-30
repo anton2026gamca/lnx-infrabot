@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import errno
 import json
 import logging
 from multiprocessing.managers import DictProxy
 import queue
 import re
 import socket
+import select
 import subprocess
 import threading
 import time
@@ -21,6 +23,7 @@ _AF_BLUETOOTH: int = getattr(socket, "AF_BLUETOOTH")
 _BTPROTO_RFCOMM: int = getattr(socket, "BTPROTO_RFCOMM")
 
 RFCOMM_CHANNEL = 1
+_CONNECT_TIMEOUT_S = 6.0
 
 DEVICE_REGEX = re.compile(r"Device\s+([0-9A-F:]{17})\s+(.+)$")
 
@@ -226,6 +229,32 @@ class BluetoothManager:
 
         return devices
 
+    @staticmethod
+    def _connect_with_timeout(
+        sock: socket.socket,
+        address: tuple[str, int],
+        timeout_s: float,
+    ) -> None:
+        sock.setblocking(False)
+
+        err = sock.connect_ex(address)
+        if err in (0, errno.EISCONN):
+            sock.setblocking(True)
+            return
+
+        if err not in (errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY):
+            raise OSError(err, f"Bluetooth connect failed: {err}")
+
+        _, writable, _ = select.select([], [sock], [], timeout_s)
+        if not writable:
+            raise TimeoutError("Bluetooth connect timed out")
+
+        err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+        if err != 0:
+            raise OSError(err, f"Bluetooth connect failed: {err}")
+
+        sock.setblocking(True)
+
     # --------------------------------------------------------
     # Pairing
     # --------------------------------------------------------
@@ -403,9 +432,7 @@ class BluetoothManager:
                 _BTPROTO_RFCOMM,
             )
 
-            sock.settimeout(10)
-
-            sock.connect((mac_address, RFCOMM_CHANNEL))
+            self._connect_with_timeout(sock, (mac_address, RFCOMM_CHANNEL), _CONNECT_TIMEOUT_S)
 
             self._add_connection(sock, mac_address)
 

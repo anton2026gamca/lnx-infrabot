@@ -80,6 +80,7 @@ def _create_calibration_data() -> dict:
                 "by_camera": camera_settings_by_camera,
             },
             "bluetooth": {
+                "enabled": shared_data.get_bluetooth_enabled(),
                 "other_robot": shared_data.get_bluetooth_other_robot_info(),
             },
         }
@@ -233,6 +234,9 @@ def load_calibration_data() -> None:
 
         bluetooth_data = calibrations.get("bluetooth", {}) if isinstance(calibrations, dict) else {}
         if bluetooth_data:
+            bluetooth_enabled = bluetooth_data.get("enabled")
+            if isinstance(bluetooth_enabled, bool):
+                shared_data.set_bluetooth_enabled(bluetooth_enabled)
             other_robot = bluetooth_data.get("other_robot")
             if isinstance(other_robot, dict):
                 shared_data.set_bluetooth_other_robot_info(other_robot)

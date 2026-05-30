@@ -11,6 +11,14 @@ from robot.profiling import profile_function, sleep
 
 _COMMAND_POLL_INTERVAL_S = 0.05
 _AUTO_CONNECT_INTERVAL_S = 10.0
+_COMMANDS_REQUIRE_ENABLED = {
+    "connect",
+    "send_message",
+    "pair_device",
+    "unpair_device",
+    "list_pairable_devices",
+    "set_pairing_mode",
+}
 
 
 def _serialize_message(message: BluetoothMessage, sender_mac: str) -> dict:
@@ -43,6 +51,10 @@ def _execute_command(manager: BluetoothManager, command: dict) -> None:
     payload = command.get("payload", {}) or {}
 
     try:
+        if command_type in _COMMANDS_REQUIRE_ENABLED and not shared_data.get_bluetooth_enabled():
+            shared_data.set_bluetooth_command_result(command_id, False, error="Bluetooth is disabled")
+            return
+
         if command_type == "connect":
             mac_address = payload.get("mac_address")
             if not mac_address:
@@ -153,7 +165,9 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     manager = BluetoothManager()
 
     try:
-        manager.start_server()
+        bluetooth_enabled = shared_data.get_bluetooth_enabled()
+        if bluetooth_enabled:
+            manager.start_server()
 
         shared_data.set_bluetooth_process_alive(True)
         _refresh_shared_state(manager)
@@ -161,19 +175,13 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         auto_connect_thread: threading.Thread | None = None
         last_auto_connect_attempt = 0.0
 
-        def _start_auto_connect(mac_address: str) -> None:
-            nonlocal auto_connect_thread, last_auto_connect_attempt
-
-            if auto_connect_thread and auto_connect_thread.is_alive():
-                return
-
-            last_auto_connect_attempt = time.time()
-
+        def _start_auto_connect(mac_address: str) -> threading.Thread:
             def _runner(target_mac: str = mac_address) -> None:
                 manager.connect(target_mac)
 
-            auto_connect_thread = threading.Thread(target=_runner, daemon=True)
-            auto_connect_thread.start()
+            thread = threading.Thread(target=_runner, daemon=True)
+            thread.start()
+            return thread
 
         while not stop_event.is_set():
             commands = shared_data.pop_bluetooth_commands()
@@ -183,14 +191,28 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
             _drain_incoming_messages(manager)
             _refresh_shared_state(manager)
 
-            if auto_connect_thread and not auto_connect_thread.is_alive():
+            if auto_connect_thread is not None and not auto_connect_thread.is_alive():
                 auto_connect_thread = None
 
-            other_robot = shared_data.get_bluetooth_other_robot_info()
-            target_mac = _normalize_mac(other_robot.get("mac_address"))
-            if target_mac and not manager.is_connected(target_mac):
-                if time.time() - last_auto_connect_attempt >= _AUTO_CONNECT_INTERVAL_S:
-                    _start_auto_connect(target_mac)
+            bluetooth_enabled = shared_data.get_bluetooth_enabled()
+            if bluetooth_enabled:
+                if not manager.running:
+                    manager.start_server()
+
+                other_robot = shared_data.get_bluetooth_other_robot_info()
+                target_mac = _normalize_mac(other_robot.get("mac_address"))
+                if target_mac and not manager.is_connected(target_mac):
+                    if time.time() - last_auto_connect_attempt >= _AUTO_CONNECT_INTERVAL_S:
+                        if auto_connect_thread is None:
+                            auto_connect_thread = _start_auto_connect(target_mac)
+                            last_auto_connect_attempt = time.time()
+            else:
+                if manager.running:
+                    manager.stop_server()
+                other_robot = shared_data.get_bluetooth_other_robot_info()
+                target_mac = _normalize_mac(other_robot.get("mac_address"))
+                if target_mac and manager.is_connected(target_mac):
+                    manager.disconnect(target_mac)
 
             sleep(_COMMAND_POLL_INTERVAL_S)
 

@@ -106,8 +106,17 @@ def get_other_robot_info() -> dict:
     return shared_data.get_bluetooth_other_robot_info()
 
 
+def get_bluetooth_enabled() -> bool:
+    return shared_data.get_bluetooth_enabled()
+
+
 def set_other_robot_info(info: dict) -> None:
     shared_data.set_bluetooth_other_robot_info(info or {})
+    calibration.save_calibration_data()
+
+
+def set_bluetooth_enabled(enabled: bool) -> None:
+    shared_data.set_bluetooth_enabled(enabled)
     calibration.save_calibration_data()
 
 

@@ -1256,6 +1256,7 @@ async def compute_hsv_from_regions(sid: str, data: dict | None = None):
 async def get_bluetooth_state(sid: str, data: dict | None = None):
     try:
         return _ok(
+            bluetooth_enabled=bluetooth_utils.get_bluetooth_enabled(),
             process_alive=bluetooth_utils.is_bluetooth_process_alive(),
             local_device=bluetooth_utils.get_local_device_info(),
             connected_devices=bluetooth_utils.get_connected_devices(),
@@ -1264,6 +1265,21 @@ async def get_bluetooth_state(sid: str, data: dict | None = None):
         )
     except Exception as exc:
         logger.error(f"get_bluetooth_state: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_bluetooth_enabled(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        enabled = d.get("enabled")
+        if not isinstance(enabled, bool):
+            return _err("enabled must be a boolean")
+
+        bluetooth_utils.set_bluetooth_enabled(enabled)
+        return _ok(bluetooth_enabled=bluetooth_utils.get_bluetooth_enabled())
+    except Exception as exc:
+        logger.error(f"set_bluetooth_enabled: {exc}", exc_info=True)
         return _err("Internal server error")
 
 

@@ -1303,6 +1303,7 @@ Get Bluetooth process status, local device identity, connected devices, paired d
 ```typescript
 {
   status: "ok",
+  bluetooth_enabled: boolean,
   process_alive: boolean,
   local_device: {
     device_id?: string,
@@ -1334,6 +1335,29 @@ Get Bluetooth process status, local device identity, connected devices, paired d
     ip_address?: string,
     note?: string
   }
+}
+```
+
+### `set_bluetooth_enabled`
+
+Enable or disable Bluetooth usage. When disabled, auto-connect is paused and active connections are closed.
+
+**Request:**
+```typescript
+{
+  event: "set_bluetooth_enabled",
+  data: {
+    enabled: boolean
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  bluetooth_enabled?: boolean,
+  error?: string
 }
 ```
 
