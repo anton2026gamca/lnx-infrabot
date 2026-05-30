@@ -570,7 +570,6 @@ class GoalkeeperApproachState(State):
     @profile_function
     def on_enter(self, state_machine: StateMachine) -> None:
         self._goal_line_pushoff_ticks = 0
-        logger.info("Goalkeeper entering APPROACH state, navigating to defend position")
 
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:
@@ -627,9 +626,6 @@ class GoalkeeperApproachState(State):
         # Ready to defend
         # -------------------------------------------------
 
-        logger.info(f"Goalkeeper approach: distance to defend position = {distance:.1f} mm")
-        logger.info(f"Goalkeeper approach: own goal detected = {data.sensors.own_goal.detected}, own goal distance = {data.sensors.own_goal.distance_mm} mm")
-
         if (
             data.sensors.own_goal.detected
             and distance <= GOALKEEPER_POSITION_TOLERANCE_MM
@@ -680,7 +676,6 @@ class GoalkeeperDefendState(State):
     def on_enter(self, state_machine: StateMachine) -> None:
         self._goal_lost_ticks = 0
         self._goal_line_pushoff_ticks = 0
-        logger.info("Goalkeeper entering DEFEND state, actively defending the goal")
 
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:

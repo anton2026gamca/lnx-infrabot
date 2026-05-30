@@ -250,15 +250,6 @@ def get_position_estimate() -> PositionEstimate | None:
     y_mm = max(0.0, min(field_length_mm, y_mm))
 
     confidence = min(1.0, sum_weights / len(candidates))
-    previous = shared_data.get_last_position_estimate()
-    if previous is not None:
-        prev_x = float(previous.get("x_mm", x_mm))
-        prev_y = float(previous.get("y_mm", y_mm))
-        distance_delta = math.sqrt((x_mm - prev_x) ** 2 + (y_mm - prev_y) ** 2)
-        smoothing_alpha = 0.62 if distance_delta < 450.0 else 0.36
-        x_mm = prev_x + (x_mm - prev_x) * smoothing_alpha
-        y_mm = prev_y + (y_mm - prev_y) * smoothing_alpha
-        confidence = min(1.0, (confidence * 0.75) + (float(previous.get("confidence", 0.0)) * 0.25))
 
     shared_data.set_last_position_estimate(x_mm, y_mm, confidence)
     return PositionEstimate(x_mm=x_mm, y_mm=y_mm, confidence=confidence)
