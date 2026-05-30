@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import math
 import multiprocessing.synchronize
-from operator import contains
 import os
 import socket
 import time
@@ -23,6 +22,7 @@ from robot.multiprocessing import shared_data
 from robot.profiling import sleep
 from robot.robot import RobotMode
 from robot.vision import GoalDetectionResult
+
 
 DISPLAY_WIDTH = 128
 DISPLAY_HEIGHT = 32
@@ -54,7 +54,7 @@ LOCK_ICON_MARGIN_X = 1
 LOCK_ICON_MARGIN_Y = 1
 
 IP_CACHE_TTL_S = 5.0
-IP_FALLBACK = "---"
+IP_FALLBACK = "--"
 
 MODE_DISPLAY_TITLE = "LNX InfraBot"
 
@@ -338,11 +338,28 @@ def _build_main_menu() -> MenuScreen:
             MenuItem("Status", lambda: StatusScreen()),
             MenuItem("Reset Compass", _reset_compass),
             MenuItem(_goal_color_menu_label, _build_goal_color_menu),
-            MenuItem(_bluetooth_menu_label, _build_bluetooth_menu),
             MenuItem(_mode_menu_label, _build_mode_menu),
             MenuItem(_state_machine_menu_label, _build_state_machine_menu),
+            _build_bool_menu_item("BT Comm", shared_data.get_bluetooth_enabled, _set_bluetooth_enabled),
+            MenuItem("Other Settings", _build_other_settings_menu)
         ],
     )
+
+
+def _build_bool_menu(current: bool, _set: Callable[[bool], Screen | None]) -> MenuScreen:
+    options = [True, False]
+    labels = ["Enabled", "Disabled"]
+    selected_index = 0 if current else 1
+
+    items = [
+        MenuItem(labels[idx], lambda enabled=option: _set(enabled))
+        for idx, option in enumerate(options)
+    ]
+    return MenuScreen(items, selected_index)
+
+
+def _build_bool_menu_item(label_prefix: str, _get: Callable[[], bool], _set: Callable[[bool], Screen | None]) -> MenuItem:
+    return MenuItem(lambda: f"{label_prefix}: {_format_bool(_get())}", lambda: _build_bool_menu(_get(), _set))
 
 
 def _build_mode_menu() -> MenuScreen:
@@ -368,11 +385,11 @@ def _build_state_machine_menu() -> MenuScreen:
     machines = list(autonomous_mode.get_available_state_machines().keys())
     machines.sort()
 
-    current = shared_data.get_current_state_machine_name()
-    selected_index = machines.index(current) if current in machines else 0
-
     whitelist = ["Attacker State Machine", "Goalkeeper State Machine"]
     machines = [m for m in machines if m in whitelist]
+
+    current = shared_data.get_current_state_machine_name()
+    selected_index = machines.index(current) if current in machines else 0
 
     items = [
         MenuItem(name, lambda machine=name: _set_state_machine(machine))
@@ -393,17 +410,12 @@ def _build_goal_color_menu() -> MenuScreen:
     return MenuScreen(items, selected_index=selected_index)
 
 
-def _build_bluetooth_menu() -> MenuScreen:
-    options = [True, False]
-    labels = ["Enabled", "Disabled"]
-    current = shared_data.get_bluetooth_enabled()
-    selected_index = 0 if current else 1
-
-    items = [
-        MenuItem(labels[idx], lambda enabled=option: _set_bluetooth_enabled(enabled))
-        for idx, option in enumerate(options)
-    ]
-    return MenuScreen(items, selected_index=selected_index)
+def _build_other_settings_menu() -> MenuScreen:
+    return MenuScreen([
+        _build_bool_menu_item("Rotation Corr", shared_data.get_rotation_correction_enabled, _set_rotation_correction_enabled),
+        _build_bool_menu_item("Line Avoiding", shared_data.get_line_avoiding_enabled, _set_line_avoiding_enabled),
+        _build_bool_menu_item("Pos Speed", shared_data.get_position_based_speed_enabled, _set_position_based_speed_enabled),
+    ])
 
 
 def _reset_compass() -> Screen:
@@ -431,6 +443,21 @@ def _set_bluetooth_enabled(enabled: bool) -> Screen:
     return MessageScreen(["Bluetooth:", "Enabled" if enabled else "Disabled"])
 
 
+def _set_rotation_correction_enabled(enabled: bool) -> Screen:
+    shared_data.set_rotation_correction_enabled(enabled)
+    return MessageScreen(["Rotation Correction:", "Enabled" if enabled else "Disabled"])
+
+
+def _set_line_avoiding_enabled(enabled: bool) -> Screen:
+    shared_data.set_line_avoiding_enabled(enabled)
+    return MessageScreen(["Line Avoiding:", "Enabled" if enabled else "Disabled"])
+
+
+def _set_position_based_speed_enabled(enabled: bool) -> Screen:
+    shared_data.set_position_based_speed_enabled(enabled)
+    return MessageScreen(["Pos Based Speed:", "Enabled" if enabled else "Disabled"])
+
+
 def _mode_menu_label() -> str:
     return f"Mode: {_mode_label(shared_data.get_robot_mode())}"
 
@@ -444,10 +471,6 @@ def _goal_color_menu_label() -> str:
     return f"Enemy goal: {_goal_color_label(shared_data.get_goal_color())}"
 
 
-def _bluetooth_menu_label() -> str:
-    return f"BT Comm: {_format_bool(shared_data.get_bluetooth_enabled())}"
-
-
 def _build_status_pages(now: float, line_display: str | None = None) -> list[list[str]]:
     ip_address = _get_ip_address(now)
     heading = _heading_text()
@@ -456,6 +479,7 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
     main_switch = _format_bool(running_state.main_switch_value if running_state else None)
     bt_enabled = _format_bool(running_state.bt_module_enabled if running_state else None)
     bt_state = _format_bool(running_state.bt_module_value if running_state else None)
+    running = _format_bool(running_state.running if running_state else None)
 
     _, ir_angle, ir_distance = shared_data.get_hardware_compass_ir()
     ir_detected = ir_angle != 999.0 and ir_distance != 0.0
@@ -477,7 +501,7 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
     return [
         [
             f"IP: {ip_address}",
-            f"Head: {heading}",
+            f"Heading: {heading}",
             line_display,
         ],
         [
@@ -497,9 +521,9 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
             _bluetooth_other_robot_detail_line(bluetooth_info),
         ],
         [
-            f"Switch: {main_switch}",
-            f"BT Mdl: {bt_enabled}",
-            f"BT Val: {bt_state}",
+            f"Switch: {_format_fixed_len(main_switch, 3)}",
+            f"BT Mdl: {_format_fixed_len(bt_enabled, 3)}  ->  {running}",
+            f"BT Val: {_format_fixed_len(bt_state, 3)}",
         ],
     ]
 
@@ -515,6 +539,12 @@ def _format_bool(value: bool | None) -> str:
     if value is None:
         return "--"
     return "ON" if value else "OFF"
+
+
+def _format_fixed_len(str: str, length: int, ratio: float = 1.0) -> str:
+    add = length - len(str)
+    return math.floor((1.0 - ratio) * add) * " " + str + math.ceil(ratio * add) * " "
+
 
 
 def _bluetooth_other_robot_status(mac_address: str | None) -> str:
@@ -540,7 +570,7 @@ def _bluetooth_other_robot_detail_line(info: dict) -> str:
 
 def _format_ball_line(label: str, angle: float, distance: float, detected: bool) -> str:
     if not detected:
-        return f"{label}: ND"
+        return f"{label}: --"
     angle_text = _format_angle(angle)
     distance_text = _format_distance(distance)
     return f"{label}: {angle_text} {distance_text}"
@@ -549,11 +579,11 @@ def _format_ball_line(label: str, angle: float, distance: float, detected: bool)
 def _format_angle(angle: float) -> str:
     if angle == 999.0:
         return "--"
-    return f"{int(round(angle))}d"
+    return f"{int(round(angle % 360))}d"
 
 
 def _format_distance(distance: float | None) -> str:
-    if distance is None or distance <= 0:
+    if distance is None or distance < 0:
         return "--"
     if distance >= 1000.0:
         return f"{distance / 1000.0:.1f}m"
@@ -566,26 +596,18 @@ def _format_position_mm(value: float | None) -> str:
     return f"{int(round(value))}mm"
 
 
-def _format_confidence(confidence: float | None) -> str:
-    if confidence is None:
-        return "--"
-    return f"{int(round(max(0.0, min(confidence, 1.0)) * 100))}%"
-
-
 def _position_estimate_lines() -> list[str]:
     estimate = shared_data.get_last_position_estimate()
     if not estimate:
-        return ["Position", "X: -- Y: --", "Conf: --"]
+        return ["Position", "X: --    Y: --   "]
 
     x_mm = estimate.get("x_mm")
     y_mm = estimate.get("y_mm")
-    confidence = estimate.get("confidence")
 
-    x_text = _format_position_mm(x_mm if isinstance(x_mm, (int, float)) else None)
-    y_text = _format_position_mm(y_mm if isinstance(y_mm, (int, float)) else None)
-    conf_text = _format_confidence(confidence if isinstance(confidence, (int, float)) else None)
+    x_text = _format_fixed_len(_format_position_mm(x_mm if isinstance(x_mm, (int, float)) else None), 5)
+    y_text = _format_fixed_len(_format_position_mm(y_mm if isinstance(y_mm, (int, float)) else None), 5)
 
-    return ["Position", f"X: {x_text} Y: {y_text}", f"Conf: {conf_text}"]
+    return ["Position", f"X: {x_text} Y: {y_text}"]
 
 
 def _line_detection_display() -> tuple[str, LineDisplay]:
