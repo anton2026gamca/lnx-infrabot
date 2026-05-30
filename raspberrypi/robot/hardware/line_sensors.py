@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from robot.multiprocessing import shared_data
 from robot.profiling import profile_function
 
@@ -25,4 +27,3 @@ def update_line_detected(data: ParsedTeensyData) -> None:
     with shared_data.line_detected_lock:
         for i in range(LINE_SENSOR_COUNT):
             shared_data.line_detected[i] = detected[i]
-

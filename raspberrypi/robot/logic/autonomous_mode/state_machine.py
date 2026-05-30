@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 import time
 
@@ -74,4 +76,3 @@ class StateMachine:
         self.current_state = self.queued_transition()
         self.current_state.on_enter(self)
         self.queued_transition = None
-

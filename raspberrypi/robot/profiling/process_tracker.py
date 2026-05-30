@@ -2,6 +2,8 @@
 Process tracker for registering process lifecycle events.
 """
 
+from __future__ import annotations
+
 import os
 from .collector import get_collector
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 import time
 
@@ -206,4 +208,3 @@ class SmartMotorsController(MotorsController):
         self.line_avoidance_active = False
         self.line_avoidance_direction = 0.0
         self.recently_crossed_angles = []
-

@@ -3,6 +3,8 @@ Decorator for selective function profiling.
 Use @profile_function on functions you want to profile.
 """
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 import asyncio
 import functools

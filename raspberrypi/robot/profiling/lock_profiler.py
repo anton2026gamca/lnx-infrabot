@@ -3,6 +3,8 @@ Lock wrapper for profiling lock contention and acquisition times.
 Tracks which processes are waiting on which locks and for how long.
 """
 
+from __future__ import annotations
+
 import multiprocessing
 import time
 import os
@@ -100,4 +102,3 @@ class ProfiledLock:
 
 def create_profiled_lock(name: str | None = None) -> ProfiledLock:
     return ProfiledLock(name)
-

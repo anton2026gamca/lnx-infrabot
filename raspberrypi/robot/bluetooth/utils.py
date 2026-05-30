@@ -4,6 +4,8 @@ This module is intentionally process-safe and communicates with the dedicated
 Bluetooth process via shared_data queues/state.
 """
 
+from __future__ import annotations
+
 import time
 
 from robot import calibration

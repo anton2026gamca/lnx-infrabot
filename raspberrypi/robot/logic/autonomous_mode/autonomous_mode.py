@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from robot.multiprocessing import shared_data
 from robot.profiling import profile_function
 from . import state_machines
@@ -59,4 +61,3 @@ def _set_current_state_machine_internal(name: str) -> None:
         shared_data.set_current_state_machine_name(name)
     else:
         logger.warning(f"State machine with name '{name}' not found")
-

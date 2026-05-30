@@ -138,4 +138,3 @@ DEFAULT_BALL_CALIBRATION_HSV = [5, 150, 150, 25, 255, 255]  # [h_min,s_min,v_min
 # --- Camera-based ball tracking ---
 # Enable using camera ball detection as a data source
 AUTO_CAMERA_BALL_TRACKING_ENABLED = True
-

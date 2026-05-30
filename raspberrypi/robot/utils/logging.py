@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import sys
 import queue
@@ -138,4 +140,3 @@ def get_logs(since_id: int = 0) -> tuple[list[dict], int]:
     last_id = _logs_buffer[-1]["id"] if _logs_buffer else 0
 
     return items, last_id
-

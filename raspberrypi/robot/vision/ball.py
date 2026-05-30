@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import cv2
 import math
 import numpy as np

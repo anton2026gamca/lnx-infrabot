@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from robot import utils
 from robot.calibration.data_manager import save_calibration_data
 from robot.hardware import line_sensors

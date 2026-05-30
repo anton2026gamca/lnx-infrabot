@@ -1,5 +1,7 @@
 """Queue-based cross-process collector for profiling events."""
 
+from __future__ import annotations
+
 import json
 import multiprocessing
 import os

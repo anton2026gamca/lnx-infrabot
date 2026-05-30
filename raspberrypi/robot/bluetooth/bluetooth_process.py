@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import multiprocessing.synchronize
 from robot.bluetooth.bluetooth_manager import BluetoothManager, BluetoothMessage
