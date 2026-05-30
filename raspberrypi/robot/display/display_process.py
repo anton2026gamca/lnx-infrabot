@@ -177,15 +177,16 @@ class MessageScreen(Screen):
 
 
 class ModeDisplayScreen(Screen):
-    def __init__(self, show_lock: bool = True) -> None:
+    def __init__(self, show_lock: bool = False, show_down: bool = False) -> None:
         self._show_lock = show_lock
+        self._show_down = show_down
 
     def handle_event(self, event: str) -> Screen | None:
         return None
 
     def render(self, now: float, max_chars: int) -> tuple[list[str], int | None, RenderHints]:
         lines = _mode_display_lines(max_chars)
-        return _pad_lines(lines), None, RenderHints(centered=True, show_lock=self._show_lock, show_down=self._show_lock)
+        return _pad_lines(lines), None, RenderHints(centered=True, show_lock=self._show_lock, show_down=self._show_down)
 
 
 class RepeatButton:
@@ -231,8 +232,8 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger) -
     buttons = _init_buttons()
 
     main_menu = _build_main_menu()
-    screen_stack: list[Screen] = [main_menu, ModeDisplayScreen(show_lock=True)]
-    screensaver = ModeDisplayScreen(show_lock=True)
+    screen_stack: list[Screen] = [main_menu, ModeDisplayScreen(show_down=True)]
+    screensaver = ModeDisplayScreen(show_down=True)
 
     last_frame: tuple[object, ...] | None = None
     last_input_at = time.monotonic()
@@ -247,7 +248,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger) -
             lines = _mode_display_lines(max_chars)
             frame = ("mode", tuple(lines))
             if frame != last_frame:
-                _render_centered_frame(device, font, lines)
+                _render_centered_frame(device, font, lines, RenderHints(show_lock=True))
                 last_frame = frame
             sleep(0.05)
             continue
