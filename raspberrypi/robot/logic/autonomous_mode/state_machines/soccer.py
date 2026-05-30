@@ -65,11 +65,14 @@ GOAL_SEARCH_ROTATE_SPEED = 1.0
 
 # ===================== GOALKEEPER SETTINGS =====================
 
-# Distance from our goal centre while defending
-GOALKEEPER_DEFEND_RADIUS_MM = 550.0
+# Switch between straight line and arc movement
+GOALKEEPER_ARC_START_ANGLE_DEG = 45.0
 
-# Smaller radius when protecting corners/posts
-GOALKEEPER_CORNER_RADIUS_MM = 300.0
+# Distance from the goal line when tracking in a straight line
+GOALKEEPER_DEFEND_LINE_DISTANCE_MM = 450.0
+
+# Distance from our goal center while defending
+GOALKEEPER_DEFEND_ARC_RADIUS_MM = 450.0
 
 # Maximum sideways movement angle on the defend arc
 GOALKEEPER_MAX_ARC_ANGLE_DEG = 70.0
@@ -91,15 +94,8 @@ GOALKEEPER_APPROACH_MAX_SPEED = 1.0
 GOALKEEPER_DEFEND_MAX_SPEED = 0.7
 GOALKEEPER_RECOVER_SPEED = 0.35
 
-# Corner detection
-GOALKEEPER_CORNER_START_ANGLE_DEG = 70.0
-
-# Rotation
-GOALKEEPER_BALL_ROTATE_GAIN = 0.02
-GOALKEEPER_GOAL_ALIGN_ROTATE_GAIN = 0.4
-
 # Goal-line protection
-GOALKEEPER_GOAL_LINE_SENSOR_IDX = 6
+GOALKEEPER_GOAL_LINE_SENSORS_IDX = [0, 1, 2, 9, 10, 11]
 GOALKEEPER_GOAL_LINE_PUSHOFF_TICKS = 12
 GOALKEEPER_GOAL_LINE_PUSHOFF_SPEED = 0.6
 
@@ -169,8 +165,9 @@ def _global_to_local_angle_deg(global_angle_deg: float, heading_deg: float) -> f
 
 @profile_function
 def _goalkeeper_goal_line_sensor_fired(lines_detected: list[bool]) -> bool:
-    if GOALKEEPER_GOAL_LINE_SENSOR_IDX < len(lines_detected):
-        return lines_detected[GOALKEEPER_GOAL_LINE_SENSOR_IDX]
+    for idx in GOALKEEPER_GOAL_LINE_SENSORS_IDX:
+        if idx < len(lines_detected) and lines_detected[idx]:
+            return True
     return False
 
 
@@ -204,6 +201,7 @@ class LinesData:
     detected: list[bool]
     enter_avoiding_state: bool
     detection_history: list[tuple[list[bool], float]] = field(default_factory=list)  # History of recent detections with timestamps
+    raw_detected: list[bool] = field(default_factory=list)
 
 
 @dataclass
@@ -287,7 +285,9 @@ def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
 def _update_lines_data(state_machine: StateMachine) -> LinesData:
     prev_data = state_machine.cross_state_data.lines if isinstance(state_machine.cross_state_data, SoccerStateMachineData) else None
 
-    detected = line_sensors.get_line_detected()
+    raw_detected = line_sensors.get_line_detected()
+    detected = raw_detected
+
     enter_avoiding_state = any(detected) and shared_data.get_line_avoiding_enabled()
     
     current_time = time.time()
@@ -300,15 +300,19 @@ def _update_lines_data(state_machine: StateMachine) -> LinesData:
     return LinesData(
         detected=detected,
         enter_avoiding_state=enter_avoiding_state,
-        detection_history=history
+        detection_history=history,
+        raw_detected=raw_detected
     )
 
 @profile_function
 def _update_cross_state_data(state_machine: StateMachine, is_goalkeeper: bool | None = None) -> SoccerStateMachineData:
+    is_goalkeeper = is_goalkeeper if is_goalkeeper is not None else (isinstance(state_machine.cross_state_data, SoccerStateMachineData) and state_machine.cross_state_data.is_goalkeeper)
+    sensors = _update_sensors_data(state_machine)
+    lines = _update_lines_data(state_machine)
     data = SoccerStateMachineData(
-        sensors=_update_sensors_data(state_machine),
-        lines=_update_lines_data(state_machine),
-        is_goalkeeper=is_goalkeeper if is_goalkeeper is not None else (isinstance(state_machine.cross_state_data, SoccerStateMachineData) and state_machine.cross_state_data.is_goalkeeper)
+        sensors=sensors,
+        lines=lines,
+        is_goalkeeper=is_goalkeeper
     )
     state_machine.cross_state_data = data
     return data
@@ -576,7 +580,7 @@ class GoalkeeperApproachState(State):
         # Goal line protection
         # -------------------------------------------------
 
-        if _goalkeeper_goal_line_sensor_fired(data.lines.detected):
+        if _goalkeeper_goal_line_sensor_fired(data.lines.raw_detected):
             self._goal_line_pushoff_ticks = GOALKEEPER_GOAL_LINE_PUSHOFF_TICKS
 
         if self._goal_line_pushoff_ticks > 0:
@@ -612,7 +616,7 @@ class GoalkeeperApproachState(State):
             return
 
         target_x = 0.0
-        target_y = FIELD_LENGTH_MM - GOALKEEPER_DEFEND_RADIUS_MM
+        target_y = FIELD_LENGTH_MM - GOALKEEPER_DEFEND_ARC_RADIUS_MM
 
         delta_x = target_x - position.x_mm
         delta_y = target_y - position.y_mm
@@ -686,7 +690,7 @@ class GoalkeeperDefendState(State):
         # Goal line protection
         # -------------------------------------------------
 
-        if _goalkeeper_goal_line_sensor_fired(data.lines.detected):
+        if _goalkeeper_goal_line_sensor_fired(data.lines.raw_detected):
             self._goal_line_pushoff_ticks = GOALKEEPER_GOAL_LINE_PUSHOFF_TICKS
 
         if self._goal_line_pushoff_ticks > 0:
@@ -748,30 +752,44 @@ class GoalkeeperDefendState(State):
         if ball_angle is None:
             ball_angle = 0.0
 
+        abs_ball_angle = abs(ball_angle)
+
         arc_angle = _clamp(
             ball_angle * GOALKEEPER_BALL_ANGLE_TO_ARC_RATIO,
             -GOALKEEPER_MAX_ARC_ANGLE_DEG,
             GOALKEEPER_MAX_ARC_ANGLE_DEG,
         )
 
-        radius = GOALKEEPER_DEFEND_RADIUS_MM
+        if abs_ball_angle > GOALKEEPER_ARC_START_ANGLE_DEG:
+            # -------------------------------------------------
+            # Arc target
+            # -------------------------------------------------
 
-        if abs(ball_angle) >= GOALKEEPER_CORNER_START_ANGLE_DEG:
-            radius = GOALKEEPER_CORNER_RADIUS_MM
+            radius = GOALKEEPER_DEFEND_ARC_RADIUS_MM
 
-        # -------------------------------------------------
-        # Arc target
-        # -------------------------------------------------
+            target_x = (
+                math.sin(math.radians(arc_angle))
+                * radius
+            )
 
-        target_x = (
-            math.sin(math.radians(arc_angle))
-            * radius
-        )
+            target_y = (
+                FIELD_LENGTH_MM
+                - math.cos(math.radians(arc_angle)) * radius
+            )
+        else:
+            # -------------------------------------------------
+            # Line target (parallel to the goal line)
+            # -------------------------------------------------
 
-        target_y = (
-            FIELD_LENGTH_MM
-            - math.cos(math.radians(arc_angle)) * radius
-        )
+            target_x = (
+                math.tan(math.radians(arc_angle))
+                * GOALKEEPER_DEFEND_LINE_DISTANCE_MM
+            )
+
+            target_y = (
+                FIELD_LENGTH_MM
+                - GOALKEEPER_DEFEND_LINE_DISTANCE_MM
+            )
 
         # -------------------------------------------------
         # Move toward target

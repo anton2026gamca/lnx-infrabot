@@ -106,10 +106,12 @@ def stop_goal_distance_calibration() -> dict:
         
         if initial_height is None or line_height is None:
             shared_data.goal_distance_calibration_active.value = False
+            logger.warning("Calibration incomplete: goal not detected")
             return {'success': False, 'error': 'Calibration incomplete: goal not detected at both positions'}
         
         if initial_height <= 0 or line_height <= 0:
             shared_data.goal_distance_calibration_active.value = False
+            logger.warning(f"Invalid goal heights detected: initial={initial_height}, line={line_height}")
             return {'success': False, 'error': 'Invalid goal height detected'}
         
         focal1 = (initial_height * initial_distance) / GOAL_HEIGHT_MM
@@ -161,7 +163,7 @@ def update_goal_distance_calibration(goal_result: GoalDetectionResult, camera: s
             return
         if shared_data.goal_distance_calibration_data.get('camera', 'front') != camera:
             return
-        
+
         phase = shared_data.goal_distance_calibration_data.get('phase')
         initial_height = shared_data.goal_distance_calibration_data.get('initial_height_pixels')
         
@@ -175,7 +177,4 @@ def update_goal_distance_calibration(goal_result: GoalDetectionResult, camera: s
             logger.info(f"Initial goal height recorded: {initial_height:.2f} pixels. Now drive toward the goal.")
         
         if phase == 'driving':
-            line_detected = line_sensors.get_line_detected()
-            if any(line_detected) and goal_result.detected and goal_result.height_pixels > 0:
-                shared_data.goal_distance_calibration_data['line_height_pixels'] = goal_result.height_pixels
-                logger.info(f"Line detected! Recorded goal height: {goal_result.height_pixels:.2f} pixels.")
+            shared_data.goal_distance_calibration_data['line_height_pixels'] = goal_result.height_pixels
