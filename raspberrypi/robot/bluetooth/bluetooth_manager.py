@@ -190,6 +190,10 @@ class BluetoothManager:
 
         self.message_queue: queue.Queue[tuple[str, BluetoothMessage]] = queue.Queue()
 
+    @staticmethod
+    def _normalize_mac(mac_address: str) -> str:
+        return mac_address.strip().upper()
+
     # --------------------------------------------------------
     # bluetoothctl helpers
     # --------------------------------------------------------
@@ -367,7 +371,7 @@ class BluetoothManager:
             try:
                 sock, addr = self.server_socket.accept()
 
-                mac = addr[0]
+                mac = self._normalize_mac(addr[0])
 
                 logger.info(f"Incoming connection from {mac}")
 
@@ -386,6 +390,13 @@ class BluetoothManager:
 
     def connect(self, mac_address: str) -> bool:
         try:
+            if not isinstance(mac_address, str) or not mac_address.strip():
+                logger.error("Connect failed: mac_address is required")
+                return False
+            mac_address = self._normalize_mac(mac_address)
+            if self.is_connected(mac_address):
+                return True
+
             sock = socket.socket(
                 _AF_BLUETOOTH,
                 socket.SOCK_STREAM,
@@ -406,8 +417,19 @@ class BluetoothManager:
             logger.error(f"Connect failed: {e}")
             return False
 
+    def is_connected(self, mac_address: str) -> bool:
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return False
+        mac_address = self._normalize_mac(mac_address)
+        with self.lock:
+            return mac_address in self.connections
+
     def disconnect(self, mac_address: str) -> None:
-        conn = self.connections.get(mac_address)
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return
+        mac_address = self._normalize_mac(mac_address)
+        with self.lock:
+            conn = self.connections.get(mac_address)
 
         if conn:
             conn.close()
@@ -417,17 +439,23 @@ class BluetoothManager:
         sock: socket.socket,
         mac_address: str,
     ) -> None:
+        mac_address = self._normalize_mac(mac_address)
         self.disconnect(mac_address)
 
-        self.connections[mac_address] = RFCOMMConnection(
-            sock=sock,
-            mac_address=mac_address,
-            on_message=self._handle_message,
-            on_disconnect=self._handle_disconnect,
-        )
+        with self.lock:
+            self.connections[mac_address] = RFCOMMConnection(
+                sock=sock,
+                mac_address=mac_address,
+                on_message=self._handle_message,
+                on_disconnect=self._handle_disconnect,
+            )
 
     def _handle_disconnect(self, mac_address: str) -> None:
-        self.connections.pop(mac_address, None)
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return
+        mac_address = self._normalize_mac(mac_address)
+        with self.lock:
+            self.connections.pop(mac_address, None)
 
     # --------------------------------------------------------
     # Messaging
@@ -438,7 +466,11 @@ class BluetoothManager:
         mac_address: str,
         message: BluetoothMessage,
     ) -> bool:
-        conn = self.connections.get(mac_address)
+        if not isinstance(mac_address, str) or not mac_address.strip():
+            return False
+        mac_address = self._normalize_mac(mac_address)
+        with self.lock:
+            conn = self.connections.get(mac_address)
 
         if not conn:
             return False

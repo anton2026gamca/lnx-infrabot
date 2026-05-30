@@ -1303,7 +1303,7 @@ async def bluetooth_connect_other_robot(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required (or set other_robot first)")
 
-        result = bluetooth_utils.connect(mac_address.strip())
+        result = await bluetooth_utils.connect_async(mac_address.strip())
         if not result.get("success", False):
             return _err(result.get("error") or "Failed to connect")
 
@@ -1321,7 +1321,7 @@ async def bluetooth_disconnect_other_robot(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required (or set other_robot first)")
 
-        result = bluetooth_utils.disconnect(mac_address.strip())
+        result = await bluetooth_utils.disconnect_async(mac_address.strip())
         if not result.get("success", False):
             return _err(result.get("error") or "Failed to disconnect")
 
@@ -1346,7 +1346,7 @@ async def bluetooth_send_message(sid: str, data: dict | None = None):
         if content is None:
             return _err("content is required")
 
-        result = bluetooth_utils.send_message(
+        result = await bluetooth_utils.send_message_async(
             mac_address=mac_address.strip(),
             message_type=message_type.strip(),
             content=str(content),
@@ -1385,7 +1385,7 @@ async def bluetooth_list_pairable_devices(sid: str, data: dict | None = None):
         if not isinstance(timeout_raw, int) or timeout_raw <= 0:
             return _err("timeout_seconds must be a positive integer")
 
-        result = bluetooth_utils.list_pairable_devices(timeout_seconds=timeout_raw)
+        result = await bluetooth_utils.list_pairable_devices_async(timeout_seconds=timeout_raw)
         if not result.get("success", False):
             return _err(result.get("error") or "Failed to list pairable devices")
 
@@ -1405,7 +1405,7 @@ async def bluetooth_pair_device(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required")
         
-        result = bluetooth_utils.pair_device(
+        result = await bluetooth_utils.pair_device_async(
             mac_address=mac_address.strip(),
         )
         
@@ -1427,7 +1427,7 @@ async def bluetooth_unpair_device(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required")
         
-        result = bluetooth_utils.unpair_device(mac_address.strip())
+        result = await bluetooth_utils.unpair_device_async(mac_address.strip())
         
         if not result.get("success", False):
             return _err(result.get("error") or "Failed to unpair device")
@@ -1447,7 +1447,7 @@ async def set_bluetooth_pairing_mode(sid: str, data: dict | None = None):
         if not isinstance(enabled_raw, bool):
             return _err("enabled must be a boolean (true/false)")
         
-        result = bluetooth_utils.set_pairing_mode(enabled=enabled_raw)
+        result = await bluetooth_utils.set_pairing_mode_async(enabled=enabled_raw)
         
         if not result.get("success", False):
             return _err(result.get("error") or "Failed to set pairing mode")

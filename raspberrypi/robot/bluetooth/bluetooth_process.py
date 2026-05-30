@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import logging
 import multiprocessing.synchronize
+import threading
+import time
 from robot.bluetooth.bluetooth_manager import BluetoothManager, BluetoothMessage
 from robot.multiprocessing import shared_data
 from robot.profiling import profile_function, sleep
 
 
 _COMMAND_POLL_INTERVAL_S = 0.05
+_AUTO_CONNECT_INTERVAL_S = 10.0
 
 
 def _serialize_message(message: BluetoothMessage, sender_mac: str) -> dict:
@@ -137,6 +140,15 @@ def _execute_command(manager: BluetoothManager, command: dict) -> None:
         shared_data.set_bluetooth_command_result(command_id, False, error=str(exc))
 
 
+def _normalize_mac(mac_address: str | None) -> str | None:
+    if not isinstance(mac_address, str):
+        return None
+    mac_address = mac_address.strip()
+    if not mac_address:
+        return None
+    return mac_address.upper()
+
+
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     manager = BluetoothManager()
 
@@ -146,6 +158,23 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         shared_data.set_bluetooth_process_alive(True)
         _refresh_shared_state(manager)
 
+        auto_connect_thread: threading.Thread | None = None
+        last_auto_connect_attempt = 0.0
+
+        def _start_auto_connect(mac_address: str) -> None:
+            nonlocal auto_connect_thread, last_auto_connect_attempt
+
+            if auto_connect_thread and auto_connect_thread.is_alive():
+                return
+
+            last_auto_connect_attempt = time.time()
+
+            def _runner(target_mac: str = mac_address) -> None:
+                manager.connect(target_mac)
+
+            auto_connect_thread = threading.Thread(target=_runner, daemon=True)
+            auto_connect_thread.start()
+
         while not stop_event.is_set():
             commands = shared_data.pop_bluetooth_commands()
             for command in commands:
@@ -153,6 +182,16 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
             _drain_incoming_messages(manager)
             _refresh_shared_state(manager)
+
+            if auto_connect_thread and not auto_connect_thread.is_alive():
+                auto_connect_thread = None
+
+            other_robot = shared_data.get_bluetooth_other_robot_info()
+            target_mac = _normalize_mac(other_robot.get("mac_address"))
+            if target_mac and not manager.is_connected(target_mac):
+                if time.time() - last_auto_connect_attempt >= _AUTO_CONNECT_INTERVAL_S:
+                    _start_auto_connect(target_mac)
+
             sleep(_COMMAND_POLL_INTERVAL_S)
 
     except Exception as e:
