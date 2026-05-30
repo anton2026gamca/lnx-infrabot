@@ -10,6 +10,7 @@ from robot.multiprocessing import shared_data
 from robot.profiling import profile_function, sleep
 
 from robot.vision import GoalColorCalibration, GoalDetectionResult, DetectedObject
+from robot.vision.color_mask import HSV_LUT_RANGE_THRESHOLD, build_hsv_range_lut
 from robot.config import *
 
 
@@ -77,8 +78,10 @@ def _build_camera_runtime_state() -> dict[str, dict]:
             "ball_sig": (),
             "yellow_ranges_np": [],
             "blue_ranges_np": [],
-            "ball_lower_arrays": [],
-            "ball_upper_arrays": [],
+            "yellow_lut": None,
+            "blue_lut": None,
+            "ball_ranges_np": [],
+            "ball_lut": None,
             "goal_calibration": GoalColorCalibration(yellow_ranges=[], blue_ranges=[]),
             "focal_length": DEFAULT_FOCAL_LENGTH_PIXELS,
             "ball_calibration_constant": 10000.0,
@@ -118,6 +121,11 @@ def _refresh_camera_runtime_state(
             (np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
             for lower, upper in yellow_sig
         ]
+        camera_state["yellow_lut"] = (
+            build_hsv_range_lut(camera_state["yellow_ranges_np"])
+            if len(camera_state["yellow_ranges_np"]) >= HSV_LUT_RANGE_THRESHOLD
+            else None
+        )
         goal_ranges_changed = True
     if blue_sig != camera_state["blue_sig"]:
         camera_state["blue_sig"] = blue_sig
@@ -125,17 +133,31 @@ def _refresh_camera_runtime_state(
             (np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
             for lower, upper in blue_sig
         ]
+        camera_state["blue_lut"] = (
+            build_hsv_range_lut(camera_state["blue_ranges_np"])
+            if len(camera_state["blue_ranges_np"]) >= HSV_LUT_RANGE_THRESHOLD
+            else None
+        )
         goal_ranges_changed = True
     if goal_ranges_changed:
         camera_state["goal_calibration"] = GoalColorCalibration(
             yellow_ranges=camera_state["yellow_ranges_np"],
             blue_ranges=camera_state["blue_ranges_np"],
+            yellow_lut=camera_state["yellow_lut"],
+            blue_lut=camera_state["blue_lut"],
         )
 
     if ball_sig != camera_state["ball_sig"]:
         camera_state["ball_sig"] = ball_sig
-        camera_state["ball_lower_arrays"] = [np.array(lower, dtype=np.uint8) for lower, _ in ball_sig]
-        camera_state["ball_upper_arrays"] = [np.array(upper, dtype=np.uint8) for _, upper in ball_sig]
+        camera_state["ball_ranges_np"] = [
+            (np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
+            for lower, upper in ball_sig
+        ]
+        camera_state["ball_lut"] = (
+            build_hsv_range_lut(camera_state["ball_ranges_np"])
+            if len(camera_state["ball_ranges_np"]) >= HSV_LUT_RANGE_THRESHOLD
+            else None
+        )
 
     camera_state["focal_length"] = shared_data.get_goal_focal_length(camera_name)
     camera_state["ball_calibration_constant"] = shared_data.get_camera_ball_calibration_constant(camera_name)
@@ -179,8 +201,8 @@ def _process_camera_frame(
 
     ball_detections, _ = vision.detect_ball(
         hsv_frame,
-        camera_state["ball_lower_arrays"],
-        camera_state["ball_upper_arrays"],
+        camera_state["ball_ranges_np"],
+        range_lut=camera_state["ball_lut"],
     )
     camera_ball_data = NO_BALL_DATA
     if ball_detections:

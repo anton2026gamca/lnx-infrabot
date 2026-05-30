@@ -27,8 +27,8 @@ CAMERA_FRONT_YAW_DEG = 0.0
 CAMERA_BACK_YAW_DEG = 180.0
 
 # Frame size calculations
-FRAME_WIDTH  = 1536 // 4  # = 768
-FRAME_HEIGHT = 864 // 4   # = 432
+FRAME_WIDTH  = 1536 // 3  # = 512
+FRAME_HEIGHT = 864  // 3  # = 288
 FRAME_SIZE_B = FRAME_HEIGHT * FRAME_WIDTH * 3  # RGB888 format (3 bytes per pixel, no alpha)
 
 # =========================== SERIAL COMMUNICATION ================================
