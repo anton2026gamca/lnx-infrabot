@@ -490,6 +490,7 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
             _format_goal_line("E", enemy_color, enemy_goal),
             _format_goal_line("O", own_color, own_goal),
         ],
+        _position_estimate_lines(),
         [
             f"BT Comm: {bluetooth_enabled}",
             f"State: {bluetooth_status}",
@@ -557,6 +558,34 @@ def _format_distance(distance: float | None) -> str:
     if distance >= 1000.0:
         return f"{distance / 1000.0:.1f}m"
     return f"{int(round(distance))}mm"
+
+
+def _format_position_mm(value: float | None) -> str:
+    if value is None:
+        return "--"
+    return f"{int(round(value))}mm"
+
+
+def _format_confidence(confidence: float | None) -> str:
+    if confidence is None:
+        return "--"
+    return f"{int(round(max(0.0, min(confidence, 1.0)) * 100))}%"
+
+
+def _position_estimate_lines() -> list[str]:
+    estimate = shared_data.get_last_position_estimate()
+    if not estimate:
+        return ["Position", "X: -- Y: --", "Conf: --"]
+
+    x_mm = estimate.get("x_mm")
+    y_mm = estimate.get("y_mm")
+    confidence = estimate.get("confidence")
+
+    x_text = _format_position_mm(x_mm if isinstance(x_mm, (int, float)) else None)
+    y_text = _format_position_mm(y_mm if isinstance(y_mm, (int, float)) else None)
+    conf_text = _format_confidence(confidence if isinstance(confidence, (int, float)) else None)
+
+    return ["Position", f"X: {x_text} Y: {y_text}", f"Conf: {conf_text}"]
 
 
 def _line_detection_display() -> tuple[str, LineDisplay]:
