@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import multiprocessing.synchronize
+from operator import contains
 import os
 import socket
 import time
@@ -45,7 +46,7 @@ BUTTON_BACK_PIN = 25
 REPEAT_INITIAL_DELAY_S = 0.45
 REPEAT_INTERVAL_S = 0.12
 
-SCREENSAVER_IDLE_S = 60.0
+SCREENSAVER_IDLE_S = 10.0
 LOCK_ICON_WIDTH = 7
 LOCK_ICON_HEIGHT = 7
 LOCK_ICON_MARGIN_X = 1
@@ -54,7 +55,7 @@ LOCK_ICON_MARGIN_Y = 1
 IP_CACHE_TTL_S = 5.0
 IP_FALLBACK = "---"
 
-AUTONOMOUS_TITLE = "LNX InfraBot"
+MODE_DISPLAY_TITLE = "LNX InfraBot"
 
 ROLE_LABELS = {
     "Attacker State Machine": "Attacker",
@@ -183,7 +184,7 @@ class ModeDisplayScreen(Screen):
 
     def render(self, now: float, max_chars: int) -> tuple[list[str], int | None, RenderHints]:
         lines = _mode_display_lines(max_chars)
-        return _pad_lines(lines), None, RenderHints(centered=True, show_lock=self._show_lock)
+        return _pad_lines(lines), None, RenderHints(centered=True, show_lock=self._show_lock, show_down=self._show_lock)
 
 
 class RepeatButton:
@@ -238,6 +239,18 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger) -
     while not stop_event.is_set():
         now = time.monotonic()
 
+        running_state = shared_data.get_running_state()
+        motors_on = bool(running_state and running_state.running)
+
+        if motors_on:
+            lines = _mode_display_lines(max_chars)
+            frame = ("mode", tuple(lines))
+            if frame != last_frame:
+                _render_centered_frame(device, font, lines)
+                last_frame = frame
+            sleep(0.05)
+            continue
+
         event = _read_event(buttons, now)
         if event:
             current = screen_stack[-1]
@@ -260,49 +273,38 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger) -
                 screen_stack.append(main_menu)
             current = screen_stack[-1]
 
-        running_state = shared_data.get_running_state()
-        motors_on = bool(running_state and running_state.running)
-        mode = shared_data.get_robot_mode()
+        if (
+            now - last_input_at >= SCREENSAVER_IDLE_S
+            and isinstance(current, (MenuScreen))
+        ):
+            screen_stack.append(screensaver)
+            current = screen_stack[-1]
 
-        if motors_on:
-            lines = _mode_display_lines(max_chars)
-            frame = ("mode", tuple(lines))
+        lines, highlight, render_hints = current.render(now, max_chars)
+        if render_hints.centered:
+            frame = ("centered", tuple(lines), render_hints.show_lock)
             if frame != last_frame:
-                _render_centered_frame(device, font, lines, show_lock=False)
+                _render_centered_frame(device, font, lines, render_hints)
                 last_frame = frame
         else:
-            if (
-                now - last_input_at >= SCREENSAVER_IDLE_S
-                and not isinstance(current, (ModeDisplayScreen, MessageScreen))
-            ):
-                screen_stack.append(screensaver)
-                current = screen_stack[-1]
-
-            lines, highlight, render_hints = current.render(now, max_chars)
-            if render_hints.centered:
-                frame = ("centered", tuple(lines), render_hints.show_lock)
-                if frame != last_frame:
-                    _render_centered_frame(device, font, lines, show_lock=render_hints.show_lock)
-                    last_frame = frame
-            else:
-                line_display_key = None
-                if render_hints.line_display is not None:
-                    line_display_key = (
-                        render_hints.line_display.row_index,
-                        render_hints.line_display.digits,
-                        render_hints.line_display.detected,
-                    )
-                frame = (
-                    "menu",
-                    tuple(lines),
-                    highlight,
-                    render_hints.show_up,
-                    render_hints.show_down,
-                    line_display_key,
+            line_display_key = None
+            if render_hints.line_display is not None:
+                line_display_key = (
+                    render_hints.line_display.row_index,
+                    render_hints.line_display.digits,
+                    render_hints.line_display.detected,
                 )
-                if frame != last_frame:
-                    _render_frame(device, font, lines, highlight, render_hints)
-                    last_frame = frame
+            frame = (
+                "menu",
+                tuple(lines),
+                highlight,
+                render_hints.show_up,
+                render_hints.show_down,
+                line_display_key,
+            )
+            if frame != last_frame:
+                _render_frame(device, font, lines, highlight, render_hints)
+                last_frame = frame
 
         sleep(0.05)
 
@@ -710,9 +712,9 @@ def _render_frame(
             top = max(0, y)
             bottom = min(DISPLAY_HEIGHT - 1, y + LINE_HEIGHT - 1)
             draw.rectangle((0, top, DISPLAY_WIDTH, bottom - (1 if LINE_MARGIN % 2 == 1 else 0)), fill=255)
-            draw_mono_text(draw, (0, y), line, font, fill=0, spacing=TEXT_SPACING)
+            draw_mono_text(draw, (0, y), line, font, fill=0, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
         else:
-            draw_mono_text(draw, (0, y), line, font, fill=255, spacing=TEXT_SPACING)
+            draw_mono_text(draw, (0, y), line, font, fill=255, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
 
     _draw_scroll_indicators(draw, render_hints, highlight_index)
     device.display(image)
@@ -748,7 +750,7 @@ def _render_centered_frame(
     device: ssd1306,
     font: ImageFont.FreeTypeFont,
     lines: Sequence[str],
-    show_lock: bool,
+    render_hints: RenderHints | None = None,
 ) -> None:
     image = Image.new("1", (DISPLAY_WIDTH, DISPLAY_HEIGHT))
     draw = ImageDraw.Draw(image)
@@ -761,10 +763,13 @@ def _render_centered_frame(
         y = LINE_HEIGHT * idx + LINE_MARGIN
         text_width = _mono_text_width(line)
         x = max(0, (DISPLAY_WIDTH - text_width) // 2)
-        draw_mono_text(draw, (x, y), line, font, fill=255, spacing=TEXT_SPACING)
+        draw_mono_text(draw, (x, y), line, font, fill=255, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
 
-    if show_lock:
-        _draw_lock_indicator(draw)
+    if render_hints is not None:
+        if render_hints.show_lock:
+            _draw_lock_indicator(draw)
+        _draw_scroll_indicators(draw, render_hints)
+
     device.display(image)
 
 
@@ -800,7 +805,7 @@ def _draw_line_detection_row(
     line_display: LineDisplay,
 ) -> None:
     x = 0
-    draw_mono_text(draw, (x, y), LINE_PREFIX, font, fill=255, spacing=TEXT_SPACING)
+    draw_mono_text(draw, (x, y), LINE_PREFIX, font, fill=255, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
     x += _mono_text_width(LINE_PREFIX)
 
     for digit, detected in zip(line_display.digits, line_display.detected):
@@ -809,16 +814,16 @@ def _draw_line_detection_row(
                 (x - math.floor(LINE_VALUES_SPACING / 2), y, x + MONO_CHAR_WIDTH + math.ceil(LINE_VALUES_SPACING / 2) - 1, y + LINE_HEIGHT - 1),
                 fill=255,
             )
-            draw_mono_text(draw, (x, y), digit, font, fill=0, spacing=LINE_VALUES_SPACING)
+            draw_mono_text(draw, (x, y), digit, font, fill=0, spacing=LINE_VALUES_SPACING, char_width=MONO_CHAR_WIDTH)
         else:
-            draw_mono_text(draw, (x, y), digit, font, fill=255, spacing=LINE_VALUES_SPACING)
+            draw_mono_text(draw, (x, y), digit, font, fill=255, spacing=LINE_VALUES_SPACING, char_width=MONO_CHAR_WIDTH)
         x += MONO_CHAR_WIDTH + LINE_VALUES_SPACING
 
 
 def _draw_scroll_indicators(
     draw: ImageDraw.ImageDraw,
     scroll_hints: RenderHints,
-    highlight_index: int | None,
+    highlight_index: int | None = None,
 ) -> None:
     if not scroll_hints.show_up and not scroll_hints.show_down:
         return
@@ -869,7 +874,7 @@ def _role_label(name: str | None) -> str:
 
 def _mode_display_lines(max_chars: int) -> list[str]:
     mode = shared_data.get_robot_mode()
-    title = _truncate_text(AUTONOMOUS_TITLE, max_chars)
+    title = _truncate_text(MODE_DISPLAY_TITLE, max_chars)
     if mode == RobotMode.AUTONOMOUS:
         subtitle = _role_label(shared_data.get_current_state_machine_name())
     else:

@@ -30,10 +30,11 @@ def draw_mono_text(
     font: ImageFont.FreeTypeFont,
     fill: int = 255,
     spacing: int = 1,
+    char_width: int | None = None
 ) -> None:
     x, y = pos
 
-    normal_width = 5 #font.getbbox("A")[2]
+    normal_width = font.getbbox("A")[2] if char_width is None else char_width
 
     i = 0
     while i < len(text):
