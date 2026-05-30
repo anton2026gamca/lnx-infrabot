@@ -1,7 +1,7 @@
 $fn = 90;
 
 text_font_size = 35;
-height = 10;
+height = 20;
 
 module top_marker(mark = "0") {
     text_size = (len(mark) == 1) ? text_font_size :
