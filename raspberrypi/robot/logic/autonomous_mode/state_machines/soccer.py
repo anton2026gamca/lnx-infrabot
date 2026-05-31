@@ -116,7 +116,7 @@ def _neutral_state(state_machine: StateMachine) -> type[State]:
 
 
 @profile_function
-def _goalkeeper_should_grab_ball(data: "SoccerStateMachineData") -> bool:
+def _goalkeeper_should_grab_ball(data: SoccerStateMachineData) -> bool:
     if data.sensors.ball_possession or data.sensors.ball_likely_inside_robot:
         return True
 
@@ -140,12 +140,13 @@ def _goalkeeper_should_grab_ball(data: "SoccerStateMachineData") -> bool:
 @profile_function
 def _get_goal_tracking_rotation(
     state_machine: StateMachine,
-    data: "SoccerStateMachineData",
+    data: SoccerStateMachineData,
     own_goal: bool = False,
 ) -> float:
+    target_camera_yaw = 180 if own_goal else 0
     goal = data.sensors.own_goal if own_goal else data.sensors.enemy_goal
 
-    if goal.detected:
+    if goal.detected and goal.camera_yaw_deg == target_camera_yaw:
         rotate = goal.alignment * GOAL_TRACK_ROTATE_GAIN
         return _clamp(rotate, -1.0, 1.0)
     else:
@@ -575,9 +576,6 @@ class GoalkeeperApproachState(State):
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
-        # -------------------------------------------------
-        # Goal line protection
-        # -------------------------------------------------
 
         if _goalkeeper_goal_line_sensor_fired(data.lines.raw_detected):
             self._goal_line_pushoff_ticks = GOALKEEPER_GOAL_LINE_PUSHOFF_TICKS
@@ -592,17 +590,11 @@ class GoalkeeperApproachState(State):
             )
             return
 
-        # -------------------------------------------------
-        # Grab nearby balls
-        # -------------------------------------------------
 
         if _goalkeeper_should_grab_ball(data):
             state_machine.transition(AttackerApproachState)
             return
 
-        # -------------------------------------------------
-        # Recover position
-        # -------------------------------------------------
 
         position = vision.get_position_estimate()
 
@@ -622,9 +614,6 @@ class GoalkeeperApproachState(State):
 
         distance = math.sqrt(delta_x * delta_x + delta_y * delta_y)
 
-        # -------------------------------------------------
-        # Ready to defend
-        # -------------------------------------------------
 
         if (
             data.sensors.own_goal.detected
@@ -633,9 +622,6 @@ class GoalkeeperApproachState(State):
             state_machine.transition(GoalkeeperDefendState)
             return
 
-        # -------------------------------------------------
-        # Movement
-        # -------------------------------------------------
 
         global_angle = _field_delta_to_global_angle_deg(delta_x, delta_y)
 
@@ -651,9 +637,6 @@ class GoalkeeperApproachState(State):
 
         speed *= AUTO_SPEED_MULTIPLIER
 
-        # -------------------------------------------------
-        # Rotation
-        # -------------------------------------------------
 
         rotate = _get_goal_tracking_rotation(
             state_machine,
@@ -681,9 +664,6 @@ class GoalkeeperDefendState(State):
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_cross_state_data(state_machine)
 
-        # -------------------------------------------------
-        # Goal line protection
-        # -------------------------------------------------
 
         if _goalkeeper_goal_line_sensor_fired(data.lines.raw_detected):
             self._goal_line_pushoff_ticks = GOALKEEPER_GOAL_LINE_PUSHOFF_TICKS
@@ -700,17 +680,11 @@ class GoalkeeperDefendState(State):
             )
             return
 
-        # -------------------------------------------------
-        # Grab nearby balls
-        # -------------------------------------------------
 
         if _goalkeeper_should_grab_ball(data):
             state_machine.transition(AttackerApproachState)
             return
 
-        # -------------------------------------------------
-        # Goal visibility check
-        # -------------------------------------------------
 
         if data.sensors.own_goal.detected:
             self._goal_lost_ticks = 0
@@ -728,9 +702,6 @@ class GoalkeeperDefendState(State):
             state_machine.transition(GoalkeeperApproachState)
             return
 
-        # -------------------------------------------------
-        # Position estimate
-        # -------------------------------------------------
 
         position = vision.get_position_estimate()
 
@@ -738,9 +709,6 @@ class GoalkeeperDefendState(State):
             state_machine.transition(GoalkeeperApproachState)
             return
 
-        # -------------------------------------------------
-        # Ball tracking
-        # -------------------------------------------------
 
         ball_angle = data.sensors.ball_angle
 
@@ -756,10 +724,6 @@ class GoalkeeperDefendState(State):
         )
 
         if abs_ball_angle > GOALKEEPER_ARC_START_ANGLE_DEG:
-            # -------------------------------------------------
-            # Arc target
-            # -------------------------------------------------
-
             radius = GOALKEEPER_DEFEND_ARC_RADIUS_MM
 
             target_x = (
@@ -772,10 +736,6 @@ class GoalkeeperDefendState(State):
                 - math.cos(math.radians(arc_angle)) * radius
             )
         else:
-            # -------------------------------------------------
-            # Line target (parallel to the goal line)
-            # -------------------------------------------------
-
             target_x = (
                 math.tan(math.radians(arc_angle))
                 * GOALKEEPER_DEFEND_LINE_DISTANCE_MM
@@ -786,9 +746,6 @@ class GoalkeeperDefendState(State):
                 - GOALKEEPER_DEFEND_LINE_DISTANCE_MM
             )
 
-        # -------------------------------------------------
-        # Move toward target
-        # -------------------------------------------------
 
         delta_x = target_x - position.x_mm
         delta_y = target_y - position.y_mm
@@ -815,9 +772,6 @@ class GoalkeeperDefendState(State):
 
         speed *= AUTO_SPEED_MULTIPLIER
 
-        # -------------------------------------------------
-        # Rotation
-        # -------------------------------------------------
 
         rotate = _get_goal_tracking_rotation(
             state_machine,
