@@ -469,5 +469,6 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                     f"Camera Processing FPS: {frames_processed} "
                     f"(enemy_goal={enemy_result.detected}, own_goal={own_result.detected}, ball={fused_ball_data.detected})"
                 )
+                shared_data.set_process_fps(shared_data.ProfilingProcesses.CAMERA_PROCESSING, frames_processed)
                 frames_processed = 0
                 last_debug_msg_time = time.perf_counter()

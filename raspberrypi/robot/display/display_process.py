@@ -498,6 +498,8 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
     bluetooth_status = _bluetooth_other_robot_status(bluetooth_mac_address)
     bluetooth_enabled = _format_bool(shared_data.get_bluetooth_enabled())
 
+    fps_data = shared_data.get_processes_fps()
+
     return [
         [
             f"IP: {ip_address}",
@@ -519,6 +521,16 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
             f"BT Comm: {bluetooth_enabled}",
             f"State: {bluetooth_status}",
             _bluetooth_other_robot_detail_line(bluetooth_info),
+        ],
+        [
+            "Teensy Comm:",
+            f"R: {_format_fixed_len(str(fps_data.get(shared_data.ProfilingProcesses.HARDWARE_RECEIVE, 0)), 3)} S: {_format_fixed_len(str(fps_data.get(shared_data.ProfilingProcesses.HARDWARE_SEND, 0)), 3)} C: {fps_data.get(shared_data.ProfilingProcesses.HARDWARE_CORRUPT, 0)}",
+            f"Logic Ticks: {fps_data.get(shared_data.ProfilingProcesses.LOGIC, 0)}",
+        ],
+        [
+            "Camera Stats:",
+            f"Ca: F {_format_fixed_len(str(fps_data.get(shared_data.ProfilingProcesses.CAMERA_CAPTURE_FRONT)), 3)}  Pr: {fps_data.get(shared_data.ProfilingProcesses.CAMERA_PROCESSING)}",
+            f"    B {_format_fixed_len(str(fps_data.get(shared_data.ProfilingProcesses.CAMERA_CAPTURE_BACK)), 3)}",
         ],
         [
             f"Switch: {_format_fixed_len(main_switch, 3)}",

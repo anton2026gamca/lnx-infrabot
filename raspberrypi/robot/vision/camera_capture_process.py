@@ -215,6 +215,8 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                     for camera_name in available_cameras
                 )
                 logger.debug(f"Camera Capture FPS: {camera_fps_msg}")
+                shared_data.set_process_fps(shared_data.ProfilingProcesses.CAMERA_CAPTURE_FRONT, camera_fps.get("front", 0))
+                shared_data.set_process_fps(shared_data.ProfilingProcesses.CAMERA_CAPTURE_BACK, camera_fps.get("back", 0))
                 last_debug_msg_time = time.perf_counter()
             sleep(0.001)
     except KeyboardInterrupt:

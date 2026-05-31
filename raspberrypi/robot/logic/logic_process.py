@@ -17,8 +17,11 @@ from robot.config import *
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     motors_controller = SmartMotorsController()
 
+    ticks = 0
+    last_update_time = time.perf_counter()
+
     while not stop_event.is_set():
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         mode = shared_data.get_robot_mode()
     
@@ -33,7 +36,14 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
         autonomous_mode.check_state_machine_change_request()
 
-        elapsed = time.time() - start_time
+        ticks += 1
+
+        if time.perf_counter() > last_update_time + 1:
+            shared_data.set_process_fps(shared_data.ProfilingProcesses.LOGIC, ticks)
+            ticks = 0
+            last_update_time = time.perf_counter()
+
+        elapsed = time.perf_counter() - start_time
         sleep_duration = max(0.0, LOGIC_LOOP_PERIOD - elapsed - 0.001)
         if sleep_duration > 0:
             sleep(sleep_duration)

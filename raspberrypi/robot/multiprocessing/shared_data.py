@@ -1104,6 +1104,41 @@ def clear_bluetooth_command_result(command_id: int) -> None:
             del bt_command_results[command_id]
 
 
+# Profiling
+PROFILING_PROCESSES = [
+    "hardware_process:send",
+    "hardware_process:receive",
+    "hardware_process:corrupt",
+    "camera_capture_process:front",
+    "camera_capture_process:back",
+    "camera_processing_process",
+    "logic_process",
+]
+
+class ProfilingProcesses:
+    HARDWARE_SEND = PROFILING_PROCESSES[0]
+    HARDWARE_RECEIVE = PROFILING_PROCESSES[1]
+    HARDWARE_CORRUPT = PROFILING_PROCESSES[2]
+    CAMERA_CAPTURE_FRONT = PROFILING_PROCESSES[3]
+    CAMERA_CAPTURE_BACK = PROFILING_PROCESSES[4]
+    CAMERA_PROCESSING = PROFILING_PROCESSES[5]
+    LOGIC = PROFILING_PROCESSES[6]
+
+process_fps = multiprocessing.Array('i', len(PROFILING_PROCESSES))
+
+def get_processes_fps() -> dict[str, int]:
+    data = {}
+    for idx, key in enumerate(PROFILING_PROCESSES):
+        data[key] = process_fps[idx]
+    return data
+
+def set_process_fps(process: str, fps: int) -> None:
+    idx = PROFILING_PROCESSES.index(process)
+    if idx <= -1:
+        return
+    process_fps[idx] = fps
+
+
 @profile_function
 def cleanup() -> None:
     try:
