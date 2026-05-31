@@ -198,10 +198,15 @@ def _get_goal_bounding_rect(
 
 @profile_function
 def get_position_estimate() -> PositionEstimate | None:
+    return shared_data.get_last_position_estimate()
+
+@profile_function
+def update_position_estimate() -> None:
     hardware_data = shared_data.get_hardware_compass_ir()
     heading = hardware_data[0]
 
     if heading == 999.0:
+        shared_data.set_last_position_estimate(None)
         return None
 
     field_length_mm = 2190.0
@@ -239,10 +244,12 @@ def get_position_estimate() -> PositionEstimate | None:
         candidates.append(own_candidate)
 
     if not candidates:
+        shared_data.set_last_position_estimate(None)
         return None
 
     sum_weights = sum(weight for _, _, weight in candidates)
     if sum_weights <= 0:
+        shared_data.set_last_position_estimate(None)
         return None
 
     x_mm = sum(x * weight for x, _, weight in candidates) / sum_weights
@@ -251,5 +258,4 @@ def get_position_estimate() -> PositionEstimate | None:
 
     confidence = min(1.0, sum_weights / len(candidates))
 
-    shared_data.set_last_position_estimate(x_mm, y_mm, confidence)
-    return PositionEstimate(x_mm=x_mm, y_mm=y_mm, confidence=confidence)
+    shared_data.set_last_position_estimate(PositionEstimate(x_mm, y_mm, confidence))

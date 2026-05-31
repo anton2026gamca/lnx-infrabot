@@ -18,7 +18,7 @@ from robot import profiling, utils
 from robot.config import *
 from robot.hardware.teensy import ParsedTeensyData, IRData, CompassData, RunningStateData
 from robot.robot import RobotManualControl
-from robot.vision import CameraBallData, DetectedObject, GoalDetectionResult
+from robot.vision import CameraBallData, DetectedObject, GoalDetectionResult, PositionEstimate
 from robot.vision.camera import FrameData
 from robot.profiling import profile_function
 
@@ -560,7 +560,6 @@ line_calibration_phase2_max = multiprocessing.Array('d', [float('-inf')] * LINE_
 
 
 # Goal detection and calibration
-
 goal_color = multiprocessing.Value('b', True)  # True = yellow, False = blue
 @profile_function
 def set_goal_color(color: str) -> None:
@@ -760,7 +759,6 @@ def get_ball_calibration(camera: str = "front") -> list[tuple[list[int], list[in
     ranges = ball_calibration.get('ranges') if ball_calibration else None
 
     if not ranges:
-        # Return default single range
         return [([DEFAULT_BALL_CALIBRATION_HSV[0], DEFAULT_BALL_CALIBRATION_HSV[1], DEFAULT_BALL_CALIBRATION_HSV[2]],
                  [DEFAULT_BALL_CALIBRATION_HSV[3], DEFAULT_BALL_CALIBRATION_HSV[4], DEFAULT_BALL_CALIBRATION_HSV[5]])]
     return list(ranges)
@@ -890,20 +888,16 @@ def set_position_based_speed_enabled(enabled: bool) -> None:
 def get_position_based_speed_enabled() -> bool:
     return position_based_speed_enabled.value
 
-position_estimate_lock = profiling.create_profiled_lock("position_estimate_lock")
 last_position_estimate = _manager.dict()
 @profile_function
-def set_last_position_estimate(x_mm: float, y_mm: float, confidence: float) -> None:
-    with position_estimate_lock:
-        last_position_estimate.clear()
-        last_position_estimate["x_mm"] = float(x_mm)
-        last_position_estimate["y_mm"] = float(y_mm)
-        last_position_estimate["confidence"] = float(confidence)
-        last_position_estimate["timestamp"] = time.time()
+def set_last_position_estimate(pos: PositionEstimate | None) -> None:
+    last_position_estimate["data"] = (float(pos.x_mm), float(pos.y_mm), float(pos.confidence)) if pos is not None else None
 @profile_function
-def get_last_position_estimate() -> dict | None:
-    with position_estimate_lock:
-        return dict(last_position_estimate) if last_position_estimate else None
+def get_last_position_estimate() -> PositionEstimate | None:
+    data = last_position_estimate.get("data", None)
+    if data is None:
+        return None
+    return PositionEstimate(data[0], data[1], data[2])
 
 always_facing_goal_enabled = multiprocessing.Value('b', True)  # True = always face goal, False = face north
 @profile_function
@@ -913,7 +907,6 @@ def set_always_facing_goal_enabled(enabled: bool) -> None:
 @profile_function
 def get_always_facing_goal_enabled() -> bool:
     return always_facing_goal_enabled.value
-
 
 
 # Bluetooth Communication

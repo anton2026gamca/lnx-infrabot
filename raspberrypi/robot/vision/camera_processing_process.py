@@ -461,6 +461,8 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
             shared_data.set_detected_objects(all_detections)
 
+            vision.update_position_estimate()
+
             frames_processed += 1
             if time.perf_counter() > last_debug_msg_time + 1:
                 logger.debug(

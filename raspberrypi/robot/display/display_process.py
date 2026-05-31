@@ -597,15 +597,12 @@ def _format_position_mm(value: float | None) -> str:
 
 
 def _position_estimate_lines() -> list[str]:
-    estimate = shared_data.get_last_position_estimate()
-    if not estimate:
+    pos = shared_data.get_last_position_estimate()
+    if not pos:
         return ["Position", "X: --    Y: --   "]
 
-    x_mm = estimate.get("x_mm")
-    y_mm = estimate.get("y_mm")
-
-    x_text = _format_fixed_len(_format_position_mm(x_mm if isinstance(x_mm, (int, float)) else None), 5)
-    y_text = _format_fixed_len(_format_position_mm(y_mm if isinstance(y_mm, (int, float)) else None), 5)
+    x_text = _format_fixed_len(_format_position_mm(pos.x_mm if isinstance(pos.x_mm, (int, float)) else None), 5)
+    y_text = _format_fixed_len(_format_position_mm(pos.y_mm if isinstance(pos.y_mm, (int, float)) else None), 5)
 
     return ["Position", f"X: {x_text} Y: {y_text}"]
 
