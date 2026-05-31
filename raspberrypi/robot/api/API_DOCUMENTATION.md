@@ -1316,7 +1316,7 @@ Get Bluetooth process status, local device identity, connected devices, paired d
     hostname?: string,
     ip_address?: string,
     last_connected?: number,
-    is_connected: boolean,
+    connected: boolean,
     device_id?: string
   }>,
   paired_devices: Array<{
@@ -1325,7 +1325,7 @@ Get Bluetooth process status, local device identity, connected devices, paired d
     hostname?: string,
     ip_address?: string,
     last_connected?: number,
-    is_connected: boolean,
+    connected: boolean,
     device_id?: string
   }>,
   other_robot: {
@@ -1607,7 +1607,7 @@ Pair a new Bluetooth device and store its metadata.
     hostname?: string,
     ip_address?: string,
     last_connected?: number,
-    is_connected: boolean,
+    connected: boolean,
     device_id?: string
   }>,
   error?: string
@@ -1645,7 +1645,7 @@ Unpair a previously paired Bluetooth device.
     hostname?: string,
     ip_address?: string,
     last_connected?: number,
-    is_connected: boolean,
+    connected: boolean,
     device_id?: string
   }>,
   error?: string
