@@ -233,6 +233,9 @@ class SoccerStateMachineData(CrossStateData):
     sensors: SensorsData
     lines: LinesData
     is_goalkeeper: bool = False
+    motors_running: bool = True
+    motors_running_prev: bool = True
+    last_penalty_recovered_at: float | None = None
 
 
 @profile_function
@@ -330,13 +333,23 @@ def _update_lines_data(state_machine: StateMachine) -> LinesData:
 
 @profile_function
 def _update_cross_state_data(state_machine: StateMachine, is_goalkeeper: bool | None = None) -> SoccerStateMachineData:
-    is_goalkeeper = is_goalkeeper if is_goalkeeper is not None else (isinstance(state_machine.cross_state_data, SoccerStateMachineData) and state_machine.cross_state_data.is_goalkeeper)
+    prev_data = state_machine.cross_state_data if isinstance(state_machine.cross_state_data, SoccerStateMachineData) else None
+    is_goalkeeper = is_goalkeeper if is_goalkeeper is not None else (prev_data.is_goalkeeper if prev_data else False)
     sensors = _update_sensors_data(state_machine)
     lines = _update_lines_data(state_machine)
+    running_state = shared_data.get_running_state()
+    motors_running = running_state.running if running_state is not None else True
+    motors_running_prev = prev_data.motors_running if prev_data is not None else motors_running
+    last_penalty_recovered_at = prev_data.last_penalty_recovered_at if prev_data is not None else None
+    if motors_running and not motors_running_prev:
+        last_penalty_recovered_at = time.time()
     data = SoccerStateMachineData(
         sensors=sensors,
         lines=lines,
-        is_goalkeeper=is_goalkeeper
+        is_goalkeeper=is_goalkeeper,
+        motors_running=motors_running,
+        motors_running_prev=motors_running_prev,
+        last_penalty_recovered_at=last_penalty_recovered_at,
     )
     state_machine.cross_state_data = data
     return data
@@ -347,15 +360,38 @@ def _check_new_bluetooth_messages(state_machine: StateMachine) -> bool:
     if not isinstance(state_machine.cross_state_data, SoccerStateMachineData):
         return False
 
-    if not _can_sync_roles_over_bluetooth():
+    data = state_machine.cross_state_data
+    can_sync_roles = _can_sync_roles_over_bluetooth()
+    role_changed = False
+
+    if not can_sync_roles:
         reset_role_to_preset(state_machine, force_state_transition=False)
         return False
+
+    if data.motors_running_prev and not data.motors_running:
+        if change_role(
+            state_machine,
+            is_goalkeeper=True,
+            state=_neutral_state(True),
+            bt_message="attacker_penalty",
+            require_bluetooth_sync=False,
+        ):
+            role_changed = True
+
+    if not data.motors_running_prev and data.motors_running:
+        recovered_at = data.last_penalty_recovered_at or time.time()
+        if change_role(
+            state_machine,
+            is_goalkeeper=False,
+            state=_neutral_state(False),
+            bt_message=f"attacker_recovered:{recovered_at:.6f}",
+            require_bluetooth_sync=False,
+        ):
+            role_changed = True
 
     shared_data.set_autonomous_status_text(
         AutonomousStatusText.GOALKEEPER if state_machine.cross_state_data.is_goalkeeper else AutonomousStatusText.ATTACKER
     )
-
-    role_changed = False
     new = shared_data.get_bluetooth_new_received_messages()
 
     for msg in new:
@@ -377,6 +413,23 @@ def _check_new_bluetooth_messages(state_machine: StateMachine) -> bool:
                         require_bluetooth_sync=False,
                     ):
                         role_changed = True
+                case _ if msg.content.startswith("attacker_recovered:"):
+                    remote_recovered_at_raw = msg.content.split(":", 1)[1]
+                    try:
+                        remote_recovered_at = float(remote_recovered_at_raw)
+                    except ValueError:
+                        continue
+
+                    local_recovered_at = data.last_penalty_recovered_at
+                    remote_recovered_first = local_recovered_at is None or remote_recovered_at <= local_recovered_at
+                    if remote_recovered_first:
+                        if change_role(
+                            state_machine,
+                            is_goalkeeper=True,
+                            state=_neutral_state(True),
+                            require_bluetooth_sync=False,
+                        ):
+                            role_changed = True
 
     return role_changed
 
