@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from robot.multiprocessing import shared_data
+from robot.multiprocessing.shared_data import AutonomousStatusText
 from robot.profiling import profile_function
 from . import state_machines
 from .state_machine import StateMachine
@@ -59,5 +60,6 @@ def _set_current_state_machine_internal(name: str) -> None:
     if state_machine is not None:
         current_state_machine = state_machine
         shared_data.set_current_state_machine_name(name)
+        shared_data.set_autonomous_status_text(AutonomousStatusText.DEFAULT)
     else:
         logger.warning(f"State machine with name '{name}' not found")

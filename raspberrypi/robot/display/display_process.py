@@ -58,11 +58,6 @@ IP_FALLBACK = "--"
 
 MODE_DISPLAY_TITLE = "LNX InfraBot"
 
-ROLE_LABELS = {
-    "Attacker State Machine": "Attacker",
-    "Goalkeeper State Machine": "Goalkeeper",
-}
-
 LINE_PREFIX = "Line: "
 LINE_ROW_INDEX = 2
 LINE_VALUES_SPACING = 2
@@ -945,24 +940,15 @@ def _label_text(label: str | Callable[[], str]) -> str:
     return label() if callable(label) else label
 
 
-def _role_label(name: str | None) -> str:
-    if not name:
-        return "--"
-    if name in ROLE_LABELS:
-        return ROLE_LABELS[name]
-    lowered = name.lower()
-    if "goalkeeper" in lowered:
-        return "Goalkeeper"
-    if "attacker" in lowered:
-        return "Attacker"
-    return "--"
+def _role_label() -> str:
+    return shared_data.get_autonomous_status_text()
 
 
 def _mode_display_lines(max_chars: int) -> list[str]:
     mode = shared_data.get_robot_mode()
     title = _truncate_text(MODE_DISPLAY_TITLE, max_chars)
     if mode == RobotMode.AUTONOMOUS:
-        subtitle = _role_label(shared_data.get_current_state_machine_name())
+        subtitle = _role_label()
     else:
         subtitle = _mode_label(mode)
     subtitle = _truncate_text(subtitle, max_chars)

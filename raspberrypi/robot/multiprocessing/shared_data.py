@@ -224,6 +224,27 @@ def get_current_state_machine_name() -> str:
     with current_state_machine_name.get_lock():
         return bytes(current_state_machine_name[:]).decode().strip()
 
+autonomous_status_text_index = multiprocessing.Value('i', 0, lock=False)
+
+class AutonomousStatusText:
+    DEFAULT = 0
+    ATTACKER = 1
+    GOALKEEPER = 2
+
+@profile_function
+def set_autonomous_status_text(idx: int) -> None:
+    autonomous_status_text_index.value = idx
+@profile_function
+def get_autonomous_status_text() -> str:
+    idx = autonomous_status_text_index.value
+    match idx:
+        case AutonomousStatusText.ATTACKER:
+            return "Attacker"
+        case AutonomousStatusText.GOALKEEPER:
+            return "Goalkeeper"
+        case _:
+            return "Autonomous"
+
 
 # Shared memory for frame data
 front_frame_buffer = multiprocessing.shared_memory.SharedMemory(create=True, size=FRAME_SIZE_B)
