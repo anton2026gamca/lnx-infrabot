@@ -84,7 +84,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                     compass_offset["roll"] -= data.compass.roll
 
                 if time.perf_counter() > last_log_time + 1:
-                    logger.debug(f"Messages - Recieved: {messages_received}, Sent: {messages_sent}, Corrupted: {corrupted_messages}")
+                    logger.debug(f"Messages - Received: {messages_received}, Sent: {messages_sent}, Corrupted: {corrupted_messages}")
                     messages_received = 0
                     messages_sent = 0
                     corrupted_messages = 0

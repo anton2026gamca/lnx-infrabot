@@ -679,7 +679,7 @@ void process_i2c_async() {
         ir_data.distance = distance;
       }
       ir_read_completed = true;
-      DEBUG_LOG(DEBUG_INFO, "Recieved valid ir angle data");
+      DEBUG_LOG(DEBUG_INFO, "Received valid ir angle data");
 #if DEBUG_PROFILING_ENABLED
       DEBUG_PROFILING_RECORD(ir_checkpoint, "IR Read Success");
 #endif
@@ -687,7 +687,7 @@ void process_i2c_async() {
       for (int i = 0; i < IR_SENSOR_COUNT; i++) {
         ir_data.sensor_IR[i] = ir_raw_buffer[i];
       }
-      DEBUG_LOG(DEBUG_INFO, "Recieved valid ir raw data");
+      DEBUG_LOG(DEBUG_INFO, "Received valid ir raw data");
     } else if (i2c_read_kind == I2C_READ_BNO_EULER) {
       int16_t heading_raw = ((int16_t)bno_euler_buffer[1] << 8) | bno_euler_buffer[0];
       int16_t pitch_raw = ((int16_t)bno_euler_buffer[3] << 8) | bno_euler_buffer[2];
@@ -704,7 +704,7 @@ void process_i2c_async() {
 #if DEBUG_PROFILING_ENABLED
       DEBUG_PROFILING_RECORD(compass_checkpoint, "Compass Read Success");
 #endif
-      DEBUG_LOG(DEBUG_INFO, "Recieved valid compass data: " + String(compass_data.heading));
+      DEBUG_LOG(DEBUG_INFO, "Received valid compass data: " + String(compass_data.heading));
     }
 
     i2c_read_kind = I2C_READ_NONE;
