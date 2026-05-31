@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from robot import calibration, utils, vision
 from robot.profiling import async_sleep
 import robot.bluetooth.utils as bluetooth_utils
+from robot.bluetooth.bluetooth_manager import OtherRobotInfo, PairedDevice
 from robot.hardware import line_sensors
 from robot.logic import autonomous_mode
 from robot.multiprocessing import shared_data
@@ -1255,13 +1256,17 @@ async def compute_hsv_from_regions(sid: str, data: dict | None = None):
 @sio.event
 async def get_bluetooth_state(sid: str, data: dict | None = None):
     try:
+        local_device = bluetooth_utils.get_local_device_info()
+        connected_devices = bluetooth_utils.get_connected_devices()
+        paired_devices = bluetooth_utils.get_paired_devices()
+        other_robot = bluetooth_utils.get_other_robot_info()
         return _ok(
             bluetooth_enabled=bluetooth_utils.get_bluetooth_enabled(),
             process_alive=bluetooth_utils.is_bluetooth_process_alive(),
-            local_device=bluetooth_utils.get_local_device_info(),
-            connected_devices=bluetooth_utils.get_connected_devices(),
-            paired_devices=bluetooth_utils.get_paired_devices(),
-            other_robot=bluetooth_utils.get_other_robot_info(),
+            local_device=local_device.to_dict() if local_device else {},
+            connected_devices=[device.to_dict() for device in connected_devices],
+            paired_devices=[device.to_dict() for device in paired_devices],
+            other_robot=other_robot.to_dict() if other_robot else {},
         )
     except Exception as exc:
         logger.error(f"get_bluetooth_state: {exc}", exc_info=True)
@@ -1295,17 +1300,17 @@ async def set_other_robot(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required")
 
-        info = {
-            "mac_address": mac_address.strip(),
-            "name": d.get("name"),
-            "hostname": d.get("hostname"),
-            "ip_address": d.get("ip_address"),
-            "note": d.get("note"),
-        }
-        info = {k: v for k, v in info.items() if v is not None}
+        info = OtherRobotInfo(
+            mac_address=mac_address.strip().upper(),
+            name=d.get("name") if isinstance(d.get("name"), str) else None,
+            hostname=d.get("hostname") if isinstance(d.get("hostname"), str) else None,
+            ip_address=d.get("ip_address") if isinstance(d.get("ip_address"), str) else None,
+            note=d.get("note") if isinstance(d.get("note"), str) else None,
+        )
 
         bluetooth_utils.set_other_robot_info(info)
-        return _ok(other_robot=bluetooth_utils.get_other_robot_info())
+        stored_other_robot = bluetooth_utils.get_other_robot_info()
+        return _ok(other_robot=stored_other_robot.to_dict() if stored_other_robot else {})
     except Exception as exc:
         logger.error(f"set_other_robot: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1315,15 +1320,19 @@ async def set_other_robot(sid: str, data: dict | None = None):
 async def bluetooth_connect_other_robot(sid: str, data: dict | None = None):
     try:
         d = data or {}
-        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        other_robot = bluetooth_utils.get_other_robot_info()
+        mac_address = d.get("mac_address") or (other_robot.mac_address if other_robot else None)
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required (or set other_robot first)")
 
         result = await bluetooth_utils.connect_async(mac_address.strip())
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to connect")
+        if not result.success:
+            return _err(result.error or "Failed to connect")
 
-        return _ok(result=result, connected_devices=bluetooth_utils.get_connected_devices())
+        return _ok(
+            result=result.to_dict(),
+            connected_devices=[device.to_dict() for device in bluetooth_utils.get_connected_devices()],
+        )
     except Exception as exc:
         logger.error(f"bluetooth_connect_other_robot: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1333,15 +1342,19 @@ async def bluetooth_connect_other_robot(sid: str, data: dict | None = None):
 async def bluetooth_disconnect_other_robot(sid: str, data: dict | None = None):
     try:
         d = data or {}
-        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        other_robot = bluetooth_utils.get_other_robot_info()
+        mac_address = d.get("mac_address") or (other_robot.mac_address if other_robot else None)
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required (or set other_robot first)")
 
         result = await bluetooth_utils.disconnect_async(mac_address.strip())
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to disconnect")
+        if not result.success:
+            return _err(result.error or "Failed to disconnect")
 
-        return _ok(result=result, connected_devices=bluetooth_utils.get_connected_devices())
+        return _ok(
+            result=result.to_dict(),
+            connected_devices=[device.to_dict() for device in bluetooth_utils.get_connected_devices()],
+        )
     except Exception as exc:
         logger.error(f"bluetooth_disconnect_other_robot: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1351,9 +1364,12 @@ async def bluetooth_disconnect_other_robot(sid: str, data: dict | None = None):
 async def bluetooth_send_message(sid: str, data: dict | None = None):
     try:
         d = data or {}
-        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        other_robot = bluetooth_utils.get_other_robot_info()
+        mac_address = d.get("mac_address") or (other_robot.mac_address if other_robot else None)
         message_type = d.get("message_type")
         content = d.get("content")
+        sender_id_raw = d.get("sender_id")
+        sender_id = sender_id_raw.strip() if isinstance(sender_id_raw, str) and sender_id_raw.strip() else None
 
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required (or set other_robot first)")
@@ -1366,11 +1382,12 @@ async def bluetooth_send_message(sid: str, data: dict | None = None):
             mac_address=mac_address.strip(),
             message_type=message_type.strip(),
             content=str(content),
+            sender_id=sender_id,
         )
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to send message")
+        if not result.success:
+            return _err(result.error or "Failed to send message")
 
-        return _ok(result=result)
+        return _ok(result=result.to_dict())
     except Exception as exc:
         logger.error(f"bluetooth_send_message: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1385,8 +1402,8 @@ async def get_bluetooth_messages(sid: str, data: dict | None = None):
         limit = limit_raw if isinstance(limit_raw, int) and limit_raw > 0 else None
 
         return _ok(
-            received=bluetooth_utils.get_received_messages(clear=clear, limit=limit),
-            sent=bluetooth_utils.get_sent_messages(clear=clear, limit=limit),
+            received=[message.to_dict() for message in bluetooth_utils.get_received_messages(clear=clear, limit=limit)],
+            sent=[message.to_dict() for message in bluetooth_utils.get_sent_messages(clear=clear, limit=limit)],
         )
     except Exception as exc:
         logger.error(f"get_bluetooth_messages: {exc}", exc_info=True)
@@ -1402,11 +1419,17 @@ async def bluetooth_list_pairable_devices(sid: str, data: dict | None = None):
             return _err("timeout_seconds must be a positive integer")
 
         result = await bluetooth_utils.list_pairable_devices_async(timeout_seconds=timeout_raw)
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to list pairable devices")
+        if not result.success:
+            return _err(result.error or "Failed to list pairable devices")
 
-        devices = result.get("data", {}).get("devices", [])
-        return _ok(result=result, devices=devices)
+        raw_devices = result.data.get("devices", [])
+        devices = []
+        if isinstance(raw_devices, list):
+            for device in raw_devices:
+                parsed_device = PairedDevice.from_dict(device)
+                if parsed_device is not None:
+                    devices.append(parsed_device.to_dict())
+        return _ok(result=result.to_dict(), devices=devices)
     except Exception as exc:
         logger.error(f"bluetooth_list_pairable_devices: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1425,10 +1448,13 @@ async def bluetooth_pair_device(sid: str, data: dict | None = None):
             mac_address=mac_address.strip(),
         )
         
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to pair device")
+        if not result.success:
+            return _err(result.error or "Failed to pair device")
         
-        return _ok(result=result, paired_devices=bluetooth_utils.get_paired_devices())
+        return _ok(
+            result=result.to_dict(),
+            paired_devices=[device.to_dict() for device in bluetooth_utils.get_paired_devices()],
+        )
     except Exception as exc:
         logger.error(f"bluetooth_pair_device: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1445,10 +1471,13 @@ async def bluetooth_unpair_device(sid: str, data: dict | None = None):
         
         result = await bluetooth_utils.unpair_device_async(mac_address.strip())
         
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to unpair device")
+        if not result.success:
+            return _err(result.error or "Failed to unpair device")
         
-        return _ok(result=result, paired_devices=bluetooth_utils.get_paired_devices())
+        return _ok(
+            result=result.to_dict(),
+            paired_devices=[device.to_dict() for device in bluetooth_utils.get_paired_devices()],
+        )
     except Exception as exc:
         logger.error(f"bluetooth_unpair_device: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1465,10 +1494,10 @@ async def set_bluetooth_pairing_mode(sid: str, data: dict | None = None):
         
         result = await bluetooth_utils.set_pairing_mode_async(enabled=enabled_raw)
         
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to set pairing mode")
+        if not result.success:
+            return _err(result.error or "Failed to set pairing mode")
         
-        return _ok(result=result, pairing_mode_enabled=enabled_raw)
+        return _ok(result=result.to_dict(), pairing_mode_enabled=enabled_raw)
     except Exception as exc:
         logger.error(f"set_bluetooth_pairing_mode: {exc}", exc_info=True)
         return _err("Internal server error")

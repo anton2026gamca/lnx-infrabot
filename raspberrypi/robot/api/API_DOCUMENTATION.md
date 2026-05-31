@@ -1306,27 +1306,21 @@ Get Bluetooth process status, local device identity, connected devices, paired d
   bluetooth_enabled: boolean,
   process_alive: boolean,
   local_device: {
-    device_id?: string,
+    mac_address?: string,
     hostname?: string,
     ip_address?: string
   },
   connected_devices: Array<{
     name: string,
     mac_address: string,
-    hostname?: string,
-    ip_address?: string,
-    last_connected?: number,
     connected: boolean,
-    device_id?: string
+    last_seen?: number
   }>,
   paired_devices: Array<{
     name: string,
     mac_address: string,
-    hostname?: string,
-    ip_address?: string,
-    last_connected?: number,
     connected: boolean,
-    device_id?: string
+    last_seen?: number
   }>,
   other_robot: {
     mac_address?: string,
@@ -1393,10 +1387,19 @@ Set or clear metadata for the selected "other robot".
 ```typescript
 {
   status: "ok" | "error",
-  other_robot?: object,
+  other_robot?: {
+    mac_address?: string,
+    name?: string,
+    hostname?: string,
+    ip_address?: string,
+    note?: string
+  },
   error?: string
 }
 ```
+
+**Notes:**
+- `mac_address` is normalized to uppercase when stored.
 
 ### `bluetooth_connect_other_robot`
 
@@ -1469,7 +1472,8 @@ Send a custom Bluetooth message to the selected robot or an explicit `mac_addres
   data: {
     mac_address?: string,
     message_type: string,
-    content: string
+    content: string,
+    sender_id?: string
   }
 }
 ```
@@ -1491,6 +1495,10 @@ Send a custom Bluetooth message to the selected robot or an explicit `mac_addres
   error?: string
 }
 ```
+
+**Notes:**
+- `sender_id` is optional. If omitted, sent messages use the local robot hostname as sender ID.
+- Received messages always include `sender_mac`; if no `sender_id` was provided by the sender, it is filled with `sender_mac`.
 
 ### `get_bluetooth_messages`
 
@@ -1551,21 +1559,15 @@ List nearby discoverable Bluetooth devices that are available for pairing.
   result?: {
     command_id: number,
     success: boolean,
-    data: {
-      devices: Array<{
-        name: string,
-        mac_address: string,
-        is_paired: boolean
-      }>,
-      timeout_seconds: number
-    },
+    data: object,
     error?: string,
     timestamp: number
   },
   devices?: Array<{
     name: string,
     mac_address: string,
-    is_paired: boolean
+    connected: boolean,
+    last_seen?: number
   }>,
   error?: string
 }
@@ -1574,7 +1576,7 @@ List nearby discoverable Bluetooth devices that are available for pairing.
 **Notes:**
 - Requires `bluetoothctl` and sufficient permissions on the Raspberry Pi
 - `timeout_seconds` controls how long active discovery runs before returning results
-- `is_paired` indicates whether the discovered device already exists in the saved paired devices list
+- `devices` are normalized to the same shape as paired/connected device entries
 
 ### `bluetooth_pair_device`
 
@@ -1604,11 +1606,8 @@ Pair a new Bluetooth device and store its metadata.
   paired_devices?: Array<{
     name: string,
     mac_address: string,
-    hostname?: string,
-    ip_address?: string,
-    last_connected?: number,
     connected: boolean,
-    device_id?: string
+    last_seen?: number
   }>,
   error?: string
 }
@@ -1642,11 +1641,8 @@ Unpair a previously paired Bluetooth device.
   paired_devices?: Array<{
     name: string,
     mac_address: string,
-    hostname?: string,
-    ip_address?: string,
-    last_connected?: number,
     connected: boolean,
-    device_id?: string
+    last_seen?: number
   }>,
   error?: string
 }

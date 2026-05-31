@@ -16,6 +16,7 @@ from robot.config import *
 @profile_function
 def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     motors_controller = SmartMotorsController()
+    prev_mode = shared_data.get_robot_mode()
 
     ticks = 0
     last_update_time = time.perf_counter()
@@ -24,6 +25,9 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         start_time = time.perf_counter()
 
         mode = shared_data.get_robot_mode()
+
+        if mode == RobotMode.AUTONOMOUS and prev_mode != RobotMode.AUTONOMOUS:
+            autonomous_mode.reset_current_state_machine()
     
         if mode == RobotMode.IDLE:
             motors_controller.reset()
@@ -34,6 +38,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         elif mode == RobotMode.AUTONOMOUS:
             autonomous_mode.tick()
 
+        shared_data.get_bluetooth_new_received_messages()
         autonomous_mode.check_state_machine_change_request()
 
         ticks += 1
@@ -47,3 +52,5 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         sleep_duration = max(0.0, LOGIC_LOOP_PERIOD - elapsed - 0.001)
         if sleep_duration > 0:
             sleep(sleep_duration)
+
+        prev_mode = mode

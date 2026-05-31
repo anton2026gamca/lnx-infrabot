@@ -4,6 +4,7 @@ import multiprocessing
 import multiprocessing.shared_memory
 import time
 import numpy as np
+import queue
 from multiprocessing.managers import DictProxy
 from robot.config import *
 
@@ -15,6 +16,7 @@ logs_buffer = multiprocessing.Queue(maxsize=LOG_BUFFER_MAX_ENTRIES)
 
 
 from robot import profiling, utils
+from robot.bluetooth.bluetooth_manager import BluetoothMessage
 from robot.config import *
 from robot.hardware.teensy import ParsedTeensyData, IRData, CompassData, RunningStateData
 from robot.robot import RobotManualControl
@@ -935,6 +937,7 @@ bt_device_info = _manager.dict()
 bt_devices_info = _manager.list()
 bt_paired_devices_info = _manager.list()
 bt_received_messages = _manager.list()
+bt_new_received_messages = multiprocessing.Queue(maxsize=128)
 bt_sent_messages = _manager.list()
 bt_commands = _manager.list()
 bt_command_results = _manager.dict()
@@ -1027,6 +1030,7 @@ def get_bluetooth_paired_devices_info() -> list[dict]:
 def add_bluetooth_received_message(message: dict) -> None:
     with bt_lock:
         bt_received_messages.append(message or {})
+    bt_new_received_messages.put_nowait(message or {})
 
 
 @profile_function
@@ -1038,6 +1042,21 @@ def get_bluetooth_received_messages(clear: bool = False, limit: int | None = Non
         if clear:
             bt_received_messages[:] = []
         return messages
+
+
+@profile_function
+def get_bluetooth_new_received_messages() -> list[BluetoothMessage]:
+    messages = []
+
+    while True:
+        try:
+            msg = BluetoothMessage.from_dict(bt_new_received_messages.get_nowait())
+            if msg is not None:
+                messages.append(msg)
+        except queue.Empty:
+            break
+
+    return messages
 
 
 @profile_function
