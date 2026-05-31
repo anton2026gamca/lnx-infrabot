@@ -142,7 +142,7 @@ class StatusScreen(Screen):
             show_up=page_index > 0,
             show_down=page_index < len(pages) - 1,
         )
-        if page_index == 0:
+        if LINE_ROW_INDEX < len(pages[page_index]) and line_text == pages[page_index][LINE_ROW_INDEX]:
             render_hints = RenderHints(
                 show_up=render_hints.show_up,
                 show_down=render_hints.show_down,
@@ -495,11 +495,21 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
 
     fps_data = shared_data.get_processes_fps()
 
+    pos = shared_data.get_last_position_estimate()
+    pos_x_text = _format_fixed_len(_format_position_mm(pos.x_mm if isinstance(pos.x_mm, (int, float)) else None), 5) if pos else "--   "
+    pos_y_text = _format_fixed_len(_format_position_mm(pos.y_mm if isinstance(pos.y_mm, (int, float)) else None), 5) if pos else "--   "
+
+    mode = shared_data.get_robot_mode()
+    if mode == RobotMode.AUTONOMOUS:
+        status_text = _role_label()
+    else:
+        status_text = _mode_label(mode)
+
     return [
         [
             f"IP: {ip_address}",
             f"Heading: {heading}",
-            line_display,
+            f"Mode: {status_text}"
         ],
         [
             "Ball",
@@ -511,7 +521,11 @@ def _build_status_pages(now: float, line_display: str | None = None) -> list[lis
             _format_goal_line("E", enemy_color, enemy_goal),
             _format_goal_line("O", own_color, own_goal),
         ],
-        _position_estimate_lines(),
+        [
+            "Position",
+            f"X: {pos_x_text} Y: {pos_y_text}",
+            line_display,
+        ],
         [
             f"BT Comm: {bluetooth_enabled}",
             f"State: {bluetooth_status}",
