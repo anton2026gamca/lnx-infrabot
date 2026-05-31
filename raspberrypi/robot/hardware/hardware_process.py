@@ -85,6 +85,8 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
                 if time.perf_counter() > last_log_time + 1:
                     logger.debug(f"Messages - Received: {messages_received}, Sent: {messages_sent}, Corrupted: {corrupted_messages}")
+                    if messages_received < 60:
+                        logger.warning(f"Received only {messages_received} messages this second")
                     shared_data.set_process_fps(shared_data.ProfilingProcesses.HARDWARE_SEND, messages_sent)
                     shared_data.set_process_fps(shared_data.ProfilingProcesses.HARDWARE_RECEIVE, messages_received)
                     shared_data.set_process_fps(shared_data.ProfilingProcesses.HARDWARE_CORRUPT, corrupted_messages)

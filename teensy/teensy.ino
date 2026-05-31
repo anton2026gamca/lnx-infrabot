@@ -23,7 +23,7 @@ enum DebugLevel {
 };
 
 
-#define TARGET_UPS 120
+#define TARGET_UPS 125
 #define INTERVAL_US (1000000 / TARGET_UPS)
 
 
