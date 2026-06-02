@@ -572,6 +572,10 @@ class BluetoothManager:
             )
 
             self.server_thread.start()
+
+            self._run_btctl("agent", "NoInputNoOutput")
+            self._run_btctl("default-agent")
+
             return True
 
         except Exception as e:
