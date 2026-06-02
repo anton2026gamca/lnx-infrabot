@@ -12,13 +12,13 @@ logger = utils.get_logger("State Machine")
 
 
 class State:
-    def on_enter(self, state_machine: "StateMachine") -> None:
+    def on_enter(self, state_machine: StateMachine) -> None:
         pass
 
-    def on_exit(self, state_machine: "StateMachine") -> None:
+    def on_exit(self, state_machine: StateMachine) -> None:
         pass
 
-    def tick(self, state_machine: "StateMachine") -> None:
+    def tick(self, state_machine: StateMachine) -> None:
         pass
 
 

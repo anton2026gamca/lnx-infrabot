@@ -460,7 +460,8 @@ def _check_role_update(state_machine: StateMachine) -> bool:
                     ):
                         role_changed = True
 
-    shared_data.set_autonomous_status_text(AutonomousStatusText.GOALKEEPER if data.is_goalkeeper else AutonomousStatusText.ATTACKER)
+    if role_changed:
+        shared_data.set_autonomous_status_text(AutonomousStatusText.GOALKEEPER if data.is_goalkeeper else AutonomousStatusText.ATTACKER)
 
     return role_changed
 
@@ -531,9 +532,7 @@ def change_role(
         if state is not None and type(state_machine.current_state) != state and can_transition:
             state_machine.transition(state)
 
-        shared_data.set_autonomous_status_text(
-            AutonomousStatusText.GOALKEEPER if is_goalkeeper else AutonomousStatusText.ATTACKER
-        )
+        shared_data.set_autonomous_status_text(AutonomousStatusText.GOALKEEPER if is_goalkeeper else AutonomousStatusText.ATTACKER)
 
         if LOG_ROLE_CHANGES:
             logger.info(f"Role changed: {"goalkeeper" if prev_is_goalkeeper else "attacker"} -> {"goalkeeper" if is_goalkeeper else "attacker"} ({state() if state is not None else "None"})")
@@ -558,123 +557,142 @@ class LineAvoidingState(State):
         self.min_clear_time = 0.5
         self.clear_time_start = None
         self.line_exit_time = None
-        self.slow_duration = 1.0
-        self.absolute_avoid_direction = None
-        
+
+        self.safe_target = None
+
+        self.safe_margin = 450
+        self.target_tolerance = 120
+
+        state_machine.motors.set_functions_enabled(position_based_speed_enabled=False)
+
+    @profile_function
+    def on_exit(self, state_machine: StateMachine) -> None:
+        state_machine.motors.set_functions_enabled(position_based_speed_enabled=True)
+
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:
         data = _update_soccer_data(state_machine)
+
         if _check_role_update(state_machine):
             return
 
-        position = vision.get_position_estimate()
         current_time = time.time()
 
+        heading = data.sensors.heading if data.sensors.heading != 999.0 else 0.0
+        position = vision.get_position_estimate()
         rotate = _get_goal_tracking_rotation(state_machine, data)
-        
-        currently_detected = any(data.lines.detected)
-        
-        if currently_detected:
-            self.absolute_avoid_direction = self._calculate_absolute_avoid_direction(data, position)
-            relative_avoid_direction = (self.absolute_avoid_direction - data.sensors.heading + 360) % 360
+
+        line_detected = any(data.lines.detected)
+
+        if line_detected:
             self.clear_time_start = None
             self.line_exit_time = None
-            state_machine.motors.set_motors(angle=relative_avoid_direction, speed=1.0, rotate=rotate)
+
+            if position is not None:
+                self.safe_target = self._calculate_safe_target(position.x_mm, position.y_mm)
         else:
             if self.clear_time_start is None:
                 self.clear_time_start = current_time
                 self.line_exit_time = current_time
-            
-            time_without_detection = current_time - self.clear_time_start
-            
-            recent_detections_exist = any(
-                any(detections) for detections, timestamp in data.lines.detection_history
-                if current_time - timestamp < 0.2
-            ) if data.lines.detection_history else False
-            
-            if time_without_detection > self.min_clear_time and not recent_detections_exist:
+
+        if position is not None and self.safe_target is not None:
+            target_x, target_y = self.safe_target
+
+            delta_x = target_x - position.x_mm
+            delta_y = target_y - position.y_mm
+
+            distance = math.hypot(delta_x, delta_y)
+
+            global_angle = _field_delta_to_global_angle_deg(delta_x, delta_y)
+            local_angle = _global_to_local_angle_deg(global_angle, heading)
+
+            if (
+                not line_detected
+                and self.clear_time_start is not None
+                and current_time - self.clear_time_start > self.min_clear_time
+                and distance < self.target_tolerance
+            ):
                 state_machine.transition(_neutral_state(state_machine))
                 return
-            
-            time_since_exit = current_time - self.line_exit_time if self.line_exit_time else 0
-            if time_since_exit < self.slow_duration and self.absolute_avoid_direction is not None:
-                relative_avoid_direction = (self.absolute_avoid_direction - data.sensors.heading + 360) % 360
-                state_machine.motors.set_motors(angle=relative_avoid_direction, speed=0.7, rotate=rotate)
-            else:
-                state_machine.motors.set_motors(angle=0.0, speed=0.0, rotate=0.0)
+
+            speed = _clamp(distance / 250.0, 0.4, 1.0)
+
+            state_machine.motors.set_motors(
+                angle=local_angle,
+                speed=speed,
+                rotate=rotate,
+            )
+        else:
+            avoid_direction = self._fallback_sensor_avoid(data)
+            relative_direction = (avoid_direction - heading) % 360
+
+            state_machine.motors.set_motors(
+                angle=relative_direction,
+                speed=0.8,
+                rotate=rotate,
+            )
 
     @profile_function
-    def _calculate_absolute_avoid_direction(self, data: SoccerStateMachineData, position) -> float:
+    def _calculate_safe_target(self, x_mm: float, y_mm: float) -> tuple[float, float]:
+        min_x = -FIELD_WIDTH_MM / 2 + self.safe_margin
+        max_x = FIELD_WIDTH_MM / 2 - self.safe_margin
+
+        min_y = self.safe_margin
+        max_y = FIELD_LENGTH_MM - self.safe_margin
+
+        left_dist = x_mm + FIELD_WIDTH_MM / 2
+        right_dist = FIELD_WIDTH_MM / 2 - x_mm
+
+        enemy_dist = y_mm
+        own_dist = FIELD_LENGTH_MM - y_mm
+
+        nearest = min(
+            left_dist,
+            right_dist,
+            enemy_dist,
+            own_dist,
+        )
+
+        if nearest == left_dist:
+            return (min_x, _clamp(y_mm, min_y, max_y))
+
+        elif nearest == right_dist:
+            return (max_x,_clamp(y_mm, min_y, max_y))
+
+        elif nearest == enemy_dist:
+            return (_clamp(x_mm, min_x, max_x), min_y)
+
+        else:
+            return (_clamp(x_mm, min_x, max_x), max_y)
+
+    @profile_function
+    def _fallback_sensor_avoid(
+        self,
+        data: SoccerStateMachineData,
+    ) -> float:
+
         detected_angles = []
 
-        hardware_data = shared_data.get_hardware_compass_ir()
-        robot_heading = hardware_data[0] if hardware_data[0] != 999.0 else 0.0
+        heading = data.sensors.heading if data.sensors.heading != 999.0 else 0.0
 
         for i, detected in enumerate(data.lines.detected):
             if detected and i < len(LINE_SENSOR_LOCATIONS):
-                detected_angles.append((LINE_SENSOR_LOCATIONS[i] + robot_heading) % 360)
-
-        current_time = time.time()
-        for detections, timestamp in data.lines.detection_history:
-            if current_time - timestamp < 0.3:
-                for i, detected in enumerate(detections):
-                    if detected and i < len(LINE_SENSOR_LOCATIONS):
-                        detected_angles.append((LINE_SENSOR_LOCATIONS[i] + robot_heading) % 360)
-
-        detected_angles = list(set(detected_angles))
+                detected_angles.append((LINE_SENSOR_LOCATIONS[i] + heading) % 360)
 
         if not detected_angles:
             return 0.0
 
-        if position:
-            too_close_to_enemy_goal_line = position.y_mm < 400
-            too_close_to_our_goal_line = (FIELD_LENGTH_MM - position.y_mm) < 400
+        angles_rad = [
+            math.radians(a)
+            for a in detected_angles
+        ]
 
-            too_far_left  = position.x_mm < 400 - FIELD_WIDTH_MM / 2
-            too_far_right = position.x_mm > FIELD_WIDTH_MM / 2 - 400
-
-            left_detected = any(
-                (angle >= 45 and angle <= 135)
-                for angle in detected_angles
-            )
-            right_detected = any(
-                (angle >= 225 and angle <= 315)
-                for angle in detected_angles
-            )
-
-            if too_close_to_enemy_goal_line:
-                if too_far_left and left_detected:
-                    return 135
-                if too_far_right and right_detected:
-                    return 225
-                return 180
-
-            elif too_close_to_our_goal_line:
-                if too_far_left:
-                    return 45 if left_detected else 0
-                if too_far_right:
-                    return -45 if right_detected else 0
-                ball_angle = data.sensors.cam_ball_angle if data.sensors.use_cam_ball else data.sensors.ir_ball_angle
-                ball_angle_global = utils.normalize_angle_deg(ball_angle + data.sensors.heading)
-                if ball_angle_global >= 30 and ball_angle_global <= 100:
-                    return 60
-                if ball_angle_global <= -30 and ball_angle_global >= -100:
-                    return -60
-                return 0
-
-            elif too_far_left:
-                return 90
-
-            elif too_far_right:
-                return -90
-
-        angles_rad = [math.radians(a) for a in detected_angles]
         x = sum(math.cos(a) for a in angles_rad)
         y = sum(math.sin(a) for a in angles_rad)
+
         avg_angle = (math.degrees(math.atan2(y, x)) + 360) % 360
-        
-        avoid_angle = (avg_angle + 180) % 360
-        return avoid_angle
+
+        return (avg_angle + 180) % 360
 
 
 # ------------------------------------------------------------------
@@ -734,7 +752,6 @@ class AttackerApproachState(State):
 
     @profile_function
     def on_enter(self, state_machine: StateMachine) -> None:
-        shared_data.set_autonomous_status_text(AutonomousStatusText.ATTACKER)
         if LOG_ATTACKER_STATE:
             logger.info("Attacker approach: entering")
 
@@ -806,7 +823,6 @@ class AttackerPushState(State):
 
     @profile_function
     def on_enter(self, state_machine: StateMachine) -> None:
-        shared_data.set_autonomous_status_text(AutonomousStatusText.ATTACKER)
         if LOG_ATTACKER_STATE:
             logger.info("Attacker push: entering")
 
@@ -858,9 +874,13 @@ class GoalkeeperApproachState(State):
     @profile_function
     def on_enter(self, state_machine: StateMachine) -> None:
         self._goal_line_pushoff_ticks = 0
-        shared_data.set_autonomous_status_text(AutonomousStatusText.GOALKEEPER)
         if LOG_GOALKEEPER_STATE:
             logger.info("Goalkeeper approach: entering")
+        state_machine.motors.set_functions_enabled(position_based_speed_enabled=False)
+
+    @profile_function
+    def on_exit(self, state_machine: StateMachine) -> None:
+        state_machine.motors.set_functions_enabled(position_based_speed_enabled=True)
 
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:
@@ -963,9 +983,13 @@ class GoalkeeperDefendState(State):
     def on_enter(self, state_machine: StateMachine) -> None:
         self._goal_lost_ticks = 0
         self._goal_line_pushoff_ticks = 0
-        shared_data.set_autonomous_status_text(AutonomousStatusText.GOALKEEPER)
         if LOG_GOALKEEPER_STATE:
             logger.info("Goalkeeper defend: entering")
+        state_machine.motors.set_functions_enabled(position_based_speed_enabled=False)
+
+    @profile_function
+    def on_exit(self, state_machine: StateMachine) -> None:
+        state_machine.motors.set_functions_enabled(position_based_speed_enabled=True)
 
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:

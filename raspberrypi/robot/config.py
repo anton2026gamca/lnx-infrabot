@@ -109,7 +109,7 @@ DEFAULT_ROTATION_CORRECTION_ENABLED = True
 # When enabled, the robot uses goal distance to slow down near the enemy line
 DEFAULT_POSITION_BASED_SPEED_ENABLED = True
 # Minimum speed multiplier when close to any line (0.0 to 1.0)
-AUTO_POSITION_SLOW_MIN_SPEED = 0.5
+AUTO_POSITION_SLOW_MIN_SPEED = 0.7
 # Distance from center (x coordinate) at which to start slowing down (mm)
 AUTO_POSITION_SLOW_START_DISTANCE_X_MM = 700.0
 # Range where slow speed isn't applied (y coordinate, mm)

@@ -174,7 +174,7 @@ class SmartMotorsController(MotorsController):
             pos = vision.get_position_estimate()
             if pos is not None:
                 distances = [
-                    pos.x_mm - AUTO_POSITION_SLOW_START_DISTANCE_X_MM,
+                    abs(pos.x_mm) - AUTO_POSITION_SLOW_START_DISTANCE_X_MM,
                     AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM - pos.y_mm,
                     pos.y_mm - AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM
                 ]
