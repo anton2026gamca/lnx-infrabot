@@ -14,7 +14,7 @@ from luma.core.interface.serial import i2c
 from luma.oled.device import ssd1306
 from PIL import Image, ImageDraw, ImageFont
 
-import robot.bluetooth.utils as bluetooth_utils
+import robot.bluetooth.utils as bluetooth
 from robot.config import CAMERA_FOV_DEG, LINE_SENSOR_COUNT, LINE_SENSOR_MAX_VALUE, LINE_SENSOR_MIN_VALUE
 from robot.display.rendering import draw_mono_text
 from robot.logic import autonomous_mode
@@ -181,7 +181,8 @@ class ModeDisplayScreen(Screen):
 
     def render(self, now: float, max_chars: int) -> tuple[list[str], int | None, RenderHints]:
         lines = _mode_display_lines(max_chars)
-        return _pad_lines(lines), None, RenderHints(centered=True, show_lock=self._show_lock, show_down=self._show_down)
+        invert_colors = False if _bluetooth_other_robot_status(shared_data.get_bluetooth_other_robot_info().get("mac_address")) == "Connected" or not shared_data.get_bluetooth_enabled() else True
+        return _pad_lines(lines), None, RenderHints(centered=True, show_lock=self._show_lock, show_down=self._show_down, invert_colors=invert_colors)
 
 
 class RepeatButton:
@@ -241,9 +242,10 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger) -
 
         if motors_on:
             lines = _mode_display_lines(max_chars)
-            frame = ("mode", tuple(lines))
+            invert_colors = False if _bluetooth_other_robot_status(shared_data.get_bluetooth_other_robot_info().get("mac_address")) == "Connected" or not shared_data.get_bluetooth_enabled() else True
+            frame = ("mode", tuple(lines), invert_colors)
             if frame != last_frame:
-                _render_centered_frame(device, font, lines, RenderHints(show_lock=True))
+                _render_centered_frame(device, font, lines, RenderHints(show_lock=True, invert_colors=invert_colors))
                 last_frame = frame
             sleep(0.05)
             continue
@@ -434,7 +436,7 @@ def _set_goal_color(color: str) -> Screen:
 
 
 def _set_bluetooth_enabled(enabled: bool) -> Screen:
-    bluetooth_utils.set_bluetooth_enabled(enabled)
+    bluetooth.set_bluetooth_enabled(enabled)
     return MessageScreen(["Bluetooth:", "Enabled" if enabled else "Disabled"])
 
 
@@ -784,6 +786,7 @@ class RenderHints:
     line_display: LineDisplay | None = None
     centered: bool = False
     show_lock: bool = False
+    invert_colors: bool = False
 
 
 def _render_frame(
@@ -793,10 +796,15 @@ def _render_frame(
     highlight_index: int | None,
     render_hints: RenderHints,
 ) -> None:
+    fg_color = 255 if not render_hints.invert_colors else 0
+    bg_color = 0 if not render_hints.invert_colors else 255
+
     image = Image.new("1", (DISPLAY_WIDTH, DISPLAY_HEIGHT))
     draw = ImageDraw.Draw(image)
 
     padded_lines = _pad_lines(list(lines))
+    
+    draw.rectangle((0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT), fill=bg_color)
 
     for idx, line in enumerate(padded_lines[:MAX_LINES]):
         y = LINE_HEIGHT * idx + LINE_MARGIN
@@ -806,10 +814,10 @@ def _render_frame(
         if highlight_index is not None and idx == highlight_index:
             top = max(0, y)
             bottom = min(DISPLAY_HEIGHT - 1, y + LINE_HEIGHT - 1)
-            draw.rectangle((0, top, DISPLAY_WIDTH, bottom - (1 if LINE_MARGIN % 2 == 1 else 0)), fill=255)
-            draw_mono_text(draw, (0, y), line, font, fill=0, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
+            draw.rectangle((0, top, DISPLAY_WIDTH, bottom - (1 if LINE_MARGIN % 2 == 1 else 0)), fill=fg_color)
+            draw_mono_text(draw, (0, y), line, font, fill=bg_color, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
         else:
-            draw_mono_text(draw, (0, y), line, font, fill=255, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
+            draw_mono_text(draw, (0, y), line, font, fill=fg_color, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
 
     _draw_scroll_indicators(draw, render_hints, highlight_index)
     device.display(image)
@@ -847,10 +855,15 @@ def _render_centered_frame(
     lines: Sequence[str],
     render_hints: RenderHints | None = None,
 ) -> None:
+    fg_color = 255 if not render_hints or not render_hints.invert_colors else 0
+    bg_color = 0 if not render_hints or not render_hints.invert_colors else 255
+
     image = Image.new("1", (DISPLAY_WIDTH, DISPLAY_HEIGHT))
     draw = ImageDraw.Draw(image)
 
     padded_lines = _pad_lines(list(lines))
+    
+    draw.rectangle((0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT), fill=bg_color)
 
     for idx, line in enumerate(padded_lines[:MAX_LINES]):
         if not line:
@@ -858,11 +871,11 @@ def _render_centered_frame(
         y = LINE_HEIGHT * idx + LINE_MARGIN
         text_width = _mono_text_width(line)
         x = max(0, (DISPLAY_WIDTH - text_width) // 2)
-        draw_mono_text(draw, (x, y), line, font, fill=255, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
+        draw_mono_text(draw, (x, y), line, font, fill=fg_color, spacing=TEXT_SPACING, char_width=MONO_CHAR_WIDTH)
 
     if render_hints is not None:
         if render_hints.show_lock:
-            _draw_lock_indicator(draw)
+            _draw_lock_indicator(draw, render_hints.invert_colors)
         _draw_scroll_indicators(draw, render_hints)
 
     device.display(image)
@@ -874,22 +887,25 @@ def _mono_text_width(text: str) -> int:
     return (len(text) * (MONO_CHAR_WIDTH + TEXT_SPACING)) - TEXT_SPACING
 
 
-def _draw_lock_indicator(draw: ImageDraw.ImageDraw) -> None:
+def _draw_lock_indicator(draw: ImageDraw.ImageDraw, invert_colors: bool = True) -> None:
     x = DISPLAY_WIDTH - LOCK_ICON_WIDTH - LOCK_ICON_MARGIN_X
     y = LOCK_ICON_MARGIN_Y
     x = max(0, x)
 
+    fg_color = 255 if not invert_colors else 0
+    bg_color = 0 if not invert_colors else 255
+
     shackle_bottom = y + 2
     draw.rectangle(
         (x + 1, y, x + LOCK_ICON_WIDTH - 2, shackle_bottom),
-        outline=255,
-        fill=0,
+        outline=fg_color,
+        fill=bg_color,
     )
 
     body_top = shackle_bottom + 1
     draw.rectangle(
         (x, body_top, x + LOCK_ICON_WIDTH - 1, y + LOCK_ICON_HEIGHT - 1),
-        fill=255,
+        fill=fg_color,
     )
 
 
@@ -923,11 +939,14 @@ def _draw_scroll_indicators(
     if not scroll_hints.show_up and not scroll_hints.show_down:
         return
 
+    fg_color = 255 if not scroll_hints.invert_colors else 0
+    bg_color = 0 if not scroll_hints.invert_colors else 255
+
     x = DISPLAY_WIDTH - SCROLL_ARROW_WIDTH - SCROLL_ARROW_MARGIN_X
 
     if scroll_hints.show_up:
         y = LINE_MARGIN + SCROLL_ARROW_MARGIN_Y
-        fill = 0 if highlight_index == 0 else 255
+        fill = bg_color if highlight_index == 0 else fg_color
         draw.polygon(
             (
                 (x, y + SCROLL_ARROW_HEIGHT - 1),
@@ -939,7 +958,7 @@ def _draw_scroll_indicators(
 
     if scroll_hints.show_down:
         y = DISPLAY_HEIGHT - LINE_MARGIN - SCROLL_ARROW_MARGIN_Y - SCROLL_ARROW_HEIGHT
-        fill = 0 if highlight_index == MAX_LINES - 1 else 255
+        fill = bg_color if highlight_index == MAX_LINES - 1 else fg_color
         draw.polygon(
             (
                 (x, y),
