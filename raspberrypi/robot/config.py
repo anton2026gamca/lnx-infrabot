@@ -37,7 +37,7 @@ TEENSY_PORT = "/dev/ttyAMA0"
 TEENSY_BAUD = 230400
 TEENSY_TIMEOUT = 0.1
 
-COMMUNICATION_LOOP_FREQUENCY = 120
+COMMUNICATION_LOOP_FREQUENCY = 240
 COMMUNICATION_LOOP_PERIOD = 1.0 / COMMUNICATION_LOOP_FREQUENCY
 
 # =========================== CONTROL LOOP SETTINGS ===============================
@@ -109,11 +109,11 @@ DEFAULT_ROTATION_CORRECTION_ENABLED = True
 # When enabled, the robot uses goal distance to slow down near the enemy line
 DEFAULT_POSITION_BASED_SPEED_ENABLED = True
 # Minimum speed multiplier when close to any line (0.0 to 1.0)
-AUTO_POSITION_SLOW_MIN_SPEED = 0.7
+AUTO_POSITION_SLOW_MIN_SPEED = 0.5
 # Distance from center (x coordinate) at which to start slowing down (mm)
-AUTO_POSITION_SLOW_START_DISTANCE_X_MM = 700.0
+AUTO_POSITION_SLOW_START_DISTANCE_X_MM = 600.0
 # Range where slow speed isn't applied (y coordinate, mm)
-AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM = 300.0
+AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM = 400.0
 AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM = 1900.0
 # Apply lowest speed multiplier when distance from nearest slow speed start is >= this (mm)
 AUTO_POSITION_SLOW_END_DISTANCE_MM = 200.0

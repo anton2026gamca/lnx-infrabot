@@ -42,7 +42,7 @@ APPROACH_SPEED = 1.0
 # while approaching the ball.
 IR_BALL_APPROACH_ANGLE_RATIO = 0.001
 # Similar ratio for camera-based ball tracking, using the camera ball angle instead of IR.
-CAM_BALL_APPROACH_ANGLE_RATIO = 1.3
+CAM_BALL_APPROACH_ANGLE_RATIO = 1.4
 # The threshold distance to consider the ball "close enough" to initiate pushing (3000 nearest, 0 farthest)
 IR_BALL_CLOSE_THRESHOLD = 2600
 # Angular window around 0° where ball is considered "in front" of the robot
@@ -76,17 +76,11 @@ GOAL_SEARCH_ROTATE_SPEED = 1.0
 
 # ===================== GOALKEEPER SETTINGS =====================
 
-# Switch between straight line and arc movement
-GOALKEEPER_ARC_START_ANGLE_DEG = 45.0
-
-# Distance from the goal line when tracking in a straight line
-GOALKEEPER_DEFEND_LINE_DISTANCE_MM = 450.0
-
 # Distance from our goal center while defending
-GOALKEEPER_DEFEND_ARC_RADIUS_MM = 450.0
+GOALKEEPER_DEFEND_ARC_RADIUS_MM = 400.0
 
 # Maximum sideways movement angle on the defend arc
-GOALKEEPER_MAX_ARC_ANGLE_DEG = 70.0
+GOALKEEPER_MAX_ARC_ANGLE_DEG = 80.0
 
 # How strongly the robot follows the ball angle on the arc
 GOALKEEPER_BALL_ANGLE_TO_ARC_RATIO = 0.7
@@ -782,31 +776,24 @@ class AttackerApproachState(State):
         move_angle = 0.0
         move_speed = APPROACH_SPEED
         rotate = _get_goal_tracking_rotation(state_machine, data)
+        position = vision.get_position_estimate()
+
+        heading = data.sensors.heading
+        ir_angle = data.sensors.ir_ball_angle
 
         if data.sensors.use_cam_ball:
             if abs(data.sensors.cam_ball_angle) > BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:
                 move_angle = data.sensors.cam_ball_angle * CAM_BALL_APPROACH_ANGLE_RATIO
                 move_angle = max(-180, min(180, move_angle))
         else:
-            move_angle = utils.normalize_angle_deg(data.sensors.ir_ball_angle + data.sensors.heading) * data.sensors.ir_ball_distance * IR_BALL_APPROACH_ANGLE_RATIO
-            move_angle = max(-180, min(180, move_angle))
-
-        position = vision.get_position_estimate()
-        if position:
-            y_distance = 400 - position.y_mm
-            if y_distance > 0:
-                left_x_boundry = -FIELD_WIDTH_MM / 2 + y_distance / 2
-                right_x_boundry = FIELD_WIDTH_MM / 2 - y_distance / 2
-                
-                in_left_corner = position.x_mm < left_x_boundry
-                in_right_corner = position.x_mm > right_x_boundry
-
-                absolute_move_angle = (move_angle + data.sensors.heading) % 360
-                
-                if in_left_corner and (absolute_move_angle > 225 or absolute_move_angle < 45):
-                    move_speed = 0
-                if in_right_corner and (absolute_move_angle > 315 or absolute_move_angle < 135):
-                    move_speed = 0
+            if utils.normalize_angle_deg(ir_angle + heading) <= 90:
+                move_angle = utils.normalize_angle_deg(ir_angle + heading) * data.sensors.ir_ball_distance * IR_BALL_APPROACH_ANGLE_RATIO
+                move_angle = max(-180, min(180, move_angle)) - heading
+                if position and position.y_mm > FIELD_LENGTH_MM - 700:
+                    move_angle = max(-90, min(90, move_angle))
+            else:
+                move_angle = utils.normalize_angle_deg(ir_angle) * data.sensors.ir_ball_distance * IR_BALL_APPROACH_ANGLE_RATIO
+                move_angle = max(-180, min(180, move_angle))
 
         move_speed *= AUTO_SPEED_MULTIPLIER
         state_machine.motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
@@ -1112,7 +1099,7 @@ class GoalkeeperDefendState(State):
         vx = tx + rx * radius_error * RADIAL_GAIN
         vy = ty + ry * radius_error * RADIAL_GAIN
 
-        if abs(angle_error) < 20.0 and abs(radius_error) < 20:
+        if abs(angle_error) < 20.0 and abs(radius_error) < 40:
             speed = 0.0
             local_angle = 0.0
         else:
