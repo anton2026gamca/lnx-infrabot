@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from robot.calibration.data_manager import save_calibration_data
 from robot.multiprocessing import shared_data
 from robot.multiprocessing.shared_data import AutonomousStatusText
 from robot.profiling import profile_function
@@ -63,6 +64,7 @@ def _set_current_state_machine_internal(name: str) -> None:
         current_state_machine = state_machine
         shared_data.set_current_state_machine_name(name)
         _reset_state_machine_runtime(state_machine)
+        save_calibration_data()
     else:
         logger.warning(f"State machine with name '{name}' not found")
 

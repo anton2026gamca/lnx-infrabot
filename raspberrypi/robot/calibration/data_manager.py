@@ -83,6 +83,10 @@ def _create_calibration_data() -> dict:
                 "enabled": shared_data.get_bluetooth_enabled(),
                 "other_robot": shared_data.get_bluetooth_other_robot_info(),
             },
+            "other_settings": {
+                "position_based_speed_enabled": shared_data.get_position_based_speed_enabled(),
+                "state_machine": shared_data.get_current_state_machine_name(),
+            },
         }
     }
 
@@ -226,9 +230,9 @@ def load_calibration_data() -> None:
 
                 if valid_color_gains and valid_exposure_time and valid_analogue_gain:
                     shared_data.set_camera_settings(
-                        color_gains=[float(color_gains[0]), float(color_gains[1])],
-                        exposure_time=float(exposure_time),
-                        analogue_gain=float(analogue_gain),
+                        color_gains=[float(color_gains[0]), float(color_gains[1])] if color_gains else None,
+                        exposure_time=float(exposure_time) if exposure_time else None,
+                        analogue_gain=float(analogue_gain) if analogue_gain else None,
                         camera=camera,
                     )
 
@@ -240,6 +244,15 @@ def load_calibration_data() -> None:
             other_robot = bluetooth_data.get("other_robot")
             if isinstance(other_robot, dict):
                 shared_data.set_bluetooth_other_robot_info(other_robot)
+
+        other_settings = calibrations.get("other_settings", {}) if isinstance(calibrations, dict) else {}
+        if other_settings:
+            position_based_speed_enabled = other_settings.get("position_based_speed_enabled")
+            if isinstance(position_based_speed_enabled, bool):
+                shared_data.set_position_based_speed_enabled(position_based_speed_enabled)
+            state_machine_name = other_settings.get("state_machine")
+            if isinstance(state_machine_name, str):
+                shared_data.set_current_state_machine_name(state_machine_name)
 
         logger.info("Calibration data loaded")
     except Exception as e:
