@@ -231,8 +231,9 @@ class LinesData:
 
 @dataclass
 class BluetoothSyncData:
-    last_teammate_penalty_exit: float | None = None
-    last_our_penalty_exit: float | None = None
+    last_teammate_penalty_exit: float = 0
+    last_our_penalty_exit: float = 0
+    last_sync: float = 0
 
 
 @dataclass
@@ -326,7 +327,7 @@ def _update_lines_data(state_machine: StateMachine) -> LinesData:
 
     enter_avoiding_state = any(detected) and shared_data.get_line_avoiding_enabled()
     
-    current_time = time.time()
+    current_time = time.perf_counter()
     history = prev_data.detection_history if prev_data and prev_data.detection_history else []
     history.append((detected.copy(), current_time))
     
@@ -377,18 +378,23 @@ def _check_role_update(state_machine: StateMachine) -> bool:
     if not isinstance(state_machine.cross_state_data, SoccerStateMachineData):
         return False
 
-    data = state_machine.cross_state_data
-    preset_goalkeeper = _get_preset_is_goalkeeper(state_machine)
-
     bluetooth_enabled = bluetooth.get_bluetooth_enabled()
     teammate_mac = get_teammate_mac_addr()
-    teammate_connected = is_teammate_connected() if teammate_mac else False
-    can_sync_roles = bluetooth_enabled and bool(teammate_mac) and teammate_connected
+    teammate_connected = is_teammate_connected()
+    can_sync_roles = bluetooth_enabled and teammate_connected
 
     if not can_sync_roles:
         return False
 
+    data = state_machine.cross_state_data
+    preset_goalkeeper = _get_preset_is_goalkeeper(state_machine)
+    preset_attacker = not preset_goalkeeper
+
     role_changed = False
+
+    if time.perf_counter() - data.bluetooth.last_sync > 1.0 and preset_attacker:
+        bluetooth.send_message_nowait(teammate_mac, "role_update", f"be_{"attacker" if data.is_goalkeeper or not data.motors_running else "goalkeeper"}")
+        data.bluetooth.last_sync = time.perf_counter()
 
     if data.penalty_entered:
         if change_role(
@@ -400,10 +406,11 @@ def _check_role_update(state_machine: StateMachine) -> bool:
             role_changed = True
 
     if data.penalty_exited:
-        data.bluetooth.last_our_penalty_exit = time.time()
+        now = time.perf_counter()
+        data.bluetooth.last_our_penalty_exit = now
 
-        same_time = time.time() - (data.bluetooth.last_teammate_penalty_exit or 0) < ROLE_SYNC_SAME_TIME_TOLERANCE
-        reset_roles = not preset_goalkeeper and same_time
+        same_time = now - data.bluetooth.last_teammate_penalty_exit < ROLE_SYNC_SAME_TIME_TOLERANCE
+        reset_roles = preset_attacker and same_time
         if change_role(
             state_machine,
             is_goalkeeper=False,
@@ -417,7 +424,7 @@ def _check_role_update(state_machine: StateMachine) -> bool:
             if LOG_ROLE_CHANGES:
                 logger.info(f"Received role update: {msg.content}")
             match msg.content:
-                case "goalkeeper_has_ball":
+                case "goalkeeper_has_ball" | "be_goalkeeper":
                     if change_role(
                         state_machine,
                         is_goalkeeper=True,
@@ -425,7 +432,7 @@ def _check_role_update(state_machine: StateMachine) -> bool:
                     ):
                         role_changed = True
 
-                case "penalty_entered":
+                case "penalty_entered" | "be_attacker":
                     if change_role(
                         state_machine,
                         is_goalkeeper=False,
@@ -434,10 +441,11 @@ def _check_role_update(state_machine: StateMachine) -> bool:
                         role_changed = True
 
                 case "penalty_exited":
-                    data.bluetooth.last_teammate_penalty_exit = time.time()
+                    now = time.perf_counter()
+                    data.bluetooth.last_teammate_penalty_exit = now
 
-                    same_time = time.time() - (data.bluetooth.last_our_penalty_exit or 0) < ROLE_SYNC_SAME_TIME_TOLERANCE
-                    reset_roles = not preset_goalkeeper and same_time
+                    same_time = now - data.bluetooth.last_our_penalty_exit < ROLE_SYNC_SAME_TIME_TOLERANCE
+                    reset_roles = preset_attacker and same_time
                     is_goalkeeper = False if reset_roles else True
                     if change_role(
                         state_machine,
@@ -504,15 +512,19 @@ def change_role(
     require_sync_for_role_change: bool = False,
     force_state_transition: bool = False,
 ) -> bool:
-    if not isinstance(state_machine.cross_state_data, SoccerStateMachineData):
+    data = state_machine.cross_state_data
+
+    if not isinstance(data, SoccerStateMachineData):
         return False
+
+    data.bluetooth.last_sync = time.perf_counter()
 
     bluetooth_enabled = bluetooth.get_bluetooth_enabled()
     teammate_mac = get_teammate_mac_addr()
     teammate_connected = is_teammate_connected() if teammate_mac else False
     can_sync_roles = bluetooth_enabled and bool(teammate_mac) and teammate_connected
 
-    prev_is_goalkeeper = state_machine.cross_state_data.is_goalkeeper
+    prev_is_goalkeeper = data.is_goalkeeper
 
     if require_sync_for_role_change and not can_sync_roles:
         if state:
@@ -520,7 +532,7 @@ def change_role(
             if LOG_ROLE_CHANGES:
                 logger.info(f"Cannot sync roles, transitioning to: {state}")
     else:
-        state_machine.cross_state_data.is_goalkeeper = is_goalkeeper
+        data.is_goalkeeper = is_goalkeeper
 
         role_changed = prev_is_goalkeeper != is_goalkeeper
         can_transition = force_state_transition or (role_changed and type(state_machine.current_state) not in [LineAvoidingState, AttackerPushState])
@@ -529,7 +541,7 @@ def change_role(
 
         shared_data.set_autonomous_status_text(AutonomousStatusText.GOALKEEPER if is_goalkeeper else AutonomousStatusText.ATTACKER)
 
-        if LOG_ROLE_CHANGES:
+        if LOG_ROLE_CHANGES and role_changed or force_state_transition:
             logger.info(f"Role changed: {"goalkeeper" if prev_is_goalkeeper else "attacker"} -> {"goalkeeper" if is_goalkeeper else "attacker"} ({state() if state is not None else "None"})")
 
     if bt_message is not None and can_sync_roles:

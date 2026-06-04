@@ -259,6 +259,8 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger) -
             elif event == "back":
                 if len(screen_stack) > 1:
                     screen_stack.pop()
+                else:
+                    screen_stack.append(screensaver)
             else:
                 next_screen = current.handle_event(event)
                 if next_screen is not None:

@@ -252,7 +252,7 @@ def load_calibration_data() -> None:
                 shared_data.set_position_based_speed_enabled(position_based_speed_enabled)
             state_machine_name = other_settings.get("state_machine")
             if isinstance(state_machine_name, str):
-                shared_data.set_current_state_machine_name(state_machine_name)
+                shared_data.request_state_machine_change(state_machine_name)
 
         logger.info("Calibration data loaded")
     except Exception as e:
