@@ -209,7 +209,7 @@ class TeensyCommunicator:
         self.close()
     
     @profile_function
-    def read_messages(self) -> dict[int, bytes]:
+    def read_newest_messages(self) -> dict[int, bytes]:
         if self.ser is None:
             raise RuntimeError("Serial port not open. Call connect() first.")
 
@@ -275,6 +275,47 @@ class TeensyCommunicator:
         self.buffer = buf[last_used_char_index + 1:]
 
         return newest
+
+    @profile_function
+    def read_message(self) -> tuple[int, bytes] | None:
+        if self.ser is None:
+            raise RuntimeError("Serial port not open. Call connect() first.")
+
+        if self.buffer is None:
+            self.buffer = bytearray()
+
+        read_bytes = self.ser.read_all()
+        if read_bytes:
+            self.buffer.extend(read_bytes)
+
+        buf = self.buffer
+
+        i = 0
+        while i < len(buf):
+            if buf[i] != ord('{') or i >= len(buf) - 1:
+                i += 1
+                continue
+
+            start = i
+            msg_type = buf[start + 1]
+
+            if msg_type == SENSOR_DATA_MESSAGE_TYPE:
+                end = start + SENSOR_DATA_MESSAGE_LENGTH - 1
+            elif msg_type == RUNNING_STATE_MESSAGE_TYPE:
+                end = start + 4 - 1
+            else:
+                i = start + 1
+                continue
+
+            if end >= len(buf) or buf[end] != ord('}'):
+                i = start + 1
+                continue
+
+            self.buffer = buf[end + 1:]
+            return (msg_type, bytes(buf[start:end + 1]))
+
+        return None
+
     
     def send_message(self, message: bytes) -> None:
         if self.ser is None:
@@ -304,7 +345,7 @@ def run_shell(port: str, out_file: str | None = None, raw_mode: bool = False) ->
                 if read_bytes:
                     data = read_bytes.decode("utf-8", errors="replace")
             else:
-                messages = teensy.read_messages()
+                messages = teensy.read_newest_messages()
                 if SENSOR_DATA_MESSAGE_TYPE in messages:
                     try:
                         parsed = parse_sensor_data_binary(messages[SENSOR_DATA_MESSAGE_TYPE])

@@ -45,11 +45,12 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
         if time.perf_counter() > last_update_time + 1:
             shared_data.set_process_fps(shared_data.ProfilingProcesses.LOGIC, ticks)
+            logger.debug(f"Logic UPS: {ticks}")
             ticks = 0
             last_update_time = time.perf_counter()
 
         elapsed = time.perf_counter() - start_time
-        sleep_duration = max(0.0, LOGIC_LOOP_PERIOD - elapsed - 0.001)
+        sleep_duration = max(0.0, LOGIC_LOOP_PERIOD - elapsed - 0.0004)
         if sleep_duration > 0:
             sleep(sleep_duration)
 

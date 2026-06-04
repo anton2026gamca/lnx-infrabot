@@ -19,6 +19,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     messages_sent = 0
     corrupted_messages = 0
     last_log_time = time.perf_counter()
+    last_sent_message_time: float = time.perf_counter()
 
     compass_offset: dict[str, int] = {
         "heading": 0,
@@ -36,38 +37,42 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
                 data = None
 
-                new_messages = communicator.read_messages()
+                new_message = communicator.read_message()
 
-                if teensy.SENSOR_DATA_MESSAGE_TYPE in new_messages:
-                    try:
-                        data = teensy.parse_sensor_data_binary(new_messages[teensy.SENSOR_DATA_MESSAGE_TYPE])
-                        if data.compass.heading != 999:
-                            data.compass.heading = int(utils.normalize_angle_deg(data.compass.heading + compass_offset["heading"]))
-                            data.compass.pitch = int(utils.normalize_angle_deg(data.compass.pitch + compass_offset["pitch"]))
-                            data.compass.roll = int(utils.normalize_angle_deg(data.compass.roll + compass_offset["roll"]))
-                        if data.ir.angle != 999:
-                            data.ir.angle = int(utils.normalize_angle_deg(data.ir.angle + IR_BALL_ANGLE_OFFSET_DEG))
-                        shared_data.set_hardware_data(data)
-                        line_sensors.update_line_detected(data)
-                        calibration.update_line_calibration(data)
-                        attempt_start_time = 0
-                        messages_received += 1
-                    except ValueError as e:
-                        logger.warning(f"Corrupted message: {new_messages[teensy.SENSOR_DATA_MESSAGE_TYPE]} - {e}")
-                        corrupted_messages += 1
-                        data = None
-                if teensy.RUNNING_STATE_MESSAGE_TYPE in new_messages:
-                    try:
-                        shared_data.set_running_state(teensy.parse_running_state_binary(new_messages[teensy.RUNNING_STATE_MESSAGE_TYPE]))
-                        messages_received += 1
-                    except ValueError as e:
-                        logger.warning(f"Corrupted message: {new_messages[teensy.RUNNING_STATE_MESSAGE_TYPE]} - {e}")
-                        corrupted_messages += 1
+                if new_message is not None:
+                    if teensy.SENSOR_DATA_MESSAGE_TYPE == new_message[0]:
+                        try:
+                            data = teensy.parse_sensor_data_binary(new_message[1])
+                            if data.compass.heading != 999:
+                                data.compass.heading = int(utils.normalize_angle_deg(data.compass.heading + compass_offset["heading"]))
+                                data.compass.pitch = int(utils.normalize_angle_deg(data.compass.pitch + compass_offset["pitch"]))
+                                data.compass.roll = int(utils.normalize_angle_deg(data.compass.roll + compass_offset["roll"]))
+                            if data.ir.angle != 999:
+                                data.ir.angle = int(utils.normalize_angle_deg(data.ir.angle + IR_BALL_ANGLE_OFFSET_DEG))
+                            shared_data.set_hardware_data(data)
+                            line_sensors.update_line_detected(data)
+                            calibration.update_line_calibration(data)
+                            attempt_start_time = 0
+                            messages_received += 1
+                        except ValueError as e:
+                            logger.warning(f"Corrupted message: {new_message[1]} - {e}")
+                            corrupted_messages += 1
+                            data = None
+                    if teensy.RUNNING_STATE_MESSAGE_TYPE == new_message[0]:
+                        try:
+                            shared_data.set_running_state(teensy.parse_running_state_binary(new_message[1]))
+                            messages_received += 1
+                        except ValueError as e:
+                            logger.warning(f"Corrupted message: {new_message[1]} - {e}")
+                            corrupted_messages += 1
 
-                motor_speeds = shared_data.get_motor_speeds()
-                kicker_state = shared_data.get_kicker_state()
-                communicator.send_motors_message(motor_speeds, kicker_state)
-                messages_sent += 1
+                current_time = time.perf_counter()
+                if current_time - last_sent_message_time >= LOGIC_LOOP_PERIOD:
+                    motor_speeds = shared_data.get_motor_speeds()
+                    kicker_state = shared_data.get_kicker_state()
+                    communicator.send_motors_message(motor_speeds, kicker_state)
+                    messages_sent += 1
+                    last_sent_message_time += LOGIC_LOOP_PERIOD
 
                 if data is None and attempt_start_time != 0 and attempt_start_time + 0.5 < time.perf_counter():
                     logger.warning(f"No data received from Teensy for 0.5 seconds, retrying connection... (attempt {attempts})")
