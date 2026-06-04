@@ -69,7 +69,7 @@ CAMERA_BALL_TRACKING_MAX_IR_DIFF_DEG = 45.0
 
 # --- Goal-tracking rotation ---
 # Gain applied to goal alignment error to produce rotation command while approaching/pushing
-GOAL_TRACK_ROTATE_GAIN = 0.7
+GOAL_TRACK_ROTATE_GAIN = 1.0
 # Rotation speed used while searching for the goal (no goal visible)
 GOAL_SEARCH_ROTATE_SPEED = 1.0
 
@@ -166,12 +166,13 @@ def _get_goal_tracking_rotation(
     state_machine: StateMachine,
     data: SoccerStateMachineData,
     own_goal: bool = False,
+    target_alignment: float = 0.0,
 ) -> float:
     target_camera_yaw = 180 if own_goal else 0
     goal = data.sensors.own_goal if own_goal else data.sensors.enemy_goal
 
     if goal.detected and goal.camera_yaw_deg == target_camera_yaw:
-        rotate = goal.alignment * GOAL_TRACK_ROTATE_GAIN
+        rotate = (goal.alignment - target_alignment) * GOAL_TRACK_ROTATE_GAIN
         return _clamp(rotate, -1.0, 1.0)
     else:
         state_machine.motors.target_heading = 0.0
@@ -570,11 +571,13 @@ class LineAvoidingState(State):
         if _check_role_update(state_machine):
             return
 
-        current_time = time.time()
+        current_time = time.perf_counter()
 
         heading = data.sensors.heading if data.sensors.heading != 999.0 else 0.0
         position = vision.get_position_estimate()
-        rotate = _get_goal_tracking_rotation(state_machine, data)
+        t = state_machine.time_in_current_state()
+        goal_alignment = (t - math.floor(t)) - 0.5
+        rotate = _get_goal_tracking_rotation(state_machine, data, target_alignment=goal_alignment)
 
         line_detected = any(data.lines.detected)
 
@@ -773,13 +776,13 @@ class AttackerApproachState(State):
             state_machine.transition(_neutral_state(state_machine))
             return
 
-        move_angle = 0.0
-        move_speed = APPROACH_SPEED
-        rotate = _get_goal_tracking_rotation(state_machine, data)
-        position = vision.get_position_estimate()
-
         heading = data.sensors.heading
         ir_angle = data.sensors.ir_ball_angle
+
+        rotate = _get_goal_tracking_rotation(state_machine, data, target_alignment=_clamp(heading, -90, 90) / 90 * 0.5 * -1)
+        position = vision.get_position_estimate()
+        move_angle = 0.0
+        move_speed = APPROACH_SPEED * (1.0 if position else 0.7)
 
         if data.sensors.use_cam_ball:
             if abs(data.sensors.cam_ball_angle) > BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:

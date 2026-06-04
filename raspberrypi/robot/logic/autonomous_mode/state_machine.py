@@ -44,7 +44,7 @@ class StateMachine:
         self.initial_state = initial_state
         self.motors = motors
 
-        self.state_start_time = time.time()
+        self.state_start_time = time.perf_counter()
         self.current_state = initial_state()
         self.current_state.on_enter(self)
 
@@ -65,14 +65,14 @@ class StateMachine:
         self.__init__(self.name, self.initial_state, self.motors)
 
     def time_in_current_state(self) -> float:
-        return time.time() - self.state_start_time
+        return time.perf_counter() - self.state_start_time
 
     def _do_queued_transition(self) -> None:
         if self.queued_transition is None:
             return
         if self.current_state is not None:
             self.current_state.on_exit(self)
-        self.state_start_time = time.time()
+        self.state_start_time = time.perf_counter()
         self.current_state = self.queued_transition()
         self.current_state.on_enter(self)
         self.queued_transition = None
