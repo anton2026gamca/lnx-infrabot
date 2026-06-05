@@ -1121,6 +1121,8 @@ void setup() {
 
 
 void target_ups_loop() {
+  static long last_running_state_msg_sent_time = 0;
+
 #if DEBUG_PROFILING_ENABLED
   unsigned long loop_start = 0;
   DEBUG_PROFILING_START(loop_start);
@@ -1137,6 +1139,7 @@ void target_ups_loop() {
     update_running_state();
     build_running_state_message(message_buffer);
     send_message_to_rpi(message_buffer, RUNNING_STATE_MESSAGE_LENGTH);
+    last_running_state_msg_sent_time = micros();
     DEBUG_LOG(DEBUG_INFO, main_switch_enabled ? "Manual switch: ON" : "Manual switch: OFF");
   }
 
@@ -1145,6 +1148,7 @@ void target_ups_loop() {
     update_running_state();
     build_running_state_message(message_buffer);
     send_message_to_rpi(message_buffer, RUNNING_STATE_MESSAGE_LENGTH);
+    last_running_state_msg_sent_time = micros();
     DEBUG_LOG(DEBUG_INFO, bt_module_enabled ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
   }
 
@@ -1181,8 +1185,16 @@ void target_ups_loop() {
   digitalWrite(MODULE_LED_PIN, module_value);
   digitalWrite(MODULE_SWITCH_LED_PIN, !bt_module_enabled);
 
+  int module_value_prev = module_value;
+
   update_running_state();
   digitalWrite(LED_BUILTIN, is_running);
+
+  if (micros() - last_running_state_msg_sent_time > 5000000 || module_value_prev != module_value) {
+    build_running_state_message(message_buffer);
+    send_message_to_rpi(message_buffer, RUNNING_STATE_MESSAGE_LENGTH);
+    last_running_state_msg_sent_time = micros();
+  }
 
   if (is_running) {
     set_all_motors_speed(motors_data.motor_speed);
