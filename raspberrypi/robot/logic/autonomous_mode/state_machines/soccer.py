@@ -563,12 +563,14 @@ class LineAvoidingState(State):
     def on_enter(self, state_machine: StateMachine) -> None:
         self.min_clear_time = 0.5
         self.clear_time_start = None
-        self.line_exit_time = None
 
         self.safe_target = None
 
         self.safe_margin = 450
         self.target_tolerance = 120
+
+        self.triggered_angles = []
+        self.last_avoid_dir = None
 
         state_machine.motors.set_functions_enabled(position_based_speed_enabled=False)
 
@@ -589,20 +591,29 @@ class LineAvoidingState(State):
         position = vision.get_position_estimate()
         t = state_machine.time_in_current_state()
         goal_alignment = (t - math.floor(t)) - 0.5
-        rotate = _get_goal_tracking_rotation(state_machine, data, target_alignment=goal_alignment)
+        if data.sensors.enemy_goal.detected:
+            rotate = _get_goal_tracking_rotation(state_machine, data, target_alignment=goal_alignment)
+        else:
+            rotate = 0
 
         line_detected = any(data.lines.detected)
 
+        for i, detected in enumerate(data.lines.detected):
+            if detected and len(self.triggered_angles) < LINE_SENSOR_COUNT / 2:
+                angle = LINE_SENSOR_LOCATIONS[i] + min(LINE_SENSOR_LOCATIONS + [360], key=lambda x: abs(x - (heading % 360)))
+                if angle not in self.triggered_angles:
+                    self.triggered_angles.append(angle)
+
         if line_detected:
             self.clear_time_start = None
-            self.line_exit_time = None
 
             if position is not None:
                 self.safe_target = self._calculate_safe_target(position.x_mm, position.y_mm)
         else:
             if self.clear_time_start is None:
                 self.clear_time_start = current_time
-                self.line_exit_time = current_time
+            if current_time - self.clear_time_start >= 0.05:
+                self.triggered_angles = []
 
         if position is not None and self.safe_target is not None:
             target_x, target_y = self.safe_target
@@ -631,15 +642,28 @@ class LineAvoidingState(State):
                 speed=speed,
                 rotate=rotate,
             )
+
+            self.last_avoid_dir = global_angle
         else:
-            avoid_direction = self._fallback_sensor_avoid(data)
+            if (self.clear_time_start is not None and current_time - self.clear_time_start > self.min_clear_time):
+                state_machine.transition(_neutral_state(state_machine))
+                return
+
+            if self.triggered_angles:
+                avoid_direction = (self._calculate_avg_angle(self.triggered_angles) + 180) % 360
+            else:
+                avoid_direction = self.last_avoid_dir or 0.0
             relative_direction = (avoid_direction - heading) % 360
+
+            logger.info(f"Avoid Dir: {avoid_direction} | Relative: {relative_direction} | Heading: {heading} | Triggered: {self.triggered_angles}")
 
             state_machine.motors.set_motors(
                 angle=relative_direction,
                 speed=0.8,
                 rotate=rotate,
             )
+
+            self.last_avoid_dir = avoid_direction
 
     @profile_function
     def _calculate_safe_target(self, x_mm: float, y_mm: float) -> tuple[float, float]:
@@ -675,25 +699,16 @@ class LineAvoidingState(State):
             return (_clamp(x_mm, min_x, max_x), max_y)
 
     @profile_function
-    def _fallback_sensor_avoid(
+    def _calculate_avg_angle(
         self,
-        data: SoccerStateMachineData,
+        angles: list[float]
     ) -> float:
-
-        detected_angles = []
-
-        heading = data.sensors.heading if data.sensors.heading != 999.0 else 0.0
-
-        for i, detected in enumerate(data.lines.detected):
-            if detected and i < len(LINE_SENSOR_LOCATIONS):
-                detected_angles.append((LINE_SENSOR_LOCATIONS[i] + heading) % 360)
-
-        if not detected_angles:
+        if not angles:
             return 0.0
 
         angles_rad = [
             math.radians(a)
-            for a in detected_angles
+            for a in angles
         ]
 
         x = sum(math.cos(a) for a in angles_rad)
@@ -701,7 +716,7 @@ class LineAvoidingState(State):
 
         avg_angle = (math.degrees(math.atan2(y, x)) + 360) % 360
 
-        return (avg_angle + 180) % 360
+        return avg_angle
 
 
 # ------------------------------------------------------------------
