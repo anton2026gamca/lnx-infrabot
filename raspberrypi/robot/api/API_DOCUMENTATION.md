@@ -360,8 +360,31 @@ Get current goal detection result.
   alignment: number,           // -1.0 to 1.0 (center alignment)
   goal_center_x: number | null,
   goal_area: number,
-  distance_mm: number,
-  goal_height_pixels: number
+  distance_mm: number | null,  // may be null if not available
+  goal_height_pixels: number,
+  camera_yaw_deg: number,
+  goals_by_color: {
+    yellow: {
+      goal_detected: boolean,
+      alignment: number,
+      goal_center_x: number | null,
+      goal_area: number,
+      distance_mm: number | null,
+      goal_height_pixels: number,
+      camera_yaw_deg: number,
+    },
+    blue: {
+      goal_detected: boolean,
+      alignment: number,
+      goal_center_x: number | null,
+      goal_area: number,
+      distance_mm: number | null,
+      goal_height_pixels: number,
+      camera_yaw_deg: number,
+    }
+  },
+  enemy_goal_color: "yellow" | "blue",
+  own_goal_color: "yellow" | "blue",
 }
 ```
 
@@ -477,6 +500,47 @@ Get the focal length used for distance calculations.
   status: "ok",
   camera: "front" | "back",
   focal_length_pixels: number
+}
+```
+
+### `get_camera_settings`
+
+Get current manual camera control values (persisted calibration values).
+
+**Request:**
+```typescript
+{
+  event: "get_camera_settings",
+  data: {
+    camera?: "front" | "back" | "both" // Default: "both"
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok",
+  camera: "front" | "back" | "both",
+  settings: {
+    front?: {
+      camera: "front",
+      color_gains: [number, number], // [red_gain, blue_gain]
+      exposure_time: number,          // microseconds
+      analogue_gain: number
+    },
+    back?: {
+      camera: "back",
+      color_gains: [number, number], // [red_gain, blue_gain]
+      exposure_time: number,          // microseconds
+      analogue_gain: number
+    }
+  } | {
+    camera: "front" | "back",
+    color_gains: [number, number], // [red_gain, blue_gain]
+    exposure_time: number,          // microseconds
+    analogue_gain: number
+  }
 }
 ```
 
@@ -774,6 +838,48 @@ Set the focal length for goal distance calculations.
 }
 ```
 
+### `set_camera_settings`
+
+Manually set camera control values and apply them immediately. These values are persisted to calibration storage.
+
+**Request:**
+```typescript
+{
+  event: "set_camera_settings",
+  data: {
+    camera?: "front" | "back" | "both", // Default: "both"
+    color_gains?: [number, number],     // [red_gain, blue_gain], positive values
+    exposure_time?: number,             // microseconds, positive
+    analogue_gain?: number              // positive
+  }
+}
+```
+
+**Note:** Provide at least one of `color_gains`, `exposure_time`, or `analogue_gain`.
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  camera?: "front" | "back" | "both",
+  settings?: {
+    front?: {
+      camera: "front",
+      color_gains: [number, number],
+      exposure_time: number,
+      analogue_gain: number
+    },
+    back?: {
+      camera: "back",
+      color_gains: [number, number],
+      exposure_time: number,
+      analogue_gain: number
+    }
+  },
+  error?: string
+}
+```
+
 ### `set_autonomous_state`
 
 Configure autonomous mode settings.
@@ -853,7 +959,7 @@ Calibrate ball distance detection. Place ball at a known distance and call this 
 
 ### `camera_auto_calibration`
 
-Temporarily enable camera AWB and AE so the camera can adapt to current lighting, then disable both again and copy the learned values to all other cameras.
+Temporarily enable camera AWB and AE so the camera can adapt to current lighting, then disable both again and copy the learned values to all other cameras. The resulting gains/exposure values are also saved to calibration storage.
 
 **Request:**
 ```typescript
@@ -1197,29 +1303,24 @@ Get Bluetooth process status, local device identity, connected devices, paired d
 ```typescript
 {
   status: "ok",
+  bluetooth_enabled: boolean,
   process_alive: boolean,
   local_device: {
-    device_id?: string,
+    mac_address?: string,
     hostname?: string,
     ip_address?: string
   },
   connected_devices: Array<{
     name: string,
     mac_address: string,
-    hostname?: string,
-    ip_address?: string,
-    last_connected?: number,
-    is_connected: boolean,
-    device_id?: string
+    connected: boolean,
+    last_seen?: number
   }>,
   paired_devices: Array<{
     name: string,
     mac_address: string,
-    hostname?: string,
-    ip_address?: string,
-    last_connected?: number,
-    is_connected: boolean,
-    device_id?: string
+    connected: boolean,
+    last_seen?: number
   }>,
   other_robot: {
     mac_address?: string,
@@ -1228,6 +1329,29 @@ Get Bluetooth process status, local device identity, connected devices, paired d
     ip_address?: string,
     note?: string
   }
+}
+```
+
+### `set_bluetooth_enabled`
+
+Enable or disable Bluetooth usage. When disabled, auto-connect is paused and active connections are closed.
+
+**Request:**
+```typescript
+{
+  event: "set_bluetooth_enabled",
+  data: {
+    enabled: boolean
+  }
+}
+```
+
+**Response:**
+```typescript
+{
+  status: "ok" | "error",
+  bluetooth_enabled?: boolean,
+  error?: string
 }
 ```
 
@@ -1263,10 +1387,19 @@ Set or clear metadata for the selected "other robot".
 ```typescript
 {
   status: "ok" | "error",
-  other_robot?: object,
+  other_robot?: {
+    mac_address?: string,
+    name?: string,
+    hostname?: string,
+    ip_address?: string,
+    note?: string
+  },
   error?: string
 }
 ```
+
+**Notes:**
+- `mac_address` is normalized to uppercase when stored.
 
 ### `bluetooth_connect_other_robot`
 
@@ -1339,7 +1472,8 @@ Send a custom Bluetooth message to the selected robot or an explicit `mac_addres
   data: {
     mac_address?: string,
     message_type: string,
-    content: string
+    content: string,
+    sender_id?: string
   }
 }
 ```
@@ -1361,6 +1495,10 @@ Send a custom Bluetooth message to the selected robot or an explicit `mac_addres
   error?: string
 }
 ```
+
+**Notes:**
+- `sender_id` is optional. If omitted, sent messages use the local robot hostname as sender ID.
+- Received messages always include `sender_mac`; if no `sender_id` was provided by the sender, it is filled with `sender_mac`.
 
 ### `get_bluetooth_messages`
 
@@ -1421,21 +1559,15 @@ List nearby discoverable Bluetooth devices that are available for pairing.
   result?: {
     command_id: number,
     success: boolean,
-    data: {
-      devices: Array<{
-        name: string,
-        mac_address: string,
-        is_paired: boolean
-      }>,
-      timeout_seconds: number
-    },
+    data: object,
     error?: string,
     timestamp: number
   },
   devices?: Array<{
     name: string,
     mac_address: string,
-    is_paired: boolean
+    connected: boolean,
+    last_seen?: number
   }>,
   error?: string
 }
@@ -1444,7 +1576,7 @@ List nearby discoverable Bluetooth devices that are available for pairing.
 **Notes:**
 - Requires `bluetoothctl` and sufficient permissions on the Raspberry Pi
 - `timeout_seconds` controls how long active discovery runs before returning results
-- `is_paired` indicates whether the discovered device already exists in the saved paired devices list
+- `devices` are normalized to the same shape as paired/connected device entries
 
 ### `bluetooth_pair_device`
 
@@ -1474,11 +1606,8 @@ Pair a new Bluetooth device and store its metadata.
   paired_devices?: Array<{
     name: string,
     mac_address: string,
-    hostname?: string,
-    ip_address?: string,
-    last_connected?: number,
-    is_connected: boolean,
-    device_id?: string
+    connected: boolean,
+    last_seen?: number
   }>,
   error?: string
 }
@@ -1512,11 +1641,8 @@ Unpair a previously paired Bluetooth device.
   paired_devices?: Array<{
     name: string,
     mac_address: string,
-    hostname?: string,
-    ip_address?: string,
-    last_connected?: number,
-    is_connected: boolean,
-    device_id?: string
+    connected: boolean,
+    last_seen?: number
   }>,
   error?: string
 }

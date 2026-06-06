@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import cv2
 import math
 import numpy as np
@@ -5,6 +7,7 @@ from dataclasses import dataclass, field
 
 from robot.multiprocessing import shared_data
 from robot.profiling import profile_function
+from robot.vision.color_mask import mask_from_ranges
 from robot.vision.visualizer import DetectedObject
 from robot.config import *
 
@@ -18,6 +21,8 @@ class GoalColorCalibration:
     """HSV color ranges for goal detection - supports multiple ranges per color"""
     yellow_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([20, 100, 100]), np.array([30, 255, 255]))])
     blue_ranges: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=lambda: [(np.array([100, 100, 100]), np.array([130, 255, 255]))])
+    yellow_lut: np.ndarray | None = field(default=None, repr=False)
+    blue_lut: np.ndarray | None = field(default=None, repr=False)
 
 @dataclass(slots=True)
 class GoalDetectionResult:
@@ -146,18 +151,17 @@ def _get_goal_bounding_rect(
     
     if goal_color.lower() == "yellow":
         ranges = calibration.yellow_ranges
+        lut = calibration.yellow_lut
     elif goal_color.lower() == "blue":
         ranges = calibration.blue_ranges
+        lut = calibration.blue_lut
     else:
         return 0, 0, 0, 0, 0.0
     
     if not ranges:
         return 0, 0, 0, 0, 0.0
 
-    mask = cv2.inRange(hsv_frame, ranges[0][0], ranges[0][1])
-    for lower, upper in ranges[1:]:
-        cv2.bitwise_or(mask, cv2.inRange(hsv_frame, lower, upper), dst=mask)
-    
+    mask = mask_from_ranges(hsv_frame, ranges, lut)
     if mask is None:
         return 0, 0, 0, 0, 0.0
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, MORPH_OPEN_KERNEL_3, iterations=1)
@@ -194,9 +198,15 @@ def _get_goal_bounding_rect(
 
 @profile_function
 def get_position_estimate() -> PositionEstimate | None:
-    hardware_data = shared_data.get_hardware_data()
+    return shared_data.get_last_position_estimate()
 
-    if not hardware_data or hardware_data.compass.heading is None:
+@profile_function
+def update_position_estimate() -> None:
+    hardware_data = shared_data.get_hardware_compass_ir()
+    heading = hardware_data[0]
+
+    if heading == 999.0:
+        shared_data.set_last_position_estimate(None)
         return None
 
     field_length_mm = 2190.0
@@ -210,7 +220,7 @@ def get_position_estimate() -> PositionEstimate | None:
             return None
         distance_mm = goal.distance_mm
         angle_to_goal_deg = (
-            hardware_data.compass.heading
+            heading
             + goal.camera_yaw_deg
             + goal.alignment * (CAMERA_FOV_DEG / 2.0)
         )
@@ -234,10 +244,12 @@ def get_position_estimate() -> PositionEstimate | None:
         candidates.append(own_candidate)
 
     if not candidates:
+        shared_data.set_last_position_estimate(None)
         return None
 
     sum_weights = sum(weight for _, _, weight in candidates)
     if sum_weights <= 0:
+        shared_data.set_last_position_estimate(None)
         return None
 
     x_mm = sum(x * weight for x, _, weight in candidates) / sum_weights
@@ -245,16 +257,5 @@ def get_position_estimate() -> PositionEstimate | None:
     y_mm = max(0.0, min(field_length_mm, y_mm))
 
     confidence = min(1.0, sum_weights / len(candidates))
-    previous = shared_data.get_last_position_estimate()
-    if previous is not None:
-        prev_x = float(previous.get("x_mm", x_mm))
-        prev_y = float(previous.get("y_mm", y_mm))
-        distance_delta = math.sqrt((x_mm - prev_x) ** 2 + (y_mm - prev_y) ** 2)
-        smoothing_alpha = 0.62 if distance_delta < 450.0 else 0.36
-        x_mm = prev_x + (x_mm - prev_x) * smoothing_alpha
-        y_mm = prev_y + (y_mm - prev_y) * smoothing_alpha
-        confidence = min(1.0, (confidence * 0.75) + (float(previous.get("confidence", 0.0)) * 0.25))
 
-    shared_data.set_last_position_estimate(x_mm, y_mm, confidence)
-    return PositionEstimate(x_mm=x_mm, y_mm=y_mm, confidence=confidence)
-
+    shared_data.set_last_position_estimate(PositionEstimate(x_mm, y_mm, confidence))

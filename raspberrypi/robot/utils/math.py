@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 
 
@@ -9,4 +11,3 @@ def normalize_angle_deg(angle: float) -> float:
 def normalize_angle_rad(angle: float) -> float:
     """Normalize angle to range [-pi, pi)."""
     return ((angle + math.pi) % (2 * math.pi)) - math.pi
-

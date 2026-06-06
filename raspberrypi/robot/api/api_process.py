@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import multiprocessing.synchronize
 import logging
 
@@ -30,4 +32,3 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
     )
 
     api.start(stop_event=stop_event)
-

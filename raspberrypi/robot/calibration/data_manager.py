@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import multiprocessing
 import os
@@ -29,10 +31,12 @@ def _create_calibration_data() -> dict:
     ball_detection_by_camera = {}
     ball_distance_by_camera = {}
     focal_length_by_camera = {}
+    camera_settings_by_camera = {}
     for camera in ("front", "back"):
         yellow_ranges = shared_data.get_goal_calibration("yellow", camera)
         blue_ranges = shared_data.get_goal_calibration("blue", camera)
         ball_ranges = shared_data.get_ball_calibration(camera)
+        camera_settings = shared_data.get_camera_settings(camera)
         goal_detection_by_camera[camera] = {
             "yellow_ranges": [{'lower': list(lower), 'upper': list(upper)} for lower, upper in yellow_ranges],
             "blue_ranges": [{'lower': list(lower), 'upper': list(upper)} for lower, upper in blue_ranges],
@@ -44,6 +48,11 @@ def _create_calibration_data() -> dict:
             "calibration_constant": shared_data.get_camera_ball_calibration_constant(camera),
         }
         focal_length_by_camera[camera] = shared_data.get_goal_focal_length(camera)
+        camera_settings_by_camera[camera] = {
+            "color_gains": list(camera_settings.get("color_gains", [CAMERA_DEFAULT_COLOR_GAINS[0], CAMERA_DEFAULT_COLOR_GAINS[1]])),
+            "exposure_time": int(camera_settings.get("exposure_time", CAMERA_DEFAULT_EXPOSURE_TIME)),
+            "analogue_gain": float(camera_settings.get("analogue_gain", CAMERA_DEFAULT_ANALOGUE_GAIN)),
+        }
     
     return {
         "version": CALIBRATION_SCHEMA_VERSION,
@@ -67,8 +76,16 @@ def _create_calibration_data() -> dict:
                 "calibration_constant": ball_distance_by_camera["front"]["calibration_constant"],  # backward compatibility
                 "by_camera": ball_distance_by_camera,
             },
+            "camera_controls": {
+                "by_camera": camera_settings_by_camera,
+            },
             "bluetooth": {
+                "enabled": shared_data.get_bluetooth_enabled(),
                 "other_robot": shared_data.get_bluetooth_other_robot_info(),
+            },
+            "other_settings": {
+                "position_based_speed_enabled": shared_data.get_position_based_speed_enabled(),
+                "state_machine": shared_data.get_current_state_machine_name(),
             },
         }
     }
@@ -116,10 +133,7 @@ def load_calibration_data() -> None:
         if goal_data:
             goal_color = goal_data.get("goal_color")
             if goal_color in ['yellow', 'blue']:
-                with shared_data.goal_detection_lock:
-                    color_bytes = goal_color.encode()[:10].ljust(10)
-                    for i in range(10):
-                        shared_data.goal_color[i] = color_bytes[i:i+1]
+                shared_data.set_goal_color(goal_color)
 
             goal_by_camera = goal_data.get("by_camera", {}) if isinstance(goal_data.get("by_camera"), dict) else {}
             focal_by_camera = goal_data.get("focal_length_pixels_by_camera", {}) if isinstance(goal_data.get("focal_length_pixels_by_camera"), dict) else {}
@@ -197,11 +211,48 @@ def load_calibration_data() -> None:
                 if calibration_constant is not None and isinstance(calibration_constant, (int, float)) and calibration_constant > 0:
                     shared_data.set_camera_ball_calibration_constant(float(calibration_constant), camera="both")
 
+        camera_controls_data = calibrations.get("camera_controls", {}) if isinstance(calibrations, dict) else {}
+        if camera_controls_data:
+            by_camera = camera_controls_data.get("by_camera", {}) if isinstance(camera_controls_data.get("by_camera"), dict) else {}
+            for camera in ("front", "back"):
+                camera_data = by_camera.get(camera, {}) if isinstance(by_camera.get(camera), dict) else {}
+                color_gains = camera_data.get("color_gains")
+                exposure_time = camera_data.get("exposure_time")
+                analogue_gain = camera_data.get("analogue_gain")
+
+                valid_color_gains = (
+                    isinstance(color_gains, list)
+                    and len(color_gains) == 2
+                    and all(isinstance(v, (int, float)) and float(v) > 0 for v in color_gains)
+                )
+                valid_exposure_time = isinstance(exposure_time, (int, float)) and float(exposure_time) > 0
+                valid_analogue_gain = isinstance(analogue_gain, (int, float)) and float(analogue_gain) > 0
+
+                if valid_color_gains and valid_exposure_time and valid_analogue_gain:
+                    shared_data.set_camera_settings(
+                        color_gains=[float(color_gains[0]), float(color_gains[1])] if color_gains else None,
+                        exposure_time=float(exposure_time) if exposure_time else None,
+                        analogue_gain=float(analogue_gain) if analogue_gain else None,
+                        camera=camera,
+                    )
+
         bluetooth_data = calibrations.get("bluetooth", {}) if isinstance(calibrations, dict) else {}
         if bluetooth_data:
+            bluetooth_enabled = bluetooth_data.get("enabled")
+            if isinstance(bluetooth_enabled, bool):
+                shared_data.set_bluetooth_enabled(bluetooth_enabled)
             other_robot = bluetooth_data.get("other_robot")
             if isinstance(other_robot, dict):
                 shared_data.set_bluetooth_other_robot_info(other_robot)
+
+        other_settings = calibrations.get("other_settings", {}) if isinstance(calibrations, dict) else {}
+        if other_settings:
+            position_based_speed_enabled = other_settings.get("position_based_speed_enabled")
+            if isinstance(position_based_speed_enabled, bool):
+                shared_data.set_position_based_speed_enabled(position_based_speed_enabled)
+            state_machine_name = other_settings.get("state_machine")
+            if isinstance(state_machine_name, str):
+                shared_data.request_state_machine_change(state_machine_name)
 
         logger.info("Calibration data loaded")
     except Exception as e:

@@ -23,7 +23,7 @@ enum DebugLevel {
 };
 
 
-#define TARGET_UPS 120
+#define TARGET_UPS 245
 #define INTERVAL_US (1000000 / TARGET_UPS)
 
 
@@ -679,7 +679,7 @@ void process_i2c_async() {
         ir_data.distance = distance;
       }
       ir_read_completed = true;
-      DEBUG_LOG(DEBUG_INFO, "Recieved valid ir angle data");
+      DEBUG_LOG(DEBUG_INFO, "Received valid ir angle data");
 #if DEBUG_PROFILING_ENABLED
       DEBUG_PROFILING_RECORD(ir_checkpoint, "IR Read Success");
 #endif
@@ -687,7 +687,7 @@ void process_i2c_async() {
       for (int i = 0; i < IR_SENSOR_COUNT; i++) {
         ir_data.sensor_IR[i] = ir_raw_buffer[i];
       }
-      DEBUG_LOG(DEBUG_INFO, "Recieved valid ir raw data");
+      DEBUG_LOG(DEBUG_INFO, "Received valid ir raw data");
     } else if (i2c_read_kind == I2C_READ_BNO_EULER) {
       int16_t heading_raw = ((int16_t)bno_euler_buffer[1] << 8) | bno_euler_buffer[0];
       int16_t pitch_raw = ((int16_t)bno_euler_buffer[3] << 8) | bno_euler_buffer[2];
@@ -704,7 +704,7 @@ void process_i2c_async() {
 #if DEBUG_PROFILING_ENABLED
       DEBUG_PROFILING_RECORD(compass_checkpoint, "Compass Read Success");
 #endif
-      DEBUG_LOG(DEBUG_INFO, "Recieved valid compass data: " + String(compass_data.heading));
+      DEBUG_LOG(DEBUG_INFO, "Received valid compass data: " + String(compass_data.heading));
     }
 
     i2c_read_kind = I2C_READ_NONE;
@@ -1121,6 +1121,8 @@ void setup() {
 
 
 void target_ups_loop() {
+  static long last_running_state_msg_sent_time = 0;
+
 #if DEBUG_PROFILING_ENABLED
   unsigned long loop_start = 0;
   DEBUG_PROFILING_START(loop_start);
@@ -1137,6 +1139,7 @@ void target_ups_loop() {
     update_running_state();
     build_running_state_message(message_buffer);
     send_message_to_rpi(message_buffer, RUNNING_STATE_MESSAGE_LENGTH);
+    last_running_state_msg_sent_time = micros();
     DEBUG_LOG(DEBUG_INFO, main_switch_enabled ? "Manual switch: ON" : "Manual switch: OFF");
   }
 
@@ -1145,6 +1148,7 @@ void target_ups_loop() {
     update_running_state();
     build_running_state_message(message_buffer);
     send_message_to_rpi(message_buffer, RUNNING_STATE_MESSAGE_LENGTH);
+    last_running_state_msg_sent_time = micros();
     DEBUG_LOG(DEBUG_INFO, bt_module_enabled ? "Bluetooth: ENABLED" : "Bluetooth: DISABLED");
   }
 
@@ -1181,8 +1185,16 @@ void target_ups_loop() {
   digitalWrite(MODULE_LED_PIN, module_value);
   digitalWrite(MODULE_SWITCH_LED_PIN, !bt_module_enabled);
 
+  int module_value_prev = module_value;
+
   update_running_state();
   digitalWrite(LED_BUILTIN, is_running);
+
+  if (micros() - last_running_state_msg_sent_time > 5000000 || module_value_prev != module_value) {
+    build_running_state_message(message_buffer);
+    send_message_to_rpi(message_buffer, RUNNING_STATE_MESSAGE_LENGTH);
+    last_running_state_msg_sent_time = micros();
+  }
 
   if (is_running) {
     set_all_motors_speed(motors_data.motor_speed);

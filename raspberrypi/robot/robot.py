@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 from dataclasses import dataclass
 
@@ -28,11 +30,7 @@ logger = utils.get_logger()
 
 
 def main():
-    # Initialize profiler
-    from robot import profiling
-    
     shared_data.set_robot_mode(RobotMode.AUTONOMOUS)
-    shared_data.set_position_based_speed_enabled(False)
     calibration.load_calibration_data()
 
     process_manager.start_all_processes()
@@ -50,4 +48,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -16,6 +16,9 @@ CAMERA_FOV_DEG = 90
 CAMERA_BUFFER_COUNT = 2
 CAMERA_MAX_FPS = 60
 CAMERA_MIN_FRAME_INTERVAL = 1.0 / CAMERA_MAX_FPS
+CAMERA_DEFAULT_COLOR_GAINS = (1.84, 2.05)
+CAMERA_DEFAULT_EXPOSURE_TIME = 10000
+CAMERA_DEFAULT_ANALOGUE_GAIN = 3.0
 
 # Physical cameras
 CAMERA_FRONT_INDEX = 0
@@ -24,8 +27,8 @@ CAMERA_FRONT_YAW_DEG = 0.0
 CAMERA_BACK_YAW_DEG = 180.0
 
 # Frame size calculations
-FRAME_WIDTH  = 1536 // 2
-FRAME_HEIGHT = 864 // 2
+FRAME_WIDTH  = 1536 // 3  # = 512
+FRAME_HEIGHT = 864  // 3  # = 288
 FRAME_SIZE_B = FRAME_HEIGHT * FRAME_WIDTH * 3  # RGB888 format (3 bytes per pixel, no alpha)
 
 # =========================== SERIAL COMMUNICATION ================================
@@ -34,12 +37,12 @@ TEENSY_PORT = "/dev/ttyAMA0"
 TEENSY_BAUD = 230400
 TEENSY_TIMEOUT = 0.1
 
-COMMUNICATION_LOOP_FREQUENCY = 120
+COMMUNICATION_LOOP_FREQUENCY = 480
 COMMUNICATION_LOOP_PERIOD = 1.0 / COMMUNICATION_LOOP_FREQUENCY
 
 # =========================== CONTROL LOOP SETTINGS ===============================
 # Logic loop timing
-LOGIC_LOOP_FREQUENCY = 120
+LOGIC_LOOP_FREQUENCY = 240
 LOGIC_LOOP_PERIOD = 1.0 / LOGIC_LOOP_FREQUENCY
 
 # Idle mode settings
@@ -102,25 +105,24 @@ DEFAULT_FOCAL_LENGTH_PIXELS = 1000.0
 DEFAULT_LINE_AVOIDING_ENABLED = True
 DEFAULT_ROTATION_CORRECTION_ENABLED = True
 
-# ===================== AUTONOMOUS BEHAVIOUR SETTINGS =============================
-
-# --- General ---
-# Global speed multiplier for all autonomous movements (reduce for debugging)
-AUTO_SPEED_MULTIPLIER = 1.0
-# Angle offset to apply to the ball angle (degrees)
-IR_BALL_ANGLE_OFFSET_DEG = -10.0
 # --- Position-based speed scaling ---
 # When enabled, the robot uses goal distance to slow down near the enemy line
 DEFAULT_POSITION_BASED_SPEED_ENABLED = True
 # Minimum speed multiplier when close to any line (0.0 to 1.0)
 AUTO_POSITION_SLOW_MIN_SPEED = 0.5
 # Distance from center (x coordinate) at which to start slowing down (mm)
-AUTO_POSITION_SLOW_START_DISTANCE_X_MM = 700.0
+AUTO_POSITION_SLOW_START_DISTANCE_X_MM = 450.0
 # Range where slow speed isn't applied (y coordinate, mm)
-AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM = 300.0
+AUTO_POSITION_SLOW_START_DISTANCE_Y_MIN_MM = 500.0
 AUTO_POSITION_SLOW_START_DISTANCE_Y_MAX_MM = 1900.0
 # Apply lowest speed multiplier when distance from nearest slow speed start is >= this (mm)
-AUTO_POSITION_SLOW_END_DISTANCE_MM = 200.0
+AUTO_POSITION_SLOW_END_DISTANCE_MM = 100.0
+
+# --- General ---
+# Global speed multiplier for all autonomous movements (reduce for debugging)
+AUTO_SPEED_MULTIPLIER = 1.0
+# Angle offset to apply to the ball angle (degrees)
+IR_BALL_ANGLE_OFFSET_DEG = -53.0
 
 # --- Ball possession camera check ---
 # Ball possession area as percentage of frame dimensions

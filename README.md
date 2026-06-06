@@ -72,7 +72,7 @@ lnx-infrabot/
 - **Prerequisites:**
     - **Raspberry Pi 5** with **Raspberry Pi OS Lite** installed
 
-1. **Configure UART and Camera**  
+1. **Configure UART, I2C and Camera**  
    Edit `/boot/firmware/config.txt` using a text editor like `nano`:
    ```sh
    sudo nano /boot/firmware/config.txt
@@ -84,10 +84,16 @@ lnx-infrabot/
 
    # Camera
    camera_auto_detect=0
-   dtoverlay=imx708
+   dtoverlay=imx708,cam0
+   dtoverlay=imx708,cam1
    ```
    After editing, press `Ctrl+X` and then `Y` to exit and save.
-   Disable the serial console with `sudo raspi-config` if needed.
+
+   Enable I2C:
+   ```bash
+   sudo raspi-config
+   ```
+   Go to `Interface Options` -> `I2C`, select `Yes` and press `Enter`
 
    ```bash
    sudo reboot
@@ -95,37 +101,14 @@ lnx-infrabot/
 
    For more info about the camera, see the [official documentation](https://docs.arducam.com/Raspberry-Pi-Camera/Native-camera/12MP-IMX708/#software-configuration)
 
-2. **Add yourself to the `bluetooth` group**
+2. **Install Dependencies**
    ```bash
-   sudo usermod -aG bluetooth $USER
-   ```
-
-   Relogin or reboot
-   ```bash
-   sudo reboot
-   ```
-
-3. **(Optional) Enable Passwordless Bluetooth Discoverability**
-
-   Some Bluetooth operations (like making the device discoverable) require root privileges. To allow the robot software to set Bluetooth discoverable mode without prompting for a password, you can configure passwordless sudo only for the `hciconfig` command:
-
-   1. Open the sudoers file for editing:
-      ```bash
-      sudo visudo
-      ```
-   2. Add the following line at the end (replace `pi` with your username if different):
-      ```
-      pi ALL=NOPASSWD: /usr/bin/hciconfig
-      ```
-   3. Save and exit. Now, the robot software can run `sudo hciconfig ...` without a password prompt.
-
-4. **Install Dependencies**
-   ```bash
-   sudo apt install git python3.13-dev libcap-dev libgl1 libcamera-apps python3-libcamera
+   sudo apt update
+   sudo apt install git python3.13-dev libcap-dev libgl1 libcamera-apps python3-libcamera i2c-tools python3-gpiozero python3-lgpio
    sudo apt install python3-picamera2 --no-install-recommends
    ```
 
-5. **Clone the Repository**
+3. **Clone the Repository**
    ```bash
    git clone --no-checkout https://github.com/anton2026gamca/lnx-infrabot
    cd lnx-infrabot
@@ -134,25 +117,25 @@ lnx-infrabot/
    git checkout main
    ```
 
-6. **Set Up Python Virtual Environment**
+4. **Set Up Python Virtual Environment**
    ```bash
    cd raspberrypi
-   python3 -m venv .venv
+   python3 -m venv --system-site-packages .venv
    source .venv/bin/activate
    ```
 
-7. **Install Python Dependencies**
+5. **Install Python Dependencies**
    ```bash
    pip install -r requirements.txt
-   ```
+    ```
 
-8. **Set Environment Variables**
+6. **Set Environment Variables**
    Create a `.env` file:
    ```
    AUTH_TOKEN=your-secure-token     # Defaults to `ooops` if not set
    ```
 
-9. **Enable Auto-Start**
+7. **Enable Auto-Start**
    ```bash
    sudo ln -s "$(pwd)/robot.service" /etc/systemd/system/
    sudo systemctl daemon-reload

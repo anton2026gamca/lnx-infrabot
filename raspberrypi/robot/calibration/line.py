@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from robot import utils
 from robot.calibration.data_manager import save_calibration_data
 from robot.multiprocessing import shared_data
@@ -145,4 +147,3 @@ def set_line_detection_thresholds(thresholds: list[list[int]]) -> None:
     shared_data.set_line_detection_thresholds(thresholds)
     save_calibration_data()
     logger.info(f"Line sensor calibration thresholds manually set to: {thresholds}")
-

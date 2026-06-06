@@ -5,6 +5,8 @@ Requirements:
     pip install pygame python-socketio[client] aiohttp dotenv
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import math

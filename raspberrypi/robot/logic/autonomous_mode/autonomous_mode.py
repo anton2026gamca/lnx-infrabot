@@ -1,8 +1,14 @@
+from __future__ import annotations
+
+from robot.calibration.data_manager import save_calibration_data
 from robot.multiprocessing import shared_data
+from robot.multiprocessing.shared_data import AutonomousStatusText
 from robot.profiling import profile_function
 from . import state_machines
 from .state_machine import StateMachine
+from .state_machines import soccer
 from robot import utils
+import time
 
 
 logger = utils.get_logger("Autonomous Mode")
@@ -57,6 +63,29 @@ def _set_current_state_machine_internal(name: str) -> None:
     if state_machine is not None:
         current_state_machine = state_machine
         shared_data.set_current_state_machine_name(name)
+        _reset_state_machine_runtime(state_machine)
+        save_calibration_data()
     else:
         logger.warning(f"State machine with name '{name}' not found")
 
+
+@profile_function
+def reset_current_state_machine() -> None:
+    if current_state_machine is not None:
+        _reset_state_machine_runtime(current_state_machine)
+
+
+@profile_function
+def _reset_state_machine_runtime(state_machine: StateMachine) -> None:
+    if state_machine.current_state is not None:
+        state_machine.current_state.on_exit(state_machine)
+
+    state_machine.queued_transition = None
+    state_machine.state_start_time = time.time()
+    state_machine.current_state = state_machine.initial_state()
+    state_machine.current_state.on_enter(state_machine)
+
+    if state_machine.name in (soccer.ATTACKER_STATE_MACHINE_NAME, soccer.GOALKEEPER_STATE_MACHINE_NAME):
+        soccer.reset_role_to_preset(state_machine, force_state_transition=False)
+    else:
+        shared_data.set_autonomous_status_text(AutonomousStatusText.DEFAULT)

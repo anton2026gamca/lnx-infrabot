@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import cv2
 import multiprocessing.synchronize
@@ -11,7 +13,9 @@ import socketio
 from fastapi import FastAPI
 
 from robot import calibration, utils, vision
+from robot.profiling import async_sleep
 import robot.bluetooth.utils as bluetooth_utils
+from robot.bluetooth.bluetooth_manager import OtherRobotInfo, PairedDevice
 from robot.hardware import line_sensors
 from robot.logic import autonomous_mode
 from robot.multiprocessing import shared_data
@@ -87,18 +91,18 @@ async def _monitor_state_changes() -> None:
     
     try:
         while True:
-            await asyncio.sleep(check_interval)
+            await async_sleep(check_interval)
             
             try:
                 # Get current state
                 current_mode = shared_data.get_robot_mode()
                 current_goal_color = shared_data.get_goal_color()
                 current_line_detected = line_sensors.get_line_detected()
-                current_hw_data = shared_data.get_hardware_data()
-                current_ir_data = current_hw_data.ir if current_hw_data else None
+                current_hw_data = shared_data.get_hardware_compass_ir()
+                current_ir_angle = current_hw_data[1]
                 current_cam_data = shared_data.get_camera_ball_data()
                 
-                current_ir_detected = current_ir_data.angle != 999 if current_ir_data else False
+                current_ir_detected = current_ir_angle != 999
                 current_cam_detected = current_cam_data.detected if current_cam_data else False
                 current_ball_detected = current_cam_detected or current_ir_detected
 
@@ -198,7 +202,7 @@ async def _video_loop(sid: str, fps: float, show_detections: bool, camera: str) 
     try:
         while True:
             if sleep_time:
-                await asyncio.sleep(sleep_time)
+                await async_sleep(sleep_time)
 
             emit_front = camera in ("front", "both")
             emit_back = camera in ("back", "both")
@@ -478,11 +482,11 @@ async def get_goal_color_calibration(sid: str, data: dict | None = None):
 @sio.event
 async def get_goal_detection(sid: str, data: dict | None = None):
     try:
-        result = shared_data.get_goal_detection_result()
         enemy_color = shared_data.get_goal_color().lower()
         own_color = "blue" if enemy_color == "yellow" else "yellow"
         yellow_result = shared_data.get_goal_detection_result_for_color("yellow")
         blue_result = shared_data.get_goal_detection_result_for_color("blue")
+        result = yellow_result if enemy_color == "yellow" else blue_result
 
         def _result_to_dict(goal_result):
             if goal_result is None:
@@ -602,6 +606,26 @@ async def get_goal_focal_length(sid: str, data: dict | None = None):
         return _ok(camera=camera, focal_length_pixels=shared_data.get_goal_focal_length(camera))
     except Exception as exc:
         logger.error(f"get_goal_focal_length: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def get_camera_settings(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        camera = str(d.get("camera", "both")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
+        if camera == "both":
+            settings = {
+                "front": shared_data.get_camera_settings("front"),
+                "back": shared_data.get_camera_settings("back"),
+            }
+        else:
+            settings = shared_data.get_camera_settings(camera)
+        return _ok(camera=camera, settings=settings)
+    except Exception as exc:
+        logger.error(f"get_camera_settings: {exc}", exc_info=True)
         return _err("Internal server error")
 
 
@@ -811,6 +835,68 @@ async def set_goal_focal_length(sid: str, data: dict | None = None):
 
 
 @sio.event
+async def set_camera_settings(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        camera = str(d.get("camera", "both")).lower()
+        if camera not in ("front", "back", "both"):
+            return _err("camera must be one of: front, back, both")
+
+        color_gains = d.get("color_gains")
+        if color_gains is not None:
+            if not isinstance(color_gains, list) or len(color_gains) != 2:
+                return _err("color_gains must be a list of exactly 2 numbers")
+            if not all(isinstance(v, (int, float)) and float(v) > 0 for v in color_gains):
+                return _err("color_gains values must be positive numbers")
+
+        exposure_time = d.get("exposure_time")
+        if exposure_time is not None:
+            if isinstance(exposure_time, str):
+                try:
+                    exposure_time = float(exposure_time)
+                except ValueError:
+                    return _err("exposure_time must be a positive number")
+            if not isinstance(exposure_time, (int, float)) or float(exposure_time) <= 0:
+                return _err("exposure_time must be a positive number")
+
+        analogue_gain = d.get("analogue_gain")
+        if analogue_gain is not None:
+            if isinstance(analogue_gain, str):
+                try:
+                    analogue_gain = float(analogue_gain)
+                except ValueError:
+                    return _err("analogue_gain must be a positive number")
+            if not isinstance(analogue_gain, (int, float)) or float(analogue_gain) <= 0:
+                return _err("analogue_gain must be a positive number")
+
+        if color_gains is None and exposure_time is None and analogue_gain is None:
+            return _err("Provide at least one setting: color_gains, exposure_time, or analogue_gain")
+
+        request_id = shared_data.request_camera_settings_update(
+            camera=camera,
+            color_gains=[float(color_gains[0]), float(color_gains[1])] if color_gains is not None else None,
+            exposure_time=float(exposure_time) if exposure_time is not None else None,
+            analogue_gain=float(analogue_gain) if analogue_gain is not None else None,
+        )
+        if request_id is None:
+            return _err("A camera settings update is already in progress")
+
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while asyncio.get_running_loop().time() < deadline:
+            result = shared_data.get_camera_settings_update_result(request_id)
+            if result and result.get("done", False):
+                if result.get("success", False):
+                    return _ok(camera=camera, settings=result.get("settings", {}))
+                return _err(result.get("error") or "Camera settings update failed")
+            await async_sleep(0.05)
+
+        return _err("Camera settings update timed out")
+    except Exception as exc:
+        logger.error(f"set_camera_settings: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
 async def set_autonomous_state(sid: str, data: dict | None = None):
     try:
         state_machine = (data or {}).get("state_machine")
@@ -887,7 +973,7 @@ async def camera_ball_distance_calibration(sid: str, data: dict | None = None):
 async def camera_auto_calibration(sid: str, data: dict | None = None):
     try:
         d = data or {}
-        camera_name = str(d.get("camera", "both")).lower()
+        camera_name = str(d.get("camera", "front")).lower()
         if camera_name not in ("front", "back"):
             return _err("camera must be one of: front, back")
 
@@ -916,7 +1002,7 @@ async def camera_auto_calibration(sid: str, data: dict | None = None):
                     payload = result.get("result", {})
                     return _ok(camera=payload.get("camera", camera_name), result=payload.get("result", {}))
                 return _err(result.get("error") or "Camera auto calibration failed")
-            await asyncio.sleep(0.05)
+            await async_sleep(0.05)
 
         return _err("Camera auto calibration timed out")
     except Exception as exc:
@@ -1170,15 +1256,35 @@ async def compute_hsv_from_regions(sid: str, data: dict | None = None):
 @sio.event
 async def get_bluetooth_state(sid: str, data: dict | None = None):
     try:
+        local_device = bluetooth_utils.get_local_device_info()
+        connected_devices = bluetooth_utils.get_connected_devices()
+        paired_devices = bluetooth_utils.get_paired_devices()
+        other_robot = bluetooth_utils.get_other_robot_info()
         return _ok(
+            bluetooth_enabled=bluetooth_utils.get_bluetooth_enabled(),
             process_alive=bluetooth_utils.is_bluetooth_process_alive(),
-            local_device=bluetooth_utils.get_local_device_info(),
-            connected_devices=bluetooth_utils.get_connected_devices(),
-            paired_devices=bluetooth_utils.get_paired_devices(),
-            other_robot=bluetooth_utils.get_other_robot_info(),
+            local_device=local_device.to_dict() if local_device else {},
+            connected_devices=[device.to_dict() for device in connected_devices],
+            paired_devices=[device.to_dict() for device in paired_devices],
+            other_robot=other_robot.to_dict() if other_robot else {},
         )
     except Exception as exc:
         logger.error(f"get_bluetooth_state: {exc}", exc_info=True)
+        return _err("Internal server error")
+
+
+@sio.event
+async def set_bluetooth_enabled(sid: str, data: dict | None = None):
+    try:
+        d = data or {}
+        enabled = d.get("enabled")
+        if not isinstance(enabled, bool):
+            return _err("enabled must be a boolean")
+
+        bluetooth_utils.set_bluetooth_enabled(enabled)
+        return _ok(bluetooth_enabled=bluetooth_utils.get_bluetooth_enabled())
+    except Exception as exc:
+        logger.error(f"set_bluetooth_enabled: {exc}", exc_info=True)
         return _err("Internal server error")
 
 
@@ -1194,17 +1300,17 @@ async def set_other_robot(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required")
 
-        info = {
-            "mac_address": mac_address.strip(),
-            "name": d.get("name"),
-            "hostname": d.get("hostname"),
-            "ip_address": d.get("ip_address"),
-            "note": d.get("note"),
-        }
-        info = {k: v for k, v in info.items() if v is not None}
+        info = OtherRobotInfo(
+            mac_address=mac_address.strip().upper(),
+            name=d.get("name") if isinstance(d.get("name"), str) else None,
+            hostname=d.get("hostname") if isinstance(d.get("hostname"), str) else None,
+            ip_address=d.get("ip_address") if isinstance(d.get("ip_address"), str) else None,
+            note=d.get("note") if isinstance(d.get("note"), str) else None,
+        )
 
         bluetooth_utils.set_other_robot_info(info)
-        return _ok(other_robot=bluetooth_utils.get_other_robot_info())
+        stored_other_robot = bluetooth_utils.get_other_robot_info()
+        return _ok(other_robot=stored_other_robot.to_dict() if stored_other_robot else {})
     except Exception as exc:
         logger.error(f"set_other_robot: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1214,15 +1320,19 @@ async def set_other_robot(sid: str, data: dict | None = None):
 async def bluetooth_connect_other_robot(sid: str, data: dict | None = None):
     try:
         d = data or {}
-        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        other_robot = bluetooth_utils.get_other_robot_info()
+        mac_address = d.get("mac_address") or (other_robot.mac_address if other_robot else None)
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required (or set other_robot first)")
 
-        result = bluetooth_utils.connect(mac_address.strip())
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to connect")
+        result = await bluetooth_utils.connect_async(mac_address.strip())
+        if not result.success:
+            return _err(result.error or "Failed to connect")
 
-        return _ok(result=result, connected_devices=bluetooth_utils.get_connected_devices())
+        return _ok(
+            result=result.to_dict(),
+            connected_devices=[device.to_dict() for device in bluetooth_utils.get_connected_devices()],
+        )
     except Exception as exc:
         logger.error(f"bluetooth_connect_other_robot: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1232,15 +1342,19 @@ async def bluetooth_connect_other_robot(sid: str, data: dict | None = None):
 async def bluetooth_disconnect_other_robot(sid: str, data: dict | None = None):
     try:
         d = data or {}
-        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        other_robot = bluetooth_utils.get_other_robot_info()
+        mac_address = d.get("mac_address") or (other_robot.mac_address if other_robot else None)
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required (or set other_robot first)")
 
-        result = bluetooth_utils.disconnect(mac_address.strip())
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to disconnect")
+        result = await bluetooth_utils.disconnect_async(mac_address.strip())
+        if not result.success:
+            return _err(result.error or "Failed to disconnect")
 
-        return _ok(result=result, connected_devices=bluetooth_utils.get_connected_devices())
+        return _ok(
+            result=result.to_dict(),
+            connected_devices=[device.to_dict() for device in bluetooth_utils.get_connected_devices()],
+        )
     except Exception as exc:
         logger.error(f"bluetooth_disconnect_other_robot: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1250,9 +1364,12 @@ async def bluetooth_disconnect_other_robot(sid: str, data: dict | None = None):
 async def bluetooth_send_message(sid: str, data: dict | None = None):
     try:
         d = data or {}
-        mac_address = d.get("mac_address") or bluetooth_utils.get_other_robot_info().get("mac_address")
+        other_robot = bluetooth_utils.get_other_robot_info()
+        mac_address = d.get("mac_address") or (other_robot.mac_address if other_robot else None)
         message_type = d.get("message_type")
         content = d.get("content")
+        sender_id_raw = d.get("sender_id")
+        sender_id = sender_id_raw.strip() if isinstance(sender_id_raw, str) and sender_id_raw.strip() else None
 
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required (or set other_robot first)")
@@ -1261,15 +1378,16 @@ async def bluetooth_send_message(sid: str, data: dict | None = None):
         if content is None:
             return _err("content is required")
 
-        result = bluetooth_utils.send_message(
+        result = await bluetooth_utils.send_message_async(
             mac_address=mac_address.strip(),
             message_type=message_type.strip(),
             content=str(content),
+            sender_id=sender_id,
         )
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to send message")
+        if not result.success:
+            return _err(result.error or "Failed to send message")
 
-        return _ok(result=result)
+        return _ok(result=result.to_dict())
     except Exception as exc:
         logger.error(f"bluetooth_send_message: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1284,8 +1402,8 @@ async def get_bluetooth_messages(sid: str, data: dict | None = None):
         limit = limit_raw if isinstance(limit_raw, int) and limit_raw > 0 else None
 
         return _ok(
-            received=bluetooth_utils.get_received_messages(clear=clear, limit=limit),
-            sent=bluetooth_utils.get_sent_messages(clear=clear, limit=limit),
+            received=[message.to_dict() for message in bluetooth_utils.get_received_messages(clear=clear, limit=limit)],
+            sent=[message.to_dict() for message in bluetooth_utils.get_sent_messages(clear=clear, limit=limit)],
         )
     except Exception as exc:
         logger.error(f"get_bluetooth_messages: {exc}", exc_info=True)
@@ -1300,12 +1418,18 @@ async def bluetooth_list_pairable_devices(sid: str, data: dict | None = None):
         if not isinstance(timeout_raw, int) or timeout_raw <= 0:
             return _err("timeout_seconds must be a positive integer")
 
-        result = bluetooth_utils.list_pairable_devices(timeout_seconds=timeout_raw)
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to list pairable devices")
+        result = await bluetooth_utils.list_pairable_devices_async(timeout_seconds=timeout_raw)
+        if not result.success:
+            return _err(result.error or "Failed to list pairable devices")
 
-        devices = result.get("data", {}).get("devices", [])
-        return _ok(result=result, devices=devices)
+        raw_devices = result.data.get("devices", [])
+        devices = []
+        if isinstance(raw_devices, list):
+            for device in raw_devices:
+                parsed_device = PairedDevice.from_dict(device)
+                if parsed_device is not None:
+                    devices.append(parsed_device.to_dict())
+        return _ok(result=result.to_dict(), devices=devices)
     except Exception as exc:
         logger.error(f"bluetooth_list_pairable_devices: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1320,14 +1444,17 @@ async def bluetooth_pair_device(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required")
         
-        result = bluetooth_utils.pair_device(
+        result = await bluetooth_utils.pair_device_async(
             mac_address=mac_address.strip(),
         )
         
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to pair device")
+        if not result.success:
+            return _err(result.error or "Failed to pair device")
         
-        return _ok(result=result, paired_devices=bluetooth_utils.get_paired_devices())
+        return _ok(
+            result=result.to_dict(),
+            paired_devices=[device.to_dict() for device in bluetooth_utils.get_paired_devices()],
+        )
     except Exception as exc:
         logger.error(f"bluetooth_pair_device: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1342,12 +1469,15 @@ async def bluetooth_unpair_device(sid: str, data: dict | None = None):
         if not isinstance(mac_address, str) or not mac_address.strip():
             return _err("mac_address is required")
         
-        result = bluetooth_utils.unpair_device(mac_address.strip())
+        result = await bluetooth_utils.unpair_device_async(mac_address.strip())
         
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to unpair device")
+        if not result.success:
+            return _err(result.error or "Failed to unpair device")
         
-        return _ok(result=result, paired_devices=bluetooth_utils.get_paired_devices())
+        return _ok(
+            result=result.to_dict(),
+            paired_devices=[device.to_dict() for device in bluetooth_utils.get_paired_devices()],
+        )
     except Exception as exc:
         logger.error(f"bluetooth_unpair_device: {exc}", exc_info=True)
         return _err("Internal server error")
@@ -1362,12 +1492,12 @@ async def set_bluetooth_pairing_mode(sid: str, data: dict | None = None):
         if not isinstance(enabled_raw, bool):
             return _err("enabled must be a boolean (true/false)")
         
-        result = bluetooth_utils.set_pairing_mode(enabled=enabled_raw)
+        result = await bluetooth_utils.set_pairing_mode_async(enabled=enabled_raw)
         
-        if not result.get("success", False):
-            return _err(result.get("error") or "Failed to set pairing mode")
+        if not result.success:
+            return _err(result.error or "Failed to set pairing mode")
         
-        return _ok(result=result, pairing_mode_enabled=enabled_raw)
+        return _ok(result=result.to_dict(), pairing_mode_enabled=enabled_raw)
     except Exception as exc:
         logger.error(f"set_bluetooth_pairing_mode: {exc}", exc_info=True)
         return _err("Internal server error")

@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import cv2
 import math
 import numpy as np
 from dataclasses import dataclass
 
 from robot.profiling import profile_function
+from robot.vision.color_mask import mask_from_ranges
 from robot.vision.visualizer import DetectedObject
 
 
@@ -30,18 +33,18 @@ class BallPossessionArea:
 @profile_function
 def detect_ball(
     hsv_frame: np.ndarray,
-    ball_lower: np.ndarray | list[np.ndarray],
-    ball_upper: np.ndarray | list[np.ndarray],
-    min_area: int = 50
+    ball_ranges: list[tuple[np.ndarray, np.ndarray]],
+    min_area: int = 50,
+    range_lut: np.ndarray | None = None,
 ) -> tuple[list[DetectedObject], bool]:
     """
     Detect the ball and return bounding rectangles.
     
     Args:
         hsv_frame: HSV image array.
-        ball_lower: HSV lower bound(s) for the ball color. Can be a single array or list of arrays for multiple ranges.
-        ball_upper: HSV upper bound(s) for the ball color. Can be a single array or list of arrays for multiple ranges.
+        ball_ranges: HSV lower/upper bounds for the ball color.
         min_area: Minimum area to consider as a valid ball detection.
+        range_lut: Optional HSV lookup table for fast multi-range masking.
     
     Returns:
         Tuple of (list of DetectedObject instances, confidence_score)
@@ -49,17 +52,7 @@ def detect_ball(
     if hsv_frame is None or hsv_frame.size == 0:
         return [], False
 
-    if isinstance(ball_lower, list):
-        if not ball_lower or not isinstance(ball_upper, list):
-            return [], False
-        mask = cv2.inRange(hsv_frame, ball_lower[0], ball_upper[0])
-        for lower, upper in zip(ball_lower[1:], ball_upper[1:]):
-            cv2.bitwise_or(mask, cv2.inRange(hsv_frame, lower, upper), dst=mask)
-    elif isinstance(ball_lower, np.ndarray) and isinstance(ball_upper, np.ndarray):
-        mask = cv2.inRange(hsv_frame, ball_lower, ball_upper)
-    else:
-        return [], False
-
+    mask = mask_from_ranges(hsv_frame, ball_ranges, range_lut)
     if mask is None:
         return [], False
 
@@ -164,4 +157,3 @@ def detect_ball_possession(
         x=area_x, y=area_y, width=area_width, height=area_height,
         possessed=possessed
     )
-

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from robot import utils
@@ -46,4 +48,3 @@ _state_machine = StateMachine(name=f"{NUM_DIRS}-directional State Machine", init
 
 def get_state_machine() -> StateMachine:
     return _state_machine
-

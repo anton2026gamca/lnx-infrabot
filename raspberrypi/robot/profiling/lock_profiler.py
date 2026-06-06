@@ -3,6 +3,8 @@ Lock wrapper for profiling lock contention and acquisition times.
 Tracks which processes are waiting on which locks and for how long.
 """
 
+from __future__ import annotations
+
 import multiprocessing
 import time
 import os
@@ -40,7 +42,7 @@ class ProfiledLock:
             acquire_time = time.time() - start_time
             current_pid = os.getpid()
 
-            if collector and acquire_time >= 0.001:
+            if collector and acquire_time >= 0.00002:
                 collector.collect_lock_event(
                     lock_name=self._name,
                     event_type="acquire",
@@ -100,4 +102,3 @@ class ProfiledLock:
 
 def create_profiled_lock(name: str | None = None) -> ProfiledLock:
     return ProfiledLock(name)
-

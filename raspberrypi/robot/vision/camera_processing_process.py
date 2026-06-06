@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import cv2
 import logging
 import multiprocessing.synchronize
@@ -7,9 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 from robot import calibration, utils, vision
 from robot.multiprocessing import shared_data
-from robot.profiling import profile_function
+from robot.profiling import profile_function, sleep
 
 from robot.vision import GoalColorCalibration, GoalDetectionResult, DetectedObject
+from robot.vision.color_mask import HSV_LUT_RANGE_THRESHOLD, build_hsv_range_lut
 from robot.config import *
 
 
@@ -77,8 +80,10 @@ def _build_camera_runtime_state() -> dict[str, dict]:
             "ball_sig": (),
             "yellow_ranges_np": [],
             "blue_ranges_np": [],
-            "ball_lower_arrays": [],
-            "ball_upper_arrays": [],
+            "yellow_lut": None,
+            "blue_lut": None,
+            "ball_ranges_np": [],
+            "ball_lut": None,
             "goal_calibration": GoalColorCalibration(yellow_ranges=[], blue_ranges=[]),
             "focal_length": DEFAULT_FOCAL_LENGTH_PIXELS,
             "ball_calibration_constant": 10000.0,
@@ -118,6 +123,11 @@ def _refresh_camera_runtime_state(
             (np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
             for lower, upper in yellow_sig
         ]
+        camera_state["yellow_lut"] = (
+            build_hsv_range_lut(camera_state["yellow_ranges_np"])
+            if len(camera_state["yellow_ranges_np"]) >= HSV_LUT_RANGE_THRESHOLD
+            else None
+        )
         goal_ranges_changed = True
     if blue_sig != camera_state["blue_sig"]:
         camera_state["blue_sig"] = blue_sig
@@ -125,17 +135,31 @@ def _refresh_camera_runtime_state(
             (np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
             for lower, upper in blue_sig
         ]
+        camera_state["blue_lut"] = (
+            build_hsv_range_lut(camera_state["blue_ranges_np"])
+            if len(camera_state["blue_ranges_np"]) >= HSV_LUT_RANGE_THRESHOLD
+            else None
+        )
         goal_ranges_changed = True
     if goal_ranges_changed:
         camera_state["goal_calibration"] = GoalColorCalibration(
             yellow_ranges=camera_state["yellow_ranges_np"],
             blue_ranges=camera_state["blue_ranges_np"],
+            yellow_lut=camera_state["yellow_lut"],
+            blue_lut=camera_state["blue_lut"],
         )
 
     if ball_sig != camera_state["ball_sig"]:
         camera_state["ball_sig"] = ball_sig
-        camera_state["ball_lower_arrays"] = [np.array(lower, dtype=np.uint8) for lower, _ in ball_sig]
-        camera_state["ball_upper_arrays"] = [np.array(upper, dtype=np.uint8) for _, upper in ball_sig]
+        camera_state["ball_ranges_np"] = [
+            (np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
+            for lower, upper in ball_sig
+        ]
+        camera_state["ball_lut"] = (
+            build_hsv_range_lut(camera_state["ball_ranges_np"])
+            if len(camera_state["ball_ranges_np"]) >= HSV_LUT_RANGE_THRESHOLD
+            else None
+        )
 
     camera_state["focal_length"] = shared_data.get_goal_focal_length(camera_name)
     camera_state["ball_calibration_constant"] = shared_data.get_camera_ball_calibration_constant(camera_name)
@@ -179,8 +203,8 @@ def _process_camera_frame(
 
     ball_detections, _ = vision.detect_ball(
         hsv_frame,
-        camera_state["ball_lower_arrays"],
-        camera_state["ball_upper_arrays"],
+        camera_state["ball_ranges_np"],
+        range_lut=camera_state["ball_lut"],
     )
     camera_ball_data = NO_BALL_DATA
     if ball_detections:
@@ -271,7 +295,7 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
         while not stop_event.is_set():
             elapsed = time.perf_counter() - last_process_time
             if elapsed < target_period * 0.95:
-                time.sleep(max(0.0, target_period - elapsed - 0.0005))
+                sleep(max(0.0, target_period - elapsed - 0.0005))
                 continue
 
             now = time.perf_counter()
@@ -303,16 +327,16 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
             if not frame_entries:
                 frame_skip_count += 1
                 if frame_skip_count > 2:
-                    time.sleep(0.001)
+                    sleep(0.001)
                 continue
 
             frame_skip_count = 0
             enemy_goal_color = shared_data.get_goal_color().lower()
             own_goal_color = "blue" if enemy_goal_color == "yellow" else "yellow"
-            hardware = shared_data.get_hardware_data()
+            heading_deg, ir_angle, ir_distance = shared_data.get_hardware_compass_ir()
             robot_heading_deg = None
-            if hardware is not None and hardware.compass.heading is not None:
-                robot_heading_deg = utils.normalize_angle_deg(hardware.compass.heading)
+            if heading_deg != 999.0:
+                robot_heading_deg = utils.normalize_angle_deg(heading_deg)
 
             all_detections: list[DetectedObject] = []
             goal_results_by_camera: dict[str, dict[str, GoalDetectionResult]] = {
@@ -364,21 +388,23 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
                 goal_result = camera_result["goal_result"]
                 goal_results_by_camera[camera_name][goal_color] = goal_result
                 camera_runtime_state[camera_name]["last_goal_results"][goal_color] = goal_result
+
+                other_goal_color = "blue" if goal_color == "yellow" else "yellow"
+                empty_result = _empty_goal_result(goal_result.camera_yaw_deg)
+                goal_results_by_camera[camera_name][other_goal_color] = empty_result
+                camera_runtime_state[camera_name]["last_goal_results"][other_goal_color] = empty_result
                 if goal_color == enemy_goal_color:
                     calibration.update_goal_distance_calibration(goal_result, camera_name)
 
                 camera_ball_data = camera_result["camera_ball_data"]
                 camera_ball_data_by_camera[camera_name] = camera_ball_data
                 camera_runtime_state[camera_name]["last_camera_ball_data"] = camera_ball_data
-                shared_data.set_camera_ball_data_for_camera(camera_name, camera_ball_data_by_camera[camera_name])
                 if camera_name in BALL_POSSESSION_CAMERAS:
                     camera_runtime_state[camera_name]["last_ball_possessed"] = bool(camera_result["ball_possessed"])
 
                 all_detections.extend(camera_result["detections"])
 
-            # Keep per-camera shared state fresh even if only one camera delivered a new frame this cycle.
-            for camera_name, _ in CAMERA_CONFIG:
-                shared_data.set_camera_ball_data_for_camera(camera_name, camera_ball_data_by_camera[camera_name])
+            shared_data.set_camera_ball_data_for_cameras(camera_ball_data_by_camera)
 
             goals_by_color: dict[str, list[GoalDetectionResult]] = {"yellow": [], "blue": []}
             for camera_name, _ in CAMERA_CONFIG:
@@ -392,13 +418,12 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
             enemy_result = yellow_result if enemy_goal_color == "yellow" else blue_result
             own_result = blue_result if own_goal_color == "blue" else yellow_result
-            shared_data.set_goal_detection_result(enemy_result)
 
             ir_ball_angle = None
             ir_ball_detected = False
-            if hardware is not None and hardware.ir.angle is not None and hardware.ir.distance is not None:
-                ir_ball_angle = utils.normalize_angle_deg(hardware.ir.angle)
-                ir_ball_detected = ir_ball_angle != 999 and hardware.ir.distance != 0
+            if ir_angle != 999.0 and ir_distance != 0:
+                ir_ball_angle = utils.normalize_angle_deg(ir_angle)
+                ir_ball_detected = True
 
             ball_candidates = [
                 camera_ball_data_by_camera[camera_name]
@@ -436,12 +461,14 @@ def run(stop_event: multiprocessing.synchronize.Event, logger: logging.Logger):
 
             shared_data.set_detected_objects(all_detections)
 
+            vision.update_position_estimate()
+
             frames_processed += 1
             if time.perf_counter() > last_debug_msg_time + 1:
                 logger.debug(
                     f"Camera Processing FPS: {frames_processed} "
                     f"(enemy_goal={enemy_result.detected}, own_goal={own_result.detected}, ball={fused_ball_data.detected})"
                 )
+                shared_data.set_process_fps(shared_data.ProfilingProcesses.CAMERA_PROCESSING, frames_processed)
                 frames_processed = 0
                 last_debug_msg_time = time.perf_counter()
-
