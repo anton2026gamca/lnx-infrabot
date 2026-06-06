@@ -286,7 +286,7 @@ def _update_sensors_data(state_machine: StateMachine) -> SensorsData:
         _ball_possession_ticks = min(_ball_possession_ticks + 1, 3)
     else:
         _ball_possession_ticks = max(_ball_possession_ticks - 1, 0)
-    ball_possession  = _ball_possession_ticks >= 3
+    ball_possession  = _ball_possession_ticks >= 6
 
     ball_likely_inside_robot = (
         _last_cam_possession_elapsed_ticks <= 3 and not cam_ball.detected
@@ -384,6 +384,8 @@ def _check_role_update(state_machine: StateMachine) -> bool:
     can_sync_roles = bluetooth_enabled and teammate_connected
 
     if not can_sync_roles:
+        if state_machine.time_in_current_state() < 0.001:
+            logger.info(f"Cannot sync roles: enabled: {bluetooth_enabled}, teammate_connected: {teammate_connected}")
         return False
 
     data = state_machine.cross_state_data
@@ -392,7 +394,7 @@ def _check_role_update(state_machine: StateMachine) -> bool:
 
     role_changed = False
 
-    if time.perf_counter() - data.bluetooth.last_sync > 1.0 and preset_attacker:
+    if time.perf_counter() - data.bluetooth.last_sync > 10.0 and preset_attacker:
         bluetooth.send_message_nowait(teammate_mac, "role_update", f"be_{"attacker" if data.is_goalkeeper or not data.motors_running else "goalkeeper"}")
         data.bluetooth.last_sync = time.perf_counter()
 
@@ -655,8 +657,6 @@ class LineAvoidingState(State):
                 avoid_direction = self.last_avoid_dir or 0.0
             relative_direction = (avoid_direction - heading) % 360
 
-            logger.info(f"Avoid Dir: {avoid_direction} | Relative: {relative_direction} | Heading: {heading} | Triggered: {self.triggered_angles}")
-
             state_machine.motors.set_motors(
                 angle=relative_direction,
                 speed=0.8,
@@ -778,6 +778,7 @@ class AttackerApproachState(State):
     def on_enter(self, state_machine: StateMachine) -> None:
         if LOG_ATTACKER_STATE:
             logger.info("Attacker approach: entering")
+        state_machine.motors.set_functions_enabled(position_based_speed_enabled=True)
 
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:
@@ -808,25 +809,42 @@ class AttackerApproachState(State):
 
         rotate = _get_goal_tracking_rotation(state_machine, data, target_alignment=_clamp(heading, -90, 90) / 90 * 0.5 * -1)
         position = vision.get_position_estimate()
-        move_angle = 0.0
-        move_speed = APPROACH_SPEED * (1.0 if position else 0.7)
+        local_angle = 0.0
+        speed = APPROACH_SPEED * (1.0 if position else 0.7)
 
         if data.sensors.use_cam_ball:
             if abs(data.sensors.cam_ball_angle) > BALL_POSSESSION_AREA_WIDTH_DEG / 2.0:
-                move_angle = data.sensors.cam_ball_angle * CAM_BALL_APPROACH_ANGLE_RATIO
-                move_angle = max(-180, min(180, move_angle))
+                local_angle = data.sensors.cam_ball_angle * CAM_BALL_APPROACH_ANGLE_RATIO
+                local_angle = max(-180, min(180, local_angle))
+            else:
+                local_angle = 0.0
+            global_angle = local_angle + heading
         else:
             if utils.normalize_angle_deg(ir_angle + heading) <= 90:
-                move_angle = utils.normalize_angle_deg(ir_angle + heading) * data.sensors.ir_ball_distance * IR_BALL_APPROACH_ANGLE_RATIO
-                move_angle = max(-180, min(180, move_angle)) - heading
+                global_angle = utils.normalize_angle_deg(ir_angle + heading) * data.sensors.ir_ball_distance * IR_BALL_APPROACH_ANGLE_RATIO
+                global_angle = max(-180, min(180, global_angle))
+                local_angle = global_angle - heading
                 if position and position.y_mm > FIELD_LENGTH_MM - 700:
-                    move_angle = max(-90, min(90, move_angle))
+                    local_angle = max(-90, min(90, local_angle))
             else:
-                move_angle = utils.normalize_angle_deg(ir_angle) * data.sensors.ir_ball_distance * IR_BALL_APPROACH_ANGLE_RATIO
-                move_angle = max(-180, min(180, move_angle))
+                local_angle = utils.normalize_angle_deg(ir_angle) * data.sensors.ir_ball_distance * IR_BALL_APPROACH_ANGLE_RATIO
+                local_angle = max(-180, min(180, local_angle))
+            global_angle = local_angle + heading
 
-        move_speed *= AUTO_SPEED_MULTIPLIER
-        state_machine.motors.set_motors(angle=move_angle, speed=move_speed, rotate=rotate)
+        local_angle = utils.normalize_angle_deg(local_angle)
+        global_angle = utils.normalize_angle_deg(global_angle)
+
+        if position and (
+            (position.y_mm < 400 and abs(position.x_mm) > 300)
+            # (position.y_mm < 600 and abs(position.x_mm) > 450)
+        ) and (
+            (position.x_mm > 0 and global_angle > 0 and global_angle < 135) or
+            (position.x_mm < 0 and global_angle < 0 and global_angle > -135)
+        ):
+            speed = 0.0
+
+        speed *= AUTO_SPEED_MULTIPLIER
+        state_machine.motors.set_motors(angle=local_angle, speed=speed, rotate=rotate)
 
 
 # ------------------------------------------------------------------
@@ -842,6 +860,7 @@ class AttackerPushState(State):
     def on_enter(self, state_machine: StateMachine) -> None:
         if LOG_ATTACKER_STATE:
             logger.info("Attacker push: entering")
+        state_machine.motors.set_functions_enabled(position_based_speed_enabled=True)
 
     @profile_function
     def tick(self, state_machine: StateMachine) -> None:
@@ -1107,7 +1126,7 @@ class GoalkeeperDefendState(State):
         angle_error = utils.normalize_angle_deg(arc_angle - current_arc_angle)
 
         radius_error = radius - current_radius
-        if abs(radius_error) < 20:
+        if abs(radius_error) < 15:
             radius_error = 0.0
 
         if current_radius > 1:
